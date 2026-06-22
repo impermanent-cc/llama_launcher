@@ -1,6 +1,6 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QCheckBox, QLineEdit
+    QWidget, QHBoxLayout, QGridLayout, QCheckBox, QLineEdit
 )
 
 from llama_launcher.core.settings_catalog import Setting
@@ -58,26 +58,38 @@ class SettingWidget(QWidget):
             self._editor.currentTextChanged.connect(lambda: self.changed.emit())
         elif t == "multiselect":
             container = QWidget()
-            row = QHBoxLayout(container)
-            row.setContentsMargins(0, 0, 0, 0)
+            grid = QGridLayout(container)
+            grid.setContentsMargins(0, 0, 0, 0)
+            grid.setHorizontalSpacing(12)
+            grid.setVerticalSpacing(2)
             self._all_check = QCheckBox("all")
             self._all_check.toggled.connect(self._on_all_toggled)
             self._all_check.toggled.connect(lambda: self.changed.emit())
-            row.addWidget(self._all_check)
+            boxes = [self._all_check]
             for opt in setting.enum:
                 cb = QCheckBox(opt)
                 cb.toggled.connect(lambda: self.changed.emit())
                 self._checks[opt] = cb
-                row.addWidget(cb)
+                boxes.append(cb)
+            # arrange in a compact grid (3 columns) so nothing overflows horizontally
+            for i, cb in enumerate(boxes):
+                grid.addWidget(cb, i // 3, i % 3)
             self._editor = container
             if setting.danger:
-                for cb in [self._all_check, *self._checks.values()]:
+                for cb in boxes:
                     cb.setToolTip(tooltip)
         else:  # string
             self._editor = QLineEdit()
             self._editor.textChanged.connect(lambda: self.changed.emit())
 
+        # Cap editor widths so dropdowns/inputs don't stretch the whole panel,
+        # and left-align them with a trailing stretch.
+        _max_width = {"enum": 150, "int_or_token": 150, "int": 120,
+                      "float": 120, "string": 240}.get(t)
+        if _max_width:
+            self._editor.setMaximumWidth(_max_width)
         layout.addWidget(self._editor)
+        layout.addStretch(1)
 
         if setting.danger:
             self.setStyleSheet("#dangerSetting { border: 1px solid red; }")
