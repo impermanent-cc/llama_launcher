@@ -56,6 +56,27 @@ def test_danger_widget_tooltip(qtbot):
     assert tip.startswith("⚠ DANGER:")
 
 
+def test_danger_border_scoped(qtbot):
+    w = make_widget(CATALOG["tools"])
+    qtbot.addWidget(w)
+    ss = w.styleSheet()
+    assert "#dangerSetting" in ss
+    assert "red" in ss
+
+
+def test_non_danger_widget_no_stylesheet(qtbot):
+    w = make_widget(CATALOG["temp"])
+    qtbot.addWidget(w)
+    assert w.styleSheet() == ""
+
+
+def test_danger_border_does_not_cascade_to_checkboxes(qtbot):
+    w = make_widget(CATALOG["tools"])
+    qtbot.addWidget(w)
+    for cb in w._checks.values():
+        assert cb.styleSheet() == ""
+
+
 def test_normal_widget_tooltip(qtbot):
     w = make_widget(CATALOG["temp"])
     qtbot.addWidget(w)

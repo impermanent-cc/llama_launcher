@@ -25,6 +25,7 @@ class SettingWidget(QWidget):
         tooltip = setting.tooltip
         if setting.danger:
             tooltip = "⚠ DANGER: " + tooltip
+            self.setObjectName("dangerSetting")
 
         if t == "bool":
             self._editor = QCheckBox(setting.flag)
@@ -79,7 +80,7 @@ class SettingWidget(QWidget):
         layout.addWidget(self._editor)
 
         if setting.danger:
-            self.setStyleSheet("border: 1px solid red;")
+            self.setStyleSheet("#dangerSetting { border: 1px solid red; }")
         self.setToolTip(tooltip)
         self._editor.setToolTip(tooltip)
 
