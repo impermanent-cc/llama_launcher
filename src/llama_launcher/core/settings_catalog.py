@@ -16,6 +16,7 @@ class Setting:
     tokens: tuple = ()   # for int_or_token (e.g. ("auto", "all"))
     tooltip: str = ""
     danger: bool = False
+    option_help: tuple = ()   # multiselect only: ((option, help_text), ...)
 
 
 KV_CACHE_TYPES = ("f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1")
@@ -213,7 +214,17 @@ _ALL = [
                   "get_datetime"),
             tooltip="Built-in server-side agent tools the model can call. DANGER: "
                     "exec_shell_command runs arbitrary commands inside the container; only "
-                    "enable in trusted setups - your mounted folders are the only sandbox."),
+                    "enable in trusted setups - your mounted folders are the only sandbox.",
+            option_help=(
+                ("read_file", "Read the contents of a file inside the mounted folders."),
+                ("write_file", "Create or overwrite a file. Writes into any :rw mount (e.g. your workspace)."),
+                ("edit_file", "Make targeted edits to an existing file. Writes into :rw mounts."),
+                ("apply_diff", "Apply a patch/diff to a file. Writes into :rw mounts."),
+                ("file_glob_search", "Find files by name pattern (glob), e.g. **/*.py."),
+                ("grep_search", "Search inside file contents (like grep) across the mounted folders."),
+                ("exec_shell_command", "DANGER: runs ARBITRARY shell commands inside the container. Trusted models only."),
+                ("get_datetime", "Return the current date and time. Harmless."),
+            )),
     Setting("reasoning", "--reasoning", "enum", "auto", "Server & Tools", ("-rea",),
             enum=("on", "off", "auto"),
             tooltip="Controls whether the model emits its reasoning/thinking output. 'auto' "
