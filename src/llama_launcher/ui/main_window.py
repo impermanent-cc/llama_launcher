@@ -119,6 +119,12 @@ class MainWindow(QMainWindow):
 
         self.refresh_preview()
 
+        from PySide6.QtCore import QTimer
+        self._status_timer = QTimer(self)
+        self._status_timer.setInterval(2000)
+        self._status_timer.timeout.connect(self.update_status)
+        self._status_timer.start()
+
     def load_profile(self, p: Profile) -> None:
         self._profile = p
         self.image_edit.setText(p.image)
@@ -231,6 +237,9 @@ class MainWindow(QMainWindow):
     def update_status(self):
         from llama_launcher.core.spec import slugify
         p = self.current_profile()
+        if not runtime.binary_available(p.runtime.binary):
+            self.status_label.setText("● stopped")
+            return
         name = f"llama-{slugify(self._profile.name)}"
         state = runtime.container_state(name, p.runtime.binary)
         ok = health.health_ok(p.settings.get("port", 8080)) if state == "running" else False
