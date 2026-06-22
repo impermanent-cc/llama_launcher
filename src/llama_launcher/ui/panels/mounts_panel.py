@@ -1,10 +1,13 @@
+import os
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QComboBox, QCheckBox
+    QTableWidgetItem, QCheckBox, QFileDialog
 )
 
 from llama_launcher.core.spec import Mount
+from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 
 _ROLES = ["model", "workspace", "custom"]
 _MODES = ["ro", "rw"]
@@ -24,33 +27,42 @@ class MountsPanel(QWidget):
         row = QHBoxLayout()
         add = QPushButton("+ Add folder")
         rm = QPushButton("- Remove")
-        add.clicked.connect(self._add_blank)
+        add.clicked.connect(self._add_folder)
         rm.clicked.connect(self._remove_selected)
         row.addWidget(add); row.addWidget(rm)
         layout.addLayout(row)
         self.table.itemChanged.connect(lambda *_: self.changed.emit())
 
     def _add_row(self, m: Mount):
-        r = self.table.rowCount()
-        self.table.insertRow(r)
-        self.table.setItem(r, 0, QTableWidgetItem(m.host))
-        self.table.setItem(r, 1, QTableWidgetItem(m.container))
-        role = QComboBox(); role.addItems(_ROLES); role.setCurrentText(m.role)
-        mode = QComboBox(); mode.addItems(_MODES); mode.setCurrentText(m.mode)
-        selinux = QComboBox(); selinux.addItems(_SELINUX)
-        selinux.setCurrentText(m.selinux or "")
-        workdir = QCheckBox(); workdir.setChecked(m.workdir)
-        for w in (role, mode, selinux):
-            w.currentTextChanged.connect(self.changed.emit)
-        workdir.toggled.connect(self.changed.emit)
-        self.table.setCellWidget(r, 2, role)
-        self.table.setCellWidget(r, 3, mode)
-        self.table.setCellWidget(r, 4, selinux)
-        self.table.setCellWidget(r, 5, workdir)
-        self.changed.emit()
+        prev = self.table.blockSignals(True)
+        try:
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            self.table.setItem(r, 0, QTableWidgetItem(m.host))
+            self.table.setItem(r, 1, QTableWidgetItem(m.container))
+            role = NoWheelComboBox(); role.addItems(_ROLES); role.setCurrentText(m.role)
+            mode = NoWheelComboBox(); mode.addItems(_MODES); mode.setCurrentText(m.mode)
+            selinux = NoWheelComboBox(); selinux.addItems(_SELINUX)
+            selinux.setCurrentText(m.selinux or "")
+            workdir = QCheckBox(); workdir.setChecked(m.workdir)
+            for w in (role, mode, selinux):
+                w.currentTextChanged.connect(lambda *_: self.changed.emit())
+            workdir.toggled.connect(lambda *_: self.changed.emit())
+            self.table.setCellWidget(r, 2, role)
+            self.table.setCellWidget(r, 3, mode)
+            self.table.setCellWidget(r, 4, selinux)
+            self.table.setCellWidget(r, 5, workdir)
+        finally:
+            self.table.blockSignals(prev)
+        if not prev:
+            self.changed.emit()
 
-    def _add_blank(self):
-        self._add_row(Mount(host="", container="", role="custom", mode="ro"))
+    def _add_folder(self):
+        d = QFileDialog.getExistingDirectory(self, "Add folder")
+        if not d:
+            return
+        self._add_row(Mount(host=d, container="/" + os.path.basename(d.rstrip("/")),
+                            role="custom", mode="ro"))
 
     def _remove_selected(self):
         rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
@@ -71,6 +83,8 @@ class MountsPanel(QWidget):
     def mounts(self) -> list[Mount]:
         out = []
         for r in range(self.table.rowCount()):
+            if self.table.cellWidget(r, 2) is None:
+                continue  # row still mid-construction
             out.append(Mount(
                 host=self.table.item(r, 0).text() if self.table.item(r, 0) else "",
                 container=self.table.item(r, 1).text() if self.table.item(r, 1) else "",

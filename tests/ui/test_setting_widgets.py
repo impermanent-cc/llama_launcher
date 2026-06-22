@@ -60,3 +60,33 @@ def test_normal_widget_tooltip(qtbot):
     w = make_widget(CATALOG["temp"])
     qtbot.addWidget(w)
     assert w.toolTip() == CATALOG["temp"].tooltip
+
+
+def test_tools_multiselect_all(qtbot):
+    w = make_widget(CATALOG["tools"])
+    qtbot.addWidget(w)
+    w.set_value("all")
+    assert w.value() == "all"
+
+
+def test_tools_multiselect_subset(qtbot):
+    w = make_widget(CATALOG["tools"])
+    qtbot.addWidget(w)
+    w.set_value("read_file,grep_search")
+    assert set(w.value().split(",")) == {"read_file", "grep_search"}
+
+
+def test_tools_multiselect_default_not_set(qtbot):
+    w = make_widget(CATALOG["tools"])
+    qtbot.addWidget(w)
+    assert w.value() == ""
+    assert w.is_set() is False
+
+
+def test_tools_multiselect_all_disables_individual(qtbot):
+    w = make_widget(CATALOG["tools"])
+    qtbot.addWidget(w)
+    w.set_value("all")
+    assert all(not cb.isEnabled() for cb in w._checks.values())
+    w.set_value("")
+    assert all(cb.isEnabled() for cb in w._checks.values())
