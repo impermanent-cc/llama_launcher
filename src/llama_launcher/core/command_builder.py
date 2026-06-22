@@ -39,6 +39,12 @@ def _run_level_args(profile: Profile) -> list[str]:
             workdir = m.container
     if workdir:
         argv += ["-w", workdir]
+        # The official llama.cpp images resolve their bundled shared libraries
+        # relative to the default working dir (/app). Setting -w to a custom
+        # workspace moves the CWD off /app and breaks the dynamic linker
+        # ("libllama-server-impl.so: cannot open shared object file"), so pin
+        # the library path explicitly whenever we change the working directory.
+        argv += ["-e", "LD_LIBRARY_PATH=/app"]
 
     if rt.extra_run_args.strip():
         argv += shlex.split(rt.extra_run_args)
