@@ -5,10 +5,13 @@ from llama_launcher.ui.panels.mounts_panel import MountsPanel
 def test_mounts_panel_roundtrip(qtbot):
     panel = MountsPanel()
     qtbot.addWidget(panel)
-    mounts = [Mount(host="/h/models", container="/models", role="model", mode="ro"),
+    mounts = [Mount(host="/h/models", container="/models", role="model", mode="ro",
+                    selinux="z"),
               Mount(host="/h/ws", container="/workspace", role="workspace",
                     mode="rw", workdir=True)]
     panel.set_mounts(mounts)
     out = panel.mounts()
     assert out[0].container == "/models" and out[0].mode == "ro"
+    assert out[0].selinux == "z"
     assert out[1].workdir is True and out[1].mode == "rw"
+    assert out[1].selinux is None

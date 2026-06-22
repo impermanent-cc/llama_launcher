@@ -1,4 +1,4 @@
-from llama_launcher.core.spec import Profile, Mount, Runtime
+from llama_launcher.core.spec import Profile, Mount, Runtime, LoraRef
 from llama_launcher.ui.main_window import MainWindow
 
 
@@ -41,3 +41,15 @@ def test_roundtrip_profile(qtbot):
     assert out.model == "/models/m.gguf"
     assert out.settings.get("ctx-size") == 4096
     assert out.image == "img:tag"
+
+
+def test_loras_roundtrip(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    p = _profile()
+    p.loras = [LoraRef(path="/models/lora.gguf", scale=0.5)]
+    w.load_profile(p)
+    out = w.current_profile()
+    assert len(out.loras) == 1
+    assert out.loras[0].path == "/models/lora.gguf"
+    assert abs(out.loras[0].scale - 0.5) < 1e-6

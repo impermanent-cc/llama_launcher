@@ -22,6 +22,11 @@ def validate(profile: Profile, running_ports: tuple = (),
         issues.append(Issue("error",
                             f"Runtime '{profile.runtime.binary}' not found on PATH."))
 
+    for m in profile.mounts:
+        if bool(m.host) != bool(m.container):
+            issues.append(Issue("error",
+                                "Mount row is incomplete (host and container both required)."))
+
     if not profile.model:
         issues.append(Issue("error", "No model selected."))
     elif not _under_any_mount(profile.model, profile):

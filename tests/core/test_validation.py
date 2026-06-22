@@ -49,6 +49,20 @@ def test_tools_with_rw_model_mount_warns():
     assert any("writable" in i.message.lower() for i in warns)
 
 
+def test_partial_mount_is_error():
+    p = _ok_profile()
+    p.mounts.append(Mount(host="/h/extra", container="", role="custom", mode="ro"))
+    errs = [i for i in validate(p) if i.level == "error"]
+    assert any("incomplete" in i.message.lower() for i in errs)
+
+
+def test_fully_empty_mount_is_not_error():
+    p = _ok_profile()
+    p.mounts.append(Mount(host="", container="", role="custom", mode="ro"))
+    errs = [i for i in validate(p) if i.level == "error"]
+    assert not any("incomplete" in i.message.lower() for i in errs)
+
+
 def test_port_collision_warns():
     p = _ok_profile()
     warns = [i for i in validate(p, running_ports=(8080,)) if i.level == "warning"]
