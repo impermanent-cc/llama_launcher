@@ -3,7 +3,7 @@ import os
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QCheckBox, QFileDialog
+    QTableWidgetItem, QCheckBox, QFileDialog, QHeaderView
 )
 
 from llama_launcher.core.spec import Mount
@@ -23,6 +23,11 @@ class MountsPanel(QWidget):
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(
             ["Host", "Container", "Role", "Mode", "SELinux", "Workdir"])
+        hdr = self.table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.Stretch)            # Host
+        hdr.setSectionResizeMode(1, QHeaderView.Stretch)            # Container
+        for _c in (2, 3, 4, 5):                                     # compact controls
+            hdr.setSectionResizeMode(_c, QHeaderView.ResizeToContents)
         layout.addWidget(self.table)
         row = QHBoxLayout()
         add = QPushButton("+ Add folder")

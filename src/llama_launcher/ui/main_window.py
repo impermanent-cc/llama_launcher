@@ -72,7 +72,7 @@ class MainWindow(QMainWindow):
         self.fetch_btn.clicked.connect(self.on_fetch_latest)
         left_form.addRow(self.fetch_btn)
 
-        body.addWidget(left, 1)
+        body.addWidget(left, 3)
 
         # RIGHT: settings grouped, scrollable
         self._widgets: dict[str, object] = {}
