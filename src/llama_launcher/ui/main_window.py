@@ -20,6 +20,7 @@ from llama_launcher.ui.widgets.setting_widgets import make_widget
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
+from llama_launcher.ui.widgets.collapsible import CollapsibleSection
 
 
 def base_dir():
@@ -64,7 +65,8 @@ class MainWindow(QMainWindow):
         left_form.addRow("mmproj", self._field_with_browse(self.mmproj_edit))
         self.lora_panel = LoraPanel()
         self.lora_panel.changed.connect(self.refresh_preview)
-        left_form.addRow("LoRA", self.lora_panel)
+        self.lora_section = CollapsibleSection("LoRA adapters", self.lora_panel, collapsed=True)
+        left_form.addRow(self.lora_section)
         left_form.addRow("Raw args", self.raw_edit)
         self.fetch_btn = QPushButton("Fetch latest build")
         self.fetch_btn.clicked.connect(self.on_fetch_latest)
