@@ -77,6 +77,7 @@ class MainWindow(QMainWindow):
         self.binary_combo.setCurrentText(p.runtime.binary)
         self.gpu_combo.setCurrentText(p.runtime.gpu_mode)
         for key, w in self._widgets.items():
+            w.set_value(w.setting.default)
             if key in p.settings:
                 w.set_value(p.settings[key])
         self.refresh_preview()
