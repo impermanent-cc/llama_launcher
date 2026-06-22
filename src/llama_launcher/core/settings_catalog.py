@@ -53,11 +53,11 @@ _ALL = [
     Setting("cache-type-k", "--cache-type-k", "enum", "f16", "GPU & Memory", ("-ctk",),
             enum=KV_CACHE_TYPES,
             tooltip="Quantization of the K KV-cache. Lower precision (e.g. q8_0, q4_0) saves "
-                    "a lot of VRAM at a small quality cost; f16 is the default full precision."),
+                    "a lot of VRAM at a small quality cost; f16 (the default) is half precision, f32 is full."),
     Setting("cache-type-v", "--cache-type-v", "enum", "f16", "GPU & Memory", ("-ctv",),
             enum=KV_CACHE_TYPES,
             tooltip="Quantization of the V KV-cache. Lower precision (e.g. q8_0, q4_0) saves "
-                    "a lot of VRAM at a small quality cost; f16 is the default full precision."),
+                    "a lot of VRAM at a small quality cost; f16 (the default) is half precision, f32 is full."),
     Setting("no-mmap", "--no-mmap", "bool", False, "GPU & Memory", (),
             tooltip="Disable memory-mapping of the model file, loading it fully into RAM "
                     "instead. Slower startup and more RAM, but can help with -mlock or odd "
