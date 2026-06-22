@@ -21,7 +21,6 @@ def _run_level_args(profile: Profile) -> list[str]:
         argv += ["--device", "nvidia.com/gpu=all"]
     elif rt.gpu_mode == "gpus-all":
         argv += ["--gpus", "all"]
-    # "none" => nothing
 
     if rt.selinux_label_disable:
         argv.append("--security-opt=label=disable")
@@ -43,9 +42,41 @@ def _run_level_args(profile: Profile) -> list[str]:
         argv += shlex.split(rt.extra_run_args)
 
     argv.append(profile.image)
-    argv += ["-m", profile.model]
+    return argv
+
+
+def _render_setting(setting, value) -> list[str]:
+    if setting.type == "bool":
+        return [setting.flag] if value else []
+    return [setting.flag, str(value)]
+
+
+def _server_args(profile: Profile, catalog: dict) -> list[str]:
+    argv: list[str] = []
+    if profile.model:
+        argv += ["-m", profile.model]
+    if profile.mmproj:
+        argv += ["--mmproj", profile.mmproj]
+    for lora in profile.loras:
+        if lora.scale is None or lora.scale == 1.0:
+            argv += ["--lora", lora.path]
+        else:
+            argv += ["--lora-scaled", f"{lora.path}:{lora.scale}"]
+
+    port = profile.settings.get("port", 8080)
+    # Emit changed settings in catalog order, skipping port (handled below).
+    for key, setting in catalog.items():
+        if key == "port":
+            continue
+        if key in profile.settings:
+            argv += _render_setting(setting, profile.settings[key])
+
+    argv += ["--host", "0.0.0.0", "--port", str(port)]
+
+    if profile.raw_args.strip():
+        argv += shlex.split(profile.raw_args)
     return argv
 
 
 def build_command(profile: Profile, catalog: dict = CATALOG) -> list[str]:
-    return _run_level_args(profile)
+    return _run_level_args(profile) + _server_args(profile, catalog)
