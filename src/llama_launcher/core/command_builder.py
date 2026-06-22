@@ -30,6 +30,8 @@ def _run_level_args(profile: Profile) -> list[str]:
 
     workdir = None
     for m in profile.mounts:
+        if not m.host or not m.container:
+            continue
         opts = _mount_opts(m)
         spec = f"{m.host}:{m.container}:{opts}" if opts else f"{m.host}:{m.container}"
         argv += ["-v", spec]

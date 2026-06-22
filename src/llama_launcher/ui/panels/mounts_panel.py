@@ -8,6 +8,7 @@ from llama_launcher.core.spec import Mount
 
 _ROLES = ["model", "workspace", "custom"]
 _MODES = ["ro", "rw"]
+_SELINUX = ["", "z", "Z"]
 
 
 class MountsPanel(QWidget):
@@ -16,8 +17,9 @@ class MountsPanel(QWidget):
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
-        self.table = QTableWidget(0, 5)
-        self.table.setHorizontalHeaderLabels(["Host", "Container", "Role", "Mode", "Workdir"])
+        self.table = QTableWidget(0, 6)
+        self.table.setHorizontalHeaderLabels(
+            ["Host", "Container", "Role", "Mode", "SELinux", "Workdir"])
         layout.addWidget(self.table)
         row = QHBoxLayout()
         add = QPushButton("+ Add folder")
@@ -34,13 +36,16 @@ class MountsPanel(QWidget):
         self.table.setItem(r, 1, QTableWidgetItem(m.container))
         role = QComboBox(); role.addItems(_ROLES); role.setCurrentText(m.role)
         mode = QComboBox(); mode.addItems(_MODES); mode.setCurrentText(m.mode)
+        selinux = QComboBox(); selinux.addItems(_SELINUX)
+        selinux.setCurrentText(m.selinux or "")
         workdir = QCheckBox(); workdir.setChecked(m.workdir)
-        for w in (role, mode):
+        for w in (role, mode, selinux):
             w.currentTextChanged.connect(self.changed.emit)
         workdir.toggled.connect(self.changed.emit)
         self.table.setCellWidget(r, 2, role)
         self.table.setCellWidget(r, 3, mode)
-        self.table.setCellWidget(r, 4, workdir)
+        self.table.setCellWidget(r, 4, selinux)
+        self.table.setCellWidget(r, 5, workdir)
         self.changed.emit()
 
     def _add_blank(self):
@@ -65,6 +70,7 @@ class MountsPanel(QWidget):
                 container=self.table.item(r, 1).text() if self.table.item(r, 1) else "",
                 role=self.table.cellWidget(r, 2).currentText(),
                 mode=self.table.cellWidget(r, 3).currentText(),
-                workdir=self.table.cellWidget(r, 4).isChecked(),
+                selinux=self.table.cellWidget(r, 4).currentText() or None,
+                workdir=self.table.cellWidget(r, 5).isChecked(),
             ))
         return out

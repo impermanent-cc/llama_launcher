@@ -54,6 +54,14 @@ def test_workspace_workdir_and_rw_and_selinux_opt():
     assert "-w" in argv and "/workspace" in argv
 
 
+def test_blank_mount_is_skipped():
+    p = _base_profile()
+    p.mounts.append(Mount(host="", container="", role="custom", mode="ro"))
+    argv = build_command(p)
+    # only the one real mount should produce a -v
+    assert argv.count("-v") == 1
+
+
 def test_docker_binary_and_extra_run_args():
     p = _base_profile()
     p.runtime.binary = "docker"

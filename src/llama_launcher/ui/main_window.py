@@ -15,6 +15,7 @@ from llama_launcher.services import runtime, terminal, registry, health
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.ui.widgets.setting_widgets import make_widget
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
+from llama_launcher.ui.panels.lora_panel import LoraPanel
 
 
 def base_dir():
@@ -57,6 +58,9 @@ class MainWindow(QMainWindow):
         self.mmproj_edit = QLineEdit(); self.mmproj_edit.textChanged.connect(self.refresh_preview)
         self.raw_edit = QLineEdit(); self.raw_edit.textChanged.connect(self.refresh_preview)
         left_form.addRow("mmproj", self.mmproj_edit)
+        self.lora_panel = LoraPanel()
+        self.lora_panel.changed.connect(self.refresh_preview)
+        left_form.addRow("LoRA", self.lora_panel)
         left_form.addRow("Raw args", self.raw_edit)
         self.fetch_btn = QPushButton("Fetch latest build")
         self.fetch_btn.clicked.connect(self.on_fetch_latest)
@@ -133,6 +137,7 @@ class MainWindow(QMainWindow):
         self.gpu_combo.setCurrentText(p.runtime.gpu_mode)
         self.mounts_panel.set_mounts(p.mounts)
         self.mmproj_edit.setText(p.mmproj or "")
+        self.lora_panel.set_loras(p.loras)
         self.raw_edit.setText(p.raw_args)
         for key, w in self._widgets.items():
             w.set_value(w.setting.default)
@@ -157,7 +162,7 @@ class MainWindow(QMainWindow):
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
-            loras=list(self._profile.loras),
+            loras=self.lora_panel.loras(),
             settings=settings,
             raw_args=self.raw_edit.text(),
         )

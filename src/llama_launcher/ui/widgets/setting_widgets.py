@@ -52,6 +52,13 @@ class SettingWidget(QWidget):
 
         layout.addWidget(self._editor)
 
+        tooltip = setting.tooltip
+        if setting.danger:
+            tooltip = "⚠ DANGER: " + tooltip
+            self.setStyleSheet("border: 1px solid red;")
+        self.setToolTip(tooltip)
+        self._editor.setToolTip(tooltip)
+
     def value(self):
         t = self.setting.type
         if t == "bool":
@@ -64,6 +71,8 @@ class SettingWidget(QWidget):
             return self._editor.value()
         if t == "int_or_token":
             text = self._editor.currentText().strip()
+            if text == "":
+                return self.setting.default
             if text in self.setting.tokens:
                 return text
             try:
