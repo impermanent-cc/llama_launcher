@@ -1,9 +1,12 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QCheckBox, QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit
+    QWidget, QHBoxLayout, QCheckBox, QLineEdit
 )
 
 from llama_launcher.core.settings_catalog import Setting
+from llama_launcher.ui.widgets.no_wheel import (
+    NoWheelComboBox, NoWheelSpinBox, NoWheelDoubleSpinBox,
+)
 
 
 class SettingWidget(QWidget):
@@ -13,27 +16,33 @@ class SettingWidget(QWidget):
         super().__init__(parent)
         self.setting = setting
         self._editor = None
+        self._all_check = None
+        self._checks: dict[str, QCheckBox] = {}
         layout = QHBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         t = setting.type
+
+        tooltip = setting.tooltip
+        if setting.danger:
+            tooltip = "⚠ DANGER: " + tooltip
 
         if t == "bool":
             self._editor = QCheckBox(setting.flag)
             self._editor.toggled.connect(lambda: self.changed.emit())
         elif t == "enum":
-            self._editor = QComboBox()
+            self._editor = NoWheelComboBox()
             self._editor.addItems(list(setting.enum))
             self._editor.setCurrentText(str(setting.default))
             self._editor.currentTextChanged.connect(lambda: self.changed.emit())
         elif t == "int":
-            self._editor = QSpinBox()
+            self._editor = NoWheelSpinBox()
             self._editor.setRange(int(setting.minimum if setting.minimum is not None else -2**31),
                                   int(setting.maximum if setting.maximum is not None else 2**31 - 1))
             self._editor.setSingleStep(int(setting.step or 1))
             self._editor.setValue(int(setting.default))
             self._editor.valueChanged.connect(lambda: self.changed.emit())
         elif t == "float":
-            self._editor = QDoubleSpinBox()
+            self._editor = NoWheelDoubleSpinBox()
             self._editor.setDecimals(3)
             self._editor.setRange(float(setting.minimum if setting.minimum is not None else -1e9),
                                   float(setting.maximum if setting.maximum is not None else 1e9))
@@ -41,23 +50,42 @@ class SettingWidget(QWidget):
             self._editor.setValue(float(setting.default))
             self._editor.valueChanged.connect(lambda: self.changed.emit())
         elif t == "int_or_token":
-            self._editor = QComboBox()
+            self._editor = NoWheelComboBox()
             self._editor.setEditable(True)
             self._editor.addItems(list(setting.tokens))
             self._editor.setCurrentText(str(setting.default))
             self._editor.currentTextChanged.connect(lambda: self.changed.emit())
+        elif t == "multiselect":
+            container = QWidget()
+            row = QHBoxLayout(container)
+            row.setContentsMargins(0, 0, 0, 0)
+            self._all_check = QCheckBox("all")
+            self._all_check.toggled.connect(self._on_all_toggled)
+            self._all_check.toggled.connect(lambda: self.changed.emit())
+            row.addWidget(self._all_check)
+            for opt in setting.enum:
+                cb = QCheckBox(opt)
+                cb.toggled.connect(lambda: self.changed.emit())
+                self._checks[opt] = cb
+                row.addWidget(cb)
+            self._editor = container
+            if setting.danger:
+                for cb in [self._all_check, *self._checks.values()]:
+                    cb.setToolTip(tooltip)
         else:  # string
             self._editor = QLineEdit()
             self._editor.textChanged.connect(lambda: self.changed.emit())
 
         layout.addWidget(self._editor)
 
-        tooltip = setting.tooltip
         if setting.danger:
-            tooltip = "⚠ DANGER: " + tooltip
             self.setStyleSheet("border: 1px solid red;")
         self.setToolTip(tooltip)
         self._editor.setToolTip(tooltip)
+
+    def _on_all_toggled(self, checked):
+        for cb in self._checks.values():
+            cb.setEnabled(not checked)
 
     def value(self):
         t = self.setting.type
@@ -79,6 +107,10 @@ class SettingWidget(QWidget):
                 return int(text)
             except ValueError:
                 return text
+        if t == "multiselect":
+            if self._all_check.isChecked():
+                return "all"
+            return ",".join(opt for opt, cb in self._checks.items() if cb.isChecked())
         return self._editor.text()
 
     def set_value(self, v):
@@ -91,6 +123,14 @@ class SettingWidget(QWidget):
             self._editor.setValue(v)
         elif t == "int_or_token":
             self._editor.setCurrentText(str(v))
+        elif t == "multiselect":
+            if v == "all":
+                self._all_check.setChecked(True)
+            else:
+                self._all_check.setChecked(False)
+                members = set(str(v).split(",")) if v else set()
+                for opt, cb in self._checks.items():
+                    cb.setChecked(opt in members)
         else:
             self._editor.setText(str(v))
 

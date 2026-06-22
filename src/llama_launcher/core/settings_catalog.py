@@ -139,7 +139,10 @@ _ALL = [
             tooltip="Built-in chat template name"),
     Setting("chat-template-file", "--chat-template-file", "string", "", "Server & Tools", (),
             tooltip="Custom Jinja chat-template file"),
-    Setting("tools", "--tools", "string", "", "Server & Tools", (), danger=True,
+    Setting("tools", "--tools", "multiselect", "", "Server & Tools", (), danger=True,
+            enum=("read_file", "write_file", "edit_file", "apply_diff",
+                  "file_glob_search", "grep_search", "exec_shell_command",
+                  "get_datetime"),
             tooltip="Built-in server tools (e.g. 'all'). DANGER: exec_shell_command runs "
                     "arbitrary commands inside the container."),
     Setting("reasoning", "--reasoning", "enum", "auto", "Server & Tools", ("-rea",),

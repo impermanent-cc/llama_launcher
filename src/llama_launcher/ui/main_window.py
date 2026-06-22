@@ -1,12 +1,15 @@
+import os
+
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
-    QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton, QComboBox,
+    QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
     QMessageBox, QFileDialog, QInputDialog
 )
 
 from llama_launcher.core.spec import Profile, Mount, Runtime
 from llama_launcher.core.settings_catalog import CATALOG
 from llama_launcher.core.command_builder import build_command
+from llama_launcher.core.pathmap import host_to_container
 from llama_launcher.core.validation import validate
 from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
@@ -14,6 +17,7 @@ from llama_launcher.store.profiles import (
 from llama_launcher.services import runtime, terminal, registry, health
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.ui.widgets.setting_widgets import make_widget
+from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
 
@@ -40,14 +44,14 @@ class MainWindow(QMainWindow):
         left_form = QFormLayout(left)
         self.image_edit = QLineEdit()
         self.model_edit = QLineEdit()
-        self.binary_combo = QComboBox(); self.binary_combo.addItems(["podman", "docker"])
-        self.gpu_combo = QComboBox(); self.gpu_combo.addItems(["cdi", "gpus-all", "none"])
+        self.binary_combo = NoWheelComboBox(); self.binary_combo.addItems(["podman", "docker"])
+        self.gpu_combo = NoWheelComboBox(); self.gpu_combo.addItems(["cdi", "gpus-all", "none"])
         for w in (self.image_edit, self.model_edit):
             w.textChanged.connect(self.refresh_preview)
         self.binary_combo.currentTextChanged.connect(self.refresh_preview)
         self.gpu_combo.currentTextChanged.connect(self.refresh_preview)
         left_form.addRow("Image", self.image_edit)
-        left_form.addRow("Model", self.model_edit)
+        left_form.addRow("Model", self._field_with_browse(self.model_edit))
         left_form.addRow("Runtime", self.binary_combo)
         left_form.addRow("GPU", self.gpu_combo)
 
@@ -57,7 +61,7 @@ class MainWindow(QMainWindow):
         left_form.addRow("Folders", self.mounts_panel)
         self.mmproj_edit = QLineEdit(); self.mmproj_edit.textChanged.connect(self.refresh_preview)
         self.raw_edit = QLineEdit(); self.raw_edit.textChanged.connect(self.refresh_preview)
-        left_form.addRow("mmproj", self.mmproj_edit)
+        left_form.addRow("mmproj", self._field_with_browse(self.mmproj_edit))
         self.lora_panel = LoraPanel()
         self.lora_panel.changed.connect(self.refresh_preview)
         left_form.addRow("LoRA", self.lora_panel)
@@ -99,7 +103,7 @@ class MainWindow(QMainWindow):
 
         # profile bar (added to the top of root via insertLayout)
         bar = QHBoxLayout()
-        self.profile_combo = QComboBox()
+        self.profile_combo = NoWheelComboBox()
         self.save_btn = QPushButton("Save")
         self.save_as_btn = QPushButton("Save As")
         self.delete_btn = QPushButton("Delete")
@@ -128,6 +132,34 @@ class MainWindow(QMainWindow):
         self._status_timer.setInterval(2000)
         self._status_timer.timeout.connect(self.update_status)
         self._status_timer.start()
+
+    def _field_with_browse(self, line_edit: QLineEdit) -> QWidget:
+        container = QWidget()
+        row = QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(line_edit, 1)
+        btn = QPushButton("Browse…")
+        btn.clicked.connect(lambda: self._browse_into(line_edit))
+        row.addWidget(btn)
+        return container
+
+    def _browse_into(self, line_edit: QLineEdit) -> None:
+        start = os.path.expanduser("~")
+        for m in self.mounts_panel.mounts():
+            if m.host:
+                start = m.host
+                break
+        path, _ = QFileDialog.getOpenFileName(self, "Select file", start)
+        if not path:
+            return
+        container_path = host_to_container(path, self.mounts_panel.mounts())
+        if container_path is None:
+            QMessageBox.warning(
+                self, "File not in a mounted folder",
+                "The selected file is not inside any mounted folder.\n"
+                "Add a folder mount that contains it first, then pick it again.")
+            return
+        line_edit.setText(container_path)
 
     def load_profile(self, p: Profile) -> None:
         self._profile = p

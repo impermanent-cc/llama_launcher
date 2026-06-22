@@ -1,10 +1,11 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QDoubleSpinBox
+    QTableWidgetItem
 )
 
 from llama_launcher.core.spec import LoraRef
+from llama_launcher.ui.widgets.no_wheel import NoWheelDoubleSpinBox
 
 
 class LoraPanel(QWidget):
@@ -26,17 +27,22 @@ class LoraPanel(QWidget):
         self.table.itemChanged.connect(lambda *_: self.changed.emit())
 
     def _add_row(self, lora: LoraRef):
-        r = self.table.rowCount()
-        self.table.insertRow(r)
-        self.table.setItem(r, 0, QTableWidgetItem(lora.path))
-        scale = QDoubleSpinBox()
-        scale.setRange(0.0, 10.0)
-        scale.setSingleStep(0.1)
-        scale.setDecimals(2)
-        scale.setValue(lora.scale)
-        scale.valueChanged.connect(self.changed.emit)
-        self.table.setCellWidget(r, 1, scale)
-        self.changed.emit()
+        prev = self.table.blockSignals(True)
+        try:
+            r = self.table.rowCount()
+            self.table.insertRow(r)
+            self.table.setItem(r, 0, QTableWidgetItem(lora.path))
+            scale = NoWheelDoubleSpinBox()
+            scale.setRange(0.0, 10.0)
+            scale.setSingleStep(0.1)
+            scale.setDecimals(2)
+            scale.setValue(lora.scale)
+            scale.valueChanged.connect(lambda *_: self.changed.emit())
+            self.table.setCellWidget(r, 1, scale)
+        finally:
+            self.table.blockSignals(prev)
+        if not prev:
+            self.changed.emit()
 
     def _add_blank(self):
         self._add_row(LoraRef(path="", scale=1.0))
@@ -63,6 +69,8 @@ class LoraPanel(QWidget):
             path = self.table.item(r, 0).text() if self.table.item(r, 0) else ""
             if not path:
                 continue
+            if self.table.cellWidget(r, 1) is None:
+                continue  # row still mid-construction
             out.append(LoraRef(
                 path=path,
                 scale=self.table.cellWidget(r, 1).value(),
