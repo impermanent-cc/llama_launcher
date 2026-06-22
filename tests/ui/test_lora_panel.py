@@ -22,3 +22,11 @@ def test_lora_panel_skips_empty_path_rows(qtbot):
     out = panel.loras()
     assert len(out) == 1
     assert out[0].path == "/loras/c.gguf" and abs(out[0].scale - 0.3) < 1e-6
+
+
+def test_lora_panel_item_changed_emits_signal(qtbot):
+    panel = LoraPanel()
+    qtbot.addWidget(panel)
+    panel.set_loras([LoraRef(path="/loras/a.gguf", scale=1.0)])
+    with qtbot.waitSignal(panel.changed, timeout=1000):
+        panel.table.item(0, 0).setText("/new/path.gguf")

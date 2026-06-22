@@ -5,3 +5,4 @@ __pycache__/
 *.egg-info/
 # Spec/plan docs kept out of commits per current preference
 docs/
+.superpowers/
