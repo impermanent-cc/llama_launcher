@@ -23,6 +23,7 @@ class LoraPanel(QWidget):
         rm.clicked.connect(self._remove_selected)
         row.addWidget(add); row.addWidget(rm)
         layout.addLayout(row)
+        self.table.itemChanged.connect(lambda *_: self.changed.emit())
 
     def _add_row(self, lora: LoraRef):
         r = self.table.rowCount()
@@ -47,9 +48,14 @@ class LoraPanel(QWidget):
         self.changed.emit()
 
     def set_loras(self, loras: list[LoraRef]):
-        self.table.setRowCount(0)
-        for lora in loras:
-            self._add_row(lora)
+        self.table.blockSignals(True)
+        try:
+            self.table.setRowCount(0)
+            for lora in loras:
+                self._add_row(lora)
+        finally:
+            self.table.blockSignals(False)
+        self.changed.emit()
 
     def loras(self) -> list[LoraRef]:
         out = []

@@ -53,7 +53,7 @@ def test_danger_widget_tooltip(qtbot):
     qtbot.addWidget(w)
     tip = w.toolTip()
     assert tip
-    assert "DANGER" in tip or "⚠" in tip
+    assert tip.startswith("⚠ DANGER:")
 
 
 def test_normal_widget_tooltip(qtbot):

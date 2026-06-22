@@ -28,6 +28,7 @@ class MountsPanel(QWidget):
         rm.clicked.connect(self._remove_selected)
         row.addWidget(add); row.addWidget(rm)
         layout.addLayout(row)
+        self.table.itemChanged.connect(lambda *_: self.changed.emit())
 
     def _add_row(self, m: Mount):
         r = self.table.rowCount()
@@ -58,9 +59,14 @@ class MountsPanel(QWidget):
         self.changed.emit()
 
     def set_mounts(self, mounts: list[Mount]):
-        self.table.setRowCount(0)
-        for m in mounts:
-            self._add_row(m)
+        self.table.blockSignals(True)
+        try:
+            self.table.setRowCount(0)
+            for m in mounts:
+                self._add_row(m)
+        finally:
+            self.table.blockSignals(False)
+        self.changed.emit()
 
     def mounts(self) -> list[Mount]:
         out = []
