@@ -46,7 +46,13 @@ class MainWindow(QMainWindow):
         self.image_edit = QLineEdit()
         self.model_edit = QLineEdit()
         self.binary_combo = NoWheelComboBox(); self.binary_combo.addItems(["podman", "docker"])
-        self.gpu_combo = NoWheelComboBox(); self.gpu_combo.addItems(["cdi", "gpus-all", "none"])
+        self.gpu_combo = NoWheelComboBox()
+        for _gpu_label, _gpu_val in (
+            ("CDI — --device nvidia.com/gpu=all (recommended)", "cdi"),
+            ("Legacy — --gpus all", "gpus-all"),
+            ("None — no GPU passthrough", "none"),
+        ):
+            self.gpu_combo.addItem(_gpu_label, _gpu_val)
         for w in (self.image_edit, self.model_edit):
             w.textChanged.connect(self.refresh_preview)
         self.binary_combo.currentTextChanged.connect(self.refresh_preview)
@@ -168,7 +174,7 @@ class MainWindow(QMainWindow):
         self.image_edit.setText(p.image)
         self.model_edit.setText(p.model)
         self.binary_combo.setCurrentText(p.runtime.binary)
-        self.gpu_combo.setCurrentText(p.runtime.gpu_mode)
+        self.gpu_combo.setCurrentIndex(max(0, self.gpu_combo.findData(p.runtime.gpu_mode)))
         self.mounts_panel.set_mounts(p.mounts)
         self.mmproj_edit.setText(p.mmproj or "")
         self.lora_panel.set_loras(p.loras)
@@ -190,7 +196,7 @@ class MainWindow(QMainWindow):
             name=self._profile.name,
             image=self.image_edit.text(),
             runtime=Runtime(binary=self.binary_combo.currentText(),
-                            gpu_mode=self.gpu_combo.currentText(),
+                            gpu_mode=self.gpu_combo.currentData(),
                             selinux_label_disable=self._profile.runtime.selinux_label_disable,
                             extra_run_args=self._profile.runtime.extra_run_args),
             mounts=self.mounts_panel.mounts(),
