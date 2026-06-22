@@ -62,12 +62,15 @@ class SettingWidget(QWidget):
             grid.setContentsMargins(0, 0, 0, 0)
             grid.setHorizontalSpacing(12)
             grid.setVerticalSpacing(2)
+            help_map = dict(setting.option_help)
             self._all_check = QCheckBox("all")
+            self._all_check.setToolTip(tooltip)   # overall (danger) note on "all"
             self._all_check.toggled.connect(self._on_all_toggled)
             self._all_check.toggled.connect(lambda: self.changed.emit())
             boxes = [self._all_check]
             for opt in setting.enum:
                 cb = QCheckBox(opt)
+                cb.setToolTip(help_map.get(opt, tooltip))   # per-option description
                 cb.toggled.connect(lambda: self.changed.emit())
                 self._checks[opt] = cb
                 boxes.append(cb)
@@ -75,9 +78,6 @@ class SettingWidget(QWidget):
             for i, cb in enumerate(boxes):
                 grid.addWidget(cb, i // 3, i % 3)
             self._editor = container
-            if setting.danger:
-                for cb in boxes:
-                    cb.setToolTip(tooltip)
         else:  # string
             self._editor = QLineEdit()
             self._editor.textChanged.connect(lambda: self.changed.emit())
