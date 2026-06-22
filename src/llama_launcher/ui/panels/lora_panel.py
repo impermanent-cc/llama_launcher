@@ -1,7 +1,7 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem
+    QTableWidgetItem, QHeaderView
 )
 
 from llama_launcher.core.spec import LoraRef
@@ -16,6 +16,9 @@ class LoraPanel(QWidget):
         layout = QVBoxLayout(self)
         self.table = QTableWidget(0, 2)
         self.table.setHorizontalHeaderLabels(["Path", "Scale"])
+        hdr = self.table.horizontalHeader()
+        hdr.setSectionResizeMode(0, QHeaderView.Stretch)            # Path
+        hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)   # Scale
         layout.addWidget(self.table)
         row = QHBoxLayout()
         add = QPushButton("+ Add")
