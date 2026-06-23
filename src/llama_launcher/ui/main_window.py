@@ -3,7 +3,7 @@ import os
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
     QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
-    QMessageBox, QFileDialog, QInputDialog
+    QMessageBox, QFileDialog, QInputDialog, QTabWidget
 )
 
 from llama_launcher.core.spec import Profile, Mount, Runtime
@@ -21,6 +21,7 @@ from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
 from llama_launcher.ui.widgets.collapsible import CollapsibleSection
+from llama_launcher.ui.panels.monitor_panel import MonitorPanel
 
 
 def base_dir():
@@ -37,8 +38,9 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        body = QHBoxLayout()
-        root.addLayout(body)
+        # Configure tab = the existing left+right body
+        configure_tab = QWidget()
+        body = QHBoxLayout(configure_tab)
 
         # LEFT: environment (image + model only for v1 binding; mounts editor TODO-UI)
         left = QGroupBox("Environment")
@@ -96,8 +98,16 @@ class MainWindow(QMainWindow):
             groups[setting.group].addRow(setting.flag, w)
         right_scroll.setWidget(right_inner)
         body.addWidget(right_scroll, 2)
+        self.configure_tab = configure_tab
 
-        # BOTTOM: preview + buttons
+        # Tabs
+        self.tabs = QTabWidget()
+        self.tabs.addTab(configure_tab, "Configure")
+        self.monitor_panel = MonitorPanel()
+        self.tabs.addTab(self.monitor_panel, "Monitor")
+        root.addWidget(self.tabs)
+
+        # BOTTOM: preview + buttons (shared, below both tabs)
         self.preview = QPlainTextEdit(); self.preview.setReadOnly(True)
         root.addWidget(QLabel("Command preview:"))
         root.addWidget(self.preview)
