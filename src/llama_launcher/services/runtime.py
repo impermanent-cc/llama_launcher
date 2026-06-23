@@ -30,6 +30,12 @@ def stop(name: str, binary: str) -> None:
     _run([binary, "stop", name])
 
 
+def stop_argv(name: str, binary: str, timeout: int = 10) -> list[str]:
+    """Argv to stop a container with an explicit grace period (for async/QProcess
+    use so the UI thread never blocks on podman's stop timeout)."""
+    return [binary, "stop", "-t", str(timeout), name]
+
+
 def logs_argv(name: str, binary: str) -> list[str]:
     return [binary, "logs", "-f", name]
 

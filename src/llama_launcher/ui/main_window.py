@@ -231,6 +231,7 @@ class MainWindow(QMainWindow):
         self.refresh_preview()
 
         self._log_proc = None
+        self._stop_proc = None
 
         from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QStyle
         self._really_quit = False
@@ -434,14 +435,34 @@ class MainWindow(QMainWindow):
         terminal.launch(argv)
         self._start_log_follower()
 
+    def _spawn_async(self, argv: list[str], on_done=None):
+        """Run argv in the background via QProcess so the UI thread never blocks.
+        Calls on_done() when the process finishes."""
+        from PySide6.QtCore import QProcess
+        proc = QProcess(self)
+        if on_done is not None:
+            proc.finished.connect(lambda *_: on_done())
+        proc.start(argv[0], argv[1:])
+        return proc
+
     def on_stop(self):
-        p = self.current_profile()
-        runtime.stop(self._container_name(), p.runtime.binary)
+        # Stop the log follower immediately; run `podman stop` asynchronously so a
+        # slow stop (podman waits up to its grace period for SIGTERM) never freezes
+        # the GUI — which previously made Stop look like it did nothing.
         self._stop_log_follower()
+        p = self.current_profile()
+        self.status_label.setText("● stopping…")
+        argv = runtime.stop_argv(self._container_name(), p.runtime.binary)
+        self._stop_proc = self._spawn_async(argv, on_done=self.update_status)
 
     def on_restart(self):
-        self.on_stop()
-        self.on_launch()
+        self._stop_log_follower()
+        p = self.current_profile()
+        self.status_label.setText("● restarting…")
+        argv = runtime.stop_argv(self._container_name(), p.runtime.binary)
+        # Launch only after the stop completes, so the new container's --name/port
+        # don't collide with the one being torn down.
+        self._stop_proc = self._spawn_async(argv, on_done=self.on_launch)
 
     def _on_enable_metrics(self):
         self._widgets["metrics"].set_value(True)

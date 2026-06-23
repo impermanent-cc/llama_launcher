@@ -8,12 +8,15 @@ def _profile():
                    model="/models/m.gguf", settings={"port": 8080, "metrics": True})
 
 
-def test_on_stop_clears_log_follower(qtbot, monkeypatch):
-    """on_stop() should kill and clear the log follower process."""
-    monkeypatch.setattr(mw.runtime, "stop", lambda name, binary: None)
+def test_on_stop_clears_log_follower_and_spawns_async_stop(qtbot, monkeypatch):
+    """on_stop() kills the log follower immediately and spawns `podman stop`
+    asynchronously (never blocking the UI thread) with the right argv."""
+    spawned = {}
+    monkeypatch.setattr(mw.MainWindow, "_spawn_async",
+                        lambda self, argv, on_done=None: spawned.setdefault("argv", argv))
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.load_profile(_profile())
+    w.load_profile(_profile())   # profile name "m" -> container llama-m
 
     killed = []
 
@@ -25,6 +28,7 @@ def test_on_stop_clears_log_follower(qtbot, monkeypatch):
     w.on_stop()
     assert w._log_proc is None
     assert killed == [True]
+    assert spawned["argv"] == ["podman", "stop", "-t", "10", "llama-m"]
 
 
 def test_collect_monitor_data(qtbot, monkeypatch):

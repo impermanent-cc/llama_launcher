@@ -11,10 +11,14 @@ import llama_launcher.services.health as _health
 import llama_launcher.services.gpu as _gpu
 import llama_launcher.services.metrics as _metrics
 import llama_launcher.services.registry as _registry
+import llama_launcher.ui.main_window as _mw
 
 
 @pytest.fixture(autouse=True)
 def _hermetic_ui_boundaries(monkeypatch):
+    # No real podman spawn from async Stop/Restart in tests.
+    monkeypatch.setattr(_mw.MainWindow, "_spawn_async",
+                        lambda self, argv, on_done=None: None)
     monkeypatch.setattr(_runtime, "container_state", lambda name, binary: "absent")
     monkeypatch.setattr(_runtime, "is_rootless", lambda binary: False)
     monkeypatch.setattr(_runtime, "stats", lambda name, binary: None)
