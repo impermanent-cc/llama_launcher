@@ -14,7 +14,7 @@ from llama_launcher.core.validation import validate
 from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
 )
-from llama_launcher.services import runtime, terminal, registry, health
+from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.ui.widgets.setting_widgets import make_widget
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
@@ -145,6 +145,8 @@ class MainWindow(QMainWindow):
 
         self.refresh_preview()
 
+        self._log_proc = None
+
         from PySide6.QtCore import QTimer
         self._status_timer = QTimer(self)
         self._status_timer.setInterval(2000)
@@ -270,6 +272,7 @@ class MainWindow(QMainWindow):
             return
         argv = build_command(self.current_profile())
         terminal.launch(argv)
+        self._start_log_follower()
 
     def on_stop(self):
         from llama_launcher.core.spec import slugify
@@ -299,3 +302,45 @@ class MainWindow(QMainWindow):
         state = runtime.container_state(name, p.runtime.binary)
         ok = health.health_ok(p.settings.get("port", 8080)) if state == "running" else False
         self.status_label.setText("● " + health.derive_status(state, ok))
+        if state == "running":
+            self.monitor_panel.update_stats(self.collect_monitor_data())
+
+    def collect_monitor_data(self) -> dict:
+        from llama_launcher.core.spec import slugify
+        from llama_launcher.services.metrics import kv_usage_ratio
+        p = self.current_profile()
+        port = p.settings.get("port", 8080)
+        metrics_on = bool(p.settings.get("metrics"))
+        m = metrics.fetch_metrics(port) if metrics_on else {}
+        slots = metrics.fetch_slots(port)
+        name = f"llama-{slugify(self._profile.name)}"
+        st = runtime.stats(name, p.runtime.binary) or {}
+        return {
+            "tok_s": m.get("llamacpp:predicted_tokens_seconds"),
+            "prompt_tok_s": m.get("llamacpp:prompt_tokens_seconds"),
+            "kv_pct": kv_usage_ratio(slots),
+            "gpus": gpu.query_gpus(),
+            "cpu": st.get("cpu_perc", ""),
+            "mem": st.get("mem_usage", ""),
+            "uptime": "",
+            "metrics_on": metrics_on,
+        }
+
+    def _start_log_follower(self):
+        from PySide6.QtCore import QProcess
+        from llama_launcher.core.spec import slugify
+        self._stop_log_follower()
+        p = self.current_profile()
+        name = f"llama-{slugify(self._profile.name)}"
+        proc = QProcess(self)
+        proc.setProcessChannelMode(QProcess.MergedChannels)
+        proc.readyReadStandardOutput.connect(
+            lambda: self.monitor_panel.append_log(bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")))
+        argv = runtime.logs_argv(name, p.runtime.binary)
+        proc.start(argv[0], argv[1:])
+        self._log_proc = proc
+
+    def _stop_log_follower(self):
+        if self._log_proc is not None:
+            self._log_proc.kill()
+            self._log_proc = None
