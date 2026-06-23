@@ -1,4 +1,6 @@
 import os
+import subprocess
+from pathlib import Path
 
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
@@ -147,6 +149,10 @@ class MainWindow(QMainWindow):
         self.refresh_preview()
 
         self._log_proc = None
+
+        self.lora_panel.set_browse_resolver(
+            lambda h: host_to_container(h, self.mounts_panel.mounts())
+        )
 
         from PySide6.QtCore import QTimer
         self._status_timer = QTimer(self)
@@ -373,3 +379,27 @@ class MainWindow(QMainWindow):
         if self._log_proc is not None:
             self._log_proc.kill()
             self._log_proc = None
+
+    def open_web_ui(self):
+        port = self.current_profile().settings.get("port", 8080)
+        subprocess.Popen(["xdg-open", f"http://127.0.0.1:{port}"], start_new_session=True)
+
+    def export_sh(self, path: str):
+        cmd = " ".join(build_command(self.current_profile()))
+        Path(path).write_text(f"#!/usr/bin/env bash\n{cmd}\n")
+        os.chmod(path, 0o755)
+
+    def model_meta_text(self) -> str:
+        p = self.current_profile()
+        if not p.model:
+            return ""
+        meta = model_info.read_gguf_meta(p.model)
+        size = model_info.file_size(p.model)
+        bits = []
+        if size:
+            bits.append(f"{size / 1024**3:.1f} GiB")
+        if meta and meta.quant:
+            bits.append(meta.quant)
+        if meta and meta.size_label:
+            bits.append(meta.size_label)
+        return "  ·  ".join(bits)
