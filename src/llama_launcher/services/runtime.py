@@ -1,3 +1,4 @@
+import json
 import shutil
 import subprocess
 
@@ -24,3 +25,25 @@ def container_state(name: str, binary: str) -> str:
 
 def stop(name: str, binary: str) -> None:
     _run([binary, "stop", name])
+
+
+def logs_argv(name: str, binary: str) -> list[str]:
+    return [binary, "logs", "-f", name]
+
+
+def container_exists(name: str, binary: str) -> bool:
+    return _run([binary, "container", "exists", name]).returncode == 0
+
+
+def stats(name: str, binary: str) -> dict | None:
+    res = _run([binary, "stats", "--no-stream", "--format", "json", name])
+    if res.returncode != 0 or not res.stdout.strip():
+        return None
+    try:
+        data = json.loads(res.stdout)
+    except json.JSONDecodeError:
+        return None
+    row = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) else None)
+    if not row:
+        return None
+    return {"cpu_perc": row.get("CPUPerc", ""), "mem_usage": row.get("MemUsage", "")}
