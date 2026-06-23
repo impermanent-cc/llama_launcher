@@ -59,3 +59,26 @@ def stats(name: str, binary: str) -> dict | None:
     if not row:
         return None
     return {"cpu_perc": row.get("CPUPerc", ""), "mem_usage": row.get("MemUsage", "")}
+
+
+def parse_images(output: str) -> list[str]:
+    """Filter `repo:tag` lines to llama.cpp images (dropping dangling/<none>),
+    preserving order and de-duplicating."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for line in output.splitlines():
+        ref = line.strip()
+        if not ref or "<none>" in ref or "llama.cpp" not in ref:
+            continue
+        if ref not in seen:
+            seen.add(ref)
+            out.append(ref)
+    return out
+
+
+def list_local_images(binary: str) -> list[str]:
+    """Locally-pulled llama.cpp images (`<binary> images`), [] on error/missing binary."""
+    res = _run([binary, "images", "--format", "{{.Repository}}:{{.Tag}}"])
+    if res.returncode != 0:
+        return []
+    return parse_images(res.stdout)
