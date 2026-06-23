@@ -17,6 +17,7 @@ class Setting:
     tooltip: str = ""
     danger: bool = False
     option_help: tuple = ()   # multiselect only: ((option, help_text), ...)
+    suggestions: tuple = ()   # int only: preset values offered in an editable combo
 
 
 KV_CACHE_TYPES = ("f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1")
@@ -25,7 +26,8 @@ _ALL = [
     # Model & Context
     Setting("ctx-size", "--ctx-size", "int", 0, "Model & Context", ("-c",), 0, 1048576, 1024,
             tooltip="Context window in tokens (prompt + generation). Bigger needs more "
-                    "VRAM/RAM for the KV cache. 0 = use the model's trained maximum."),
+                    "VRAM/RAM for the KV cache. 0 = use the model's trained maximum.",
+            suggestions=(0, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144)),
     Setting("n-predict", "--n-predict", "int", -1, "Model & Context", ("-n",), -2, 1048576, 1,
             tooltip="Maximum number of tokens to generate per response. -1 = unlimited "
                     "(until end-of-text or context fills); -2 = stop when context is full."),
