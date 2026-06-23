@@ -228,8 +228,15 @@ class MainWindow(QMainWindow):
 
         from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QStyle
         self._really_quit = False
-        self._tray_enabled = QSystemTrayIcon.isSystemTrayAvailable()
-        if self._tray_enabled:
+        # Minimize-to-tray is OPT-IN: enabled only when the user turns it on in
+        # config AND the desktop actually provides a system tray. By default,
+        # closing the window quits the app (see closeEvent), so a tray-less or
+        # half-wired session never strands the process behind a blocked terminal.
+        self._minimize_to_tray = (
+            bool(load_config(base_dir()).get("minimize_to_tray", False))
+            and QSystemTrayIcon.isSystemTrayAvailable()
+        )
+        if self._minimize_to_tray:
             self.tray = QSystemTrayIcon(self)
             self.tray.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
             self.tray.setToolTip("Llama Launcher")
@@ -590,12 +597,11 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Report saved", f"Report saved to:\n{saved}")
 
     def closeEvent(self, event):
-        if getattr(self, "_really_quit", False) or not self._tray_enabled:
+        if getattr(self, "_really_quit", False) or not self._minimize_to_tray:
             self._stop_log_follower()
             event.accept()
-            if not self._tray_enabled:
-                from PySide6.QtWidgets import QApplication
-                QApplication.instance().quit()
+            from PySide6.QtWidgets import QApplication
+            QApplication.instance().quit()
         else:
             event.ignore()
             self.hide()
