@@ -1,0 +1,27 @@
+"""Hermetic autouse fixture for all UI tests.
+
+Patches every external boundary touched by MainWindow's background timers so that
+no real subprocess, network call, or filesystem read can happen during a headless test
+run.  Per-test monkeypatches still win because they run after this fixture sets up.
+"""
+import pytest
+
+import llama_launcher.services.runtime as _runtime
+import llama_launcher.services.health as _health
+import llama_launcher.services.gpu as _gpu
+import llama_launcher.services.metrics as _metrics
+import llama_launcher.services.registry as _registry
+
+
+@pytest.fixture(autouse=True)
+def _hermetic_ui_boundaries(monkeypatch):
+    monkeypatch.setattr(_runtime, "container_state", lambda name, binary: "absent")
+    monkeypatch.setattr(_runtime, "is_rootless", lambda binary: False)
+    monkeypatch.setattr(_runtime, "stats", lambda name, binary: None)
+    monkeypatch.setattr(_runtime, "started_at", lambda name, binary: None)
+    monkeypatch.setattr(_health, "health_ok", lambda port, timeout=1.0: False)
+    monkeypatch.setattr(_gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(_gpu, "free_vram_bytes", lambda: None)
+    monkeypatch.setattr(_metrics, "fetch_metrics", lambda port, timeout=1.0: {})
+    monkeypatch.setattr(_metrics, "fetch_slots", lambda port, timeout=1.0: [])
+    monkeypatch.setattr(_registry, "fetch_latest", lambda repo, prefix, timeout=10.0: None)
