@@ -13,6 +13,27 @@ def _mount_opts(mount) -> str:
     return ",".join(parts)
 
 
+# llama.cpp image tags whose entrypoint is the multi-tool dispatcher
+# (/app/tools.sh), which rejects llama-server flags like -m. For these we point
+# podman/docker straight at the llama-server binary instead.
+_TOOLS_VARIANTS = ("full", "light")
+_SERVER_ENTRYPOINT = "/app/llama-server"
+
+
+def image_tag(image: str) -> str:
+    """Return the tag portion of an image ref, or '' when none is present."""
+    _, sep, tag = image.rpartition(":")
+    if not sep or "/" in tag:        # ":" belonged to a host:port, or no tag
+        return ""
+    return tag
+
+
+def needs_server_entrypoint(image: str) -> bool:
+    """True for `full`/`light` (tool-dispatcher) image tags whose entrypoint
+    must be overridden to the llama-server binary."""
+    return image_tag(image).split("-", 1)[0] in _TOOLS_VARIANTS
+
+
 def _run_level_args(profile: Profile) -> list[str]:
     rt = profile.runtime
     argv = [rt.binary, "run", "--rm", "--name", f"llama-{slugify(profile.name)}"]
@@ -46,8 +67,14 @@ def _run_level_args(profile: Profile) -> list[str]:
         # the library path explicitly whenever we change the working directory.
         argv += ["-e", "LD_LIBRARY_PATH=/app"]
 
-    if rt.extra_run_args.strip():
-        argv += shlex.split(rt.extra_run_args)
+    extra = shlex.split(rt.extra_run_args) if rt.extra_run_args.strip() else []
+    argv += extra
+
+    # Full/light images use the /app/tools.sh dispatcher (which rejects -m); point
+    # them straight at llama-server unless the user already set an --entrypoint.
+    has_entrypoint = any(a == "--entrypoint" or a.startswith("--entrypoint=") for a in extra)
+    if needs_server_entrypoint(profile.image) and not has_entrypoint:
+        argv += ["--entrypoint", _SERVER_ENTRYPOINT]
 
     argv.append(profile.image)
     return argv
