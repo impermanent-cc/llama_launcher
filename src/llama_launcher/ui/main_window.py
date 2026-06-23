@@ -85,8 +85,10 @@ class MainWindow(QMainWindow):
         self.mounts_panel.changed.connect(self.refresh_preview)
         left_form.addRow("Folders", self.mounts_panel)
         self.mmproj_edit = QLineEdit(); self.mmproj_edit.textChanged.connect(self.refresh_preview)
+        self.draft_model_edit = QLineEdit(); self.draft_model_edit.textChanged.connect(self.refresh_preview)
         self.raw_edit = QLineEdit(); self.raw_edit.textChanged.connect(self.refresh_preview)
         left_form.addRow("mmproj", self._field_with_browse(self.mmproj_edit))
+        left_form.addRow("draft model", self._field_with_browse(self.draft_model_edit))
         self.lora_panel = LoraPanel()
         self.lora_panel.changed.connect(self.refresh_preview)
         self.lora_section = CollapsibleSection("LoRA adapters", self.lora_panel, collapsed=True)
@@ -241,6 +243,7 @@ class MainWindow(QMainWindow):
         self.gpu_combo.setCurrentIndex(max(0, self.gpu_combo.findData(p.runtime.gpu_mode)))
         self.mounts_panel.set_mounts(p.mounts)
         self.mmproj_edit.setText(p.mmproj or "")
+        self.draft_model_edit.setText(p.draft_model or "")
         self.lora_panel.set_loras(p.loras)
         self.raw_edit.setText(p.raw_args)
         for key, w in self._widgets.items():
@@ -267,6 +270,7 @@ class MainWindow(QMainWindow):
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
+            draft_model=self.draft_model_edit.text() or None,
             loras=self.lora_panel.loras(),
             settings=settings,
             raw_args=self.raw_edit.text(),
@@ -483,7 +487,7 @@ class MainWindow(QMainWindow):
             "status_history": [self.status_label.text()],
             "runtime": runtime_txt,
             "image": p.image,
-            "logs": self.monitor_panel.log_view.toPlainText()[-4000:],
+            "logs": report_mod.redact_secrets(self.monitor_panel.log_view.toPlainText()[-4000:]),
         }
 
     def on_generate_report(self):

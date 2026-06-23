@@ -5,6 +5,7 @@ REPORT_SECTIONS = ("command", "validation", "runtime", "logs")
 _REDACTIONS = (
     re.compile(r"(--api-key[= ])(\S+)"),
     re.compile(r'("api-key"\s*:\s*")([^"]*)(")'),
+    re.compile(r"(?i)(authorization:\s*bearer\s+)(\S+)"),
 )
 
 
@@ -13,6 +14,7 @@ def redact_secrets(text: str) -> str:
         return text
     text = _REDACTIONS[0].sub(r"\1***", text)
     text = _REDACTIONS[1].sub(r"\1***\3", text)
+    text = _REDACTIONS[2].sub(r"\1***", text)
     return text
 
 
@@ -39,5 +41,5 @@ def build_report(data: dict, sections: dict) -> str:
     if sections.get("logs"):
         lines += ["## Image & recent logs", "",
                   f"Image: `{data.get('image', '')}`", "",
-                  "```", data.get("logs", ""), "```", ""]
+                  "```", redact_secrets(data.get("logs", "")), "```", ""]
     return "\n".join(lines)
