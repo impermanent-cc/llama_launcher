@@ -57,3 +57,22 @@ def test_run_oserror_returns_completed_process(monkeypatch):
 def test_is_rootless_returns_false_when_binary_missing(monkeypatch):
     monkeypatch.setattr(rt.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("no podman")))
     assert rt.is_rootless("podman") is False
+
+
+def test_started_at_returns_timestamp(monkeypatch):
+    monkeypatch.setattr(rt, "_run",
+                        lambda args: FakeCompleted(stdout="2024-01-15T10:30:00.123456789Z\n", returncode=0))
+    result = rt.started_at("llama-x", "podman")
+    assert result == "2024-01-15T10:30:00.123456789Z"
+
+
+def test_started_at_returns_none_on_failure(monkeypatch):
+    monkeypatch.setattr(rt, "_run",
+                        lambda args: FakeCompleted(stdout="", returncode=125))
+    assert rt.started_at("llama-x", "podman") is None
+
+
+def test_started_at_returns_none_on_empty_output(monkeypatch):
+    monkeypatch.setattr(rt, "_run",
+                        lambda args: FakeCompleted(stdout="   \n", returncode=0))
+    assert rt.started_at("llama-x", "podman") is None

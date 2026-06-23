@@ -26,3 +26,8 @@ def test_fits():
     assert fits(100, 200) == (True, 100)
     ok, margin = fits(300, 200)
     assert ok is False and margin == -100
+
+
+def test_fits_boundary_zero_margin():
+    """When estimate equals free exactly, margin==0 and fits==True."""
+    assert fits(200, 200) == (True, 0)

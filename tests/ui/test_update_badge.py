@@ -35,11 +35,11 @@ def test_update_badge_shown_and_clickable_after_newer_build(qtbot, monkeypatch):
     w = mw.MainWindow(); qtbot.addWidget(w)
     w.load_profile(Profile(name="u", image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
                            runtime=Runtime(binary="podman"), settings={"port": 8080}))
-    # Simulate what the update worker slot does
-    w.update_badge.setText("newer build server-cuda12-b9999 available")
+    # Simulate what the update worker slot does (badge uses bNNNN short form)
+    w.update_badge.setText("newer build b9999 available")
     w.update_badge.setVisible(True)
     assert not w.update_badge.isHidden()
-    assert "server-cuda12-b9999" in w.update_badge.text()
+    assert "b9999" in w.update_badge.text()
     # Clicking the badge should call on_fetch_latest which updates the image
     w.update_badge.click()
     assert w.image_edit.text() == "ghcr.io/ggml-org/llama.cpp:server-cuda12-b9999"

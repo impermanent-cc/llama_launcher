@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QMessageBox, QFileDialog, QInputDialog, QTabWidget
 )
 
-from llama_launcher.core.spec import Profile, Mount, Runtime
+from llama_launcher.core.spec import Profile, Mount, Runtime, slugify
 from llama_launcher.core.settings_catalog import CATALOG
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.pathmap import host_to_container
@@ -31,6 +31,25 @@ from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
 from llama_launcher.ui.widgets.collapsible import CollapsibleSection
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+
+
+def _fmt_uptime(started_at: str | None) -> str:
+    """Return a short human-readable uptime string from a started_at ISO timestamp."""
+    if not started_at:
+        return ""
+    try:
+        dt = datetime.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+        now = datetime.datetime.now(tz=datetime.timezone.utc)
+        elapsed = int((now - dt).total_seconds())
+        if elapsed < 60:
+            return f"{elapsed}s"
+        if elapsed < 3600:
+            return f"{elapsed // 60}m"
+        h = elapsed // 3600
+        m = (elapsed % 3600) // 60
+        return f"{h}h{m:02d}m"
+    except (ValueError, TypeError):
+        return ""
 
 
 class _UpdateWorker(QThread):
@@ -83,9 +102,6 @@ class MainWindow(QMainWindow):
             self.gpu_combo.addItem(_gpu_label, _gpu_val)
         for w in (self.image_edit, self.model_edit):
             w.textChanged.connect(self.refresh_preview)
-        self.model_edit.textChanged.connect(
-            lambda _: self.model_meta_label.setText(self.model_meta_text())
-        )
         self.binary_combo.currentTextChanged.connect(self.refresh_preview)
         self.gpu_combo.currentTextChanged.connect(self.refresh_preview)
         self.update_badge = QPushButton("")
@@ -158,6 +174,9 @@ class MainWindow(QMainWindow):
         # BOTTOM: preview + buttons (shared, below both tabs)
         self.model_meta_label = QLabel("")
         root.addWidget(self.model_meta_label)
+        self.model_edit.textChanged.connect(
+            lambda _: self.model_meta_label.setText(self.model_meta_text())
+        )
         preview_row = QHBoxLayout()
         self.preview = QPlainTextEdit(); self.preview.setReadOnly(True)
         preview_row.addWidget(self.preview, 1)
@@ -231,7 +250,8 @@ class MainWindow(QMainWindow):
 
         from PySide6.QtCore import QTimer
         self._status_timer = QTimer(self)
-        self._status_timer.setInterval(2000)
+        interval = load_config(base_dir()).get("monitor_interval_ms", 2000)
+        self._status_timer.setInterval(interval)
         self._status_timer.timeout.connect(self.update_status)
         self._status_timer.start()
 
@@ -240,6 +260,9 @@ class MainWindow(QMainWindow):
             self._update_timer.setSingleShot(True)
             self._update_timer.timeout.connect(self.run_update_check)
             self._update_timer.start(3000)
+
+    def _container_name(self) -> str:
+        return f"llama-{slugify(self._profile.name)}"
 
     def _field_with_browse(self, line_edit: QLineEdit) -> QWidget:
         container = QWidget()
@@ -369,8 +392,6 @@ class MainWindow(QMainWindow):
         if meta is None or free is None or not meta.n_layers or not meta.n_embd:
             return None
         ctx = p.settings.get("ctx-size") or meta.ctx_train or 4096
-        if ctx == 0:
-            ctx = meta.ctx_train or 4096
         est = vram.estimate(
             n_layers=meta.n_layers, n_head=meta.n_head or 1,
             n_head_kv=meta.n_head_kv or meta.n_head or 1, n_embd=meta.n_embd, ctx=ctx,
@@ -398,9 +419,8 @@ class MainWindow(QMainWindow):
         self._start_log_follower()
 
     def on_stop(self):
-        from llama_launcher.core.spec import slugify
         p = self.current_profile()
-        runtime.stop(f"llama-{slugify(self._profile.name)}", p.runtime.binary)
+        runtime.stop(self._container_name(), p.runtime.binary)
         self._stop_log_follower()
 
     def on_restart(self):
@@ -439,7 +459,9 @@ class MainWindow(QMainWindow):
 
         def _on_found(latest: str):
             if latest != current_tag:
-                self.update_badge.setText(f"newer build {latest} available")
+                m = registry._BUILD_RE.match(latest)
+                build_id = f"b{m.group('num')}" if m else latest
+                self.update_badge.setText(f"newer build {build_id} available")
                 self.update_badge.setVisible(True)
 
         worker = _UpdateWorker(repo, prefix, parent=self)
@@ -448,13 +470,12 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def update_status(self):
-        from llama_launcher.core.spec import slugify
         p = self.current_profile()
         if not runtime.binary_available(p.runtime.binary):
             self.status_label.setText("● stopped")
             self.web_ui_btn.setEnabled(False)
             return
-        name = f"llama-{slugify(self._profile.name)}"
+        name = self._container_name()
         state = runtime.container_state(name, p.runtime.binary)
         ok = health.health_ok(p.settings.get("port", 8080)) if state == "running" else False
         self.status_label.setText("● " + health.derive_status(state, ok))
@@ -463,15 +484,16 @@ class MainWindow(QMainWindow):
             self.monitor_panel.update_stats(self.collect_monitor_data())
 
     def collect_monitor_data(self) -> dict:
-        from llama_launcher.core.spec import slugify
         from llama_launcher.services.metrics import kv_usage_ratio
         p = self.current_profile()
         port = p.settings.get("port", 8080)
         metrics_on = bool(p.settings.get("metrics"))
         m = metrics.fetch_metrics(port) if metrics_on else {}
         slots = metrics.fetch_slots(port)
-        name = f"llama-{slugify(self._profile.name)}"
+        name = self._container_name()
         st = runtime.stats(name, p.runtime.binary) or {}
+        started = runtime.started_at(name, p.runtime.binary)
+        uptime = _fmt_uptime(started)
         return {
             "tok_s": m.get("llamacpp:predicted_tokens_seconds"),
             "prompt_tok_s": m.get("llamacpp:prompt_tokens_seconds"),
@@ -479,16 +501,15 @@ class MainWindow(QMainWindow):
             "gpus": gpu.query_gpus(),
             "cpu": st.get("cpu_perc", ""),
             "mem": st.get("mem_usage", ""),
-            "uptime": "",
+            "uptime": uptime,
             "metrics_on": metrics_on,
         }
 
     def _start_log_follower(self):
         from PySide6.QtCore import QProcess
-        from llama_launcher.core.spec import slugify
         self._stop_log_follower()
         p = self.current_profile()
-        name = f"llama-{slugify(self._profile.name)}"
+        name = self._container_name()
         proc = QProcess(self)
         proc.setProcessChannelMode(QProcess.MergedChannels)
         proc.readyReadStandardOutput.connect(

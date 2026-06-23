@@ -38,6 +38,15 @@ def container_exists(name: str, binary: str) -> bool:
     return _run([binary, "container", "exists", name]).returncode == 0
 
 
+def started_at(name: str, binary: str) -> str | None:
+    """Return the container's StartedAt timestamp (ISO 8601) or None on failure."""
+    res = _run([binary, "inspect", "-f", "{{.State.StartedAt}}", name])
+    if res.returncode != 0:
+        return None
+    val = res.stdout.strip()
+    return val if val else None
+
+
 def stats(name: str, binary: str) -> dict | None:
     res = _run([binary, "stats", "--no-stream", "--format", "json", name])
     if res.returncode != 0 or not res.stdout.strip():
