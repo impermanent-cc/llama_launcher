@@ -23,6 +23,7 @@ def profile_from_dict(d: dict) -> Profile:
         mounts=[Mount(**m) for m in d.get("mounts", [])],
         model=d.get("model", ""),
         mmproj=d.get("mmproj"),
+        draft_model=d.get("draft_model"),
         loras=[LoraRef(**l) for l in d.get("loras", [])],
         settings=dict(d.get("settings", {})),
         raw_args=d.get("raw_args", ""),

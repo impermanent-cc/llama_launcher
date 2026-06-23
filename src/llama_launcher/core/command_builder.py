@@ -71,6 +71,9 @@ def _server_args(profile: Profile, catalog: dict) -> list[str]:
         else:
             argv += ["--lora-scaled", f"{lora.path}:{lora.scale}"]
 
+    if profile.draft_model:
+        argv += ["--spec-draft-model", profile.draft_model]
+
     port = profile.settings.get("port", 8080)
     # Emit changed settings in catalog order, skipping port (handled below).
     for key, setting in catalog.items():

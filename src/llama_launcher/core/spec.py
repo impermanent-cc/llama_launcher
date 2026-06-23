@@ -34,6 +34,7 @@ class Profile:
     mounts: list[Mount] = field(default_factory=list)
     model: str = ""
     mmproj: str | None = None
+    draft_model: str | None = None
     loras: list[LoraRef] = field(default_factory=list)
     settings: dict = field(default_factory=dict)
     raw_args: str = ""

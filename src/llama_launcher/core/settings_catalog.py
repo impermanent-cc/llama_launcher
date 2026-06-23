@@ -235,6 +235,24 @@ _ALL = [
             -1, 1048576, 1,
             tooltip="Maximum tokens the model may spend on internal reasoning before "
                     "answering. -1 = unrestricted; 0 = no thinking."),
+    Setting("metrics", "--metrics", "bool", False, "Server & Tools", (),
+            tooltip="Expose the Prometheus /metrics endpoint (needed for the Monitor "
+                    "tab's throughput numbers). Off by default in llama-server."),
+    Setting("no-slots", "--no-slots", "bool", False, "Server & Tools", (),
+            tooltip="Disable the /slots endpoint. /slots is ON by default and powers "
+                    "per-slot + KV-cache monitoring, but it can expose prompt text; "
+                    "enable this to turn it off."),
+    Setting("props", "--props", "bool", False, "Server & Tools", (),
+            tooltip="Allow changing global properties via POST /props. Reading /props "
+                    "works without this."),
+    Setting("spec-draft-ngl", "--spec-draft-ngl", "int_or_token", "auto", "Server & Tools",
+            ("-ngld",), 0, 999, 1, tokens=("auto", "all"),
+            tooltip="Draft-model layers to offload to GPU for speculative decoding. "
+                    "'auto' lets llama.cpp decide."),
+    Setting("spec-draft-n-max", "--spec-draft-n-max", "int", 3, "Server & Tools", (),
+            1, 64, 1,
+            tooltip="Tokens the draft model proposes per step (speculative decoding). "
+                    "Default 3."),
 ]
 
 CATALOG: dict = {s.key: s for s in _ALL}
