@@ -35,6 +35,13 @@ class SettingWidget(QWidget):
             self._editor.addItems(list(setting.enum))
             self._editor.setCurrentText(str(setting.default))
             self._editor.currentTextChanged.connect(lambda: self.changed.emit())
+        elif t == "int" and setting.suggestions:
+            # editable combo of suggested values; any integer can still be typed
+            self._editor = NoWheelComboBox()
+            self._editor.setEditable(True)
+            self._editor.addItems([str(s) for s in setting.suggestions])
+            self._editor.setCurrentText(str(setting.default))
+            self._editor.currentTextChanged.connect(lambda: self.changed.emit())
         elif t == "int":
             self._editor = NoWheelSpinBox()
             self._editor.setRange(int(setting.minimum if setting.minimum is not None else -2**31),
@@ -86,6 +93,8 @@ class SettingWidget(QWidget):
         # and left-align them with a trailing stretch.
         _max_width = {"enum": 150, "int_or_token": 150, "int": 120,
                       "float": 120, "string": 240}.get(t)
+        if t == "int" and setting.suggestions:
+            _max_width = 150   # editable preset combo needs room for 6-digit values
         if _max_width:
             self._editor.setMaximumWidth(_max_width)
         layout.addWidget(self._editor)
@@ -107,6 +116,11 @@ class SettingWidget(QWidget):
         if t == "enum":
             return self._editor.currentText()
         if t == "int":
+            if self.setting.suggestions:
+                try:
+                    return int(self._editor.currentText().strip())
+                except ValueError:
+                    return self.setting.default
             return self._editor.value()
         if t == "float":
             return self._editor.value()
@@ -131,6 +145,8 @@ class SettingWidget(QWidget):
         if t == "bool":
             self._editor.setChecked(bool(v))
         elif t == "enum":
+            self._editor.setCurrentText(str(v))
+        elif t == "int" and self.setting.suggestions:
             self._editor.setCurrentText(str(v))
         elif t in ("int", "float"):
             self._editor.setValue(v)
