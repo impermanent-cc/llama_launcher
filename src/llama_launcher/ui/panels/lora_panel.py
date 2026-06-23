@@ -1,7 +1,7 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QHeaderView
+    QTableWidgetItem, QHeaderView, QFileDialog
 )
 
 from llama_launcher.core.spec import LoraRef
@@ -13,12 +13,14 @@ class LoraPanel(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
+        self._browse_resolver = None
         layout = QVBoxLayout(self)
-        self.table = QTableWidget(0, 2)
-        self.table.setHorizontalHeaderLabels(["Path", "Scale"])
+        self.table = QTableWidget(0, 3)
+        self.table.setHorizontalHeaderLabels(["Path", "Scale", ""])
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.Stretch)            # Path
         hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)   # Scale
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)   # Browse
         layout.addWidget(self.table)
         row = QHBoxLayout()
         add = QPushButton("+ Add")
@@ -28,6 +30,12 @@ class LoraPanel(QWidget):
         row.addWidget(add); row.addWidget(rm)
         layout.addLayout(row)
         self.table.itemChanged.connect(lambda *_: self.changed.emit())
+
+    def set_browse_resolver(self, fn):
+        self._browse_resolver = fn
+
+    def _resolve(self, host_path: str):
+        return self._browse_resolver(host_path) if self._browse_resolver else host_path
 
     def _add_row(self, lora: LoraRef):
         prev = self.table.blockSignals(True)
@@ -42,6 +50,24 @@ class LoraPanel(QWidget):
             scale.setValue(lora.scale)
             scale.valueChanged.connect(lambda *_: self.changed.emit())
             self.table.setCellWidget(r, 1, scale)
+            browse_btn = QPushButton("Browse…")
+            row_index = r
+
+            def _make_browse(row):
+                def _browse():
+                    path, _ = QFileDialog.getOpenFileName(self, "Select LoRA", "")
+                    if not path:
+                        return
+                    resolved = self._resolve(path)
+                    if resolved is None:
+                        return
+                    item = self.table.item(row, 0)
+                    if item is not None:
+                        item.setText(resolved)
+                return _browse
+
+            browse_btn.clicked.connect(_make_browse(row_index))
+            self.table.setCellWidget(r, 2, browse_btn)
         finally:
             self.table.blockSignals(prev)
         if not prev:
