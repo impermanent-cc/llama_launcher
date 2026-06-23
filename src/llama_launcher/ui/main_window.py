@@ -15,10 +15,13 @@ from llama_launcher.core.pathmap import host_to_container
 from llama_launcher.core.validation import validate
 from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
+    load_config, save_config, profile_to_dict,
 )
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
 from llama_launcher.core import vram
+from llama_launcher.core import report as report_mod
 from llama_launcher.services.registry import split_image, variant_prefix
+from llama_launcher.ui.dialogs.report_dialog import ReportDialog
 from llama_launcher.ui.widgets.setting_widgets import make_widget
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
@@ -141,15 +144,17 @@ class MainWindow(QMainWindow):
         self.save_btn = QPushButton("Save")
         self.save_as_btn = QPushButton("Save As")
         self.delete_btn = QPushButton("Delete")
+        self.report_btn = QPushButton("Generate report")
         self.status_label = QLabel("● stopped")
         bar.addWidget(self.profile_combo, 1)
-        for b in (self.save_btn, self.save_as_btn, self.delete_btn):
+        for b in (self.save_btn, self.save_as_btn, self.delete_btn, self.report_btn):
             bar.addWidget(b)
         bar.addWidget(self.status_label)
         root.insertLayout(0, bar)
         self.save_btn.clicked.connect(self.save_current_profile)
         self.save_as_btn.clicked.connect(self.save_as_profile)
         self.delete_btn.clicked.connect(self.delete_current_profile)
+        self.report_btn.clicked.connect(self.on_generate_report)
         self.profile_combo.activated.connect(self._on_pick_profile)
 
         # lifecycle buttons
@@ -424,6 +429,43 @@ class MainWindow(QMainWindow):
         cmd = " ".join(build_command(self.current_profile()))
         Path(path).write_text(f"#!/usr/bin/env bash\n{cmd}\n")
         os.chmod(path, 0o755)
+
+    def gather_report_data(self) -> dict:
+        import platform, json as _json
+        p = self.current_profile()
+        cmd = " ".join(build_command(p))
+        issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary))
+        gpus = gpu.query_gpus()
+        gpu_txt = "\n".join(f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, "
+                            f"util {g.util_pct}%, {g.temp_c}C" for g in gpus) or "(no nvidia-smi)"
+        runtime_txt = (f"binary={p.runtime.binary} gpu_mode={p.runtime.gpu_mode}\n"
+                       f"rootless={runtime.is_rootless(p.runtime.binary)}\n"
+                       f"{gpu_txt}\nOS={platform.platform()}")
+        return {
+            "command": report_mod.redact_secrets(cmd),
+            "profile": report_mod.redact_secrets(_json.dumps(profile_to_dict(p), indent=2)),
+            "validation": [f"[{i.level}] {i.message}" for i in issues],
+            "status_history": [self.status_label.text()],
+            "runtime": runtime_txt,
+            "image": p.image,
+            "logs": self.monitor_panel.log_view.toPlainText()[-4000:],
+        }
+
+    def on_generate_report(self):
+        cfg = load_config(base_dir())
+        initial = cfg.get("report_sections", {s: True for s in report_mod.REPORT_SECTIONS})
+        dlg = ReportDialog(initial, self)
+        if not dlg.exec():
+            return
+        sections = dlg.selected_sections()
+        cfg["report_sections"] = sections
+        save_config(cfg, base_dir())
+        md = report_mod.build_report(self.gather_report_data(), sections)
+        from PySide6.QtWidgets import QApplication, QFileDialog
+        QApplication.clipboard().setText(md)
+        path, _ = QFileDialog.getSaveFileName(self, "Save report", "llama-launcher-report.md")
+        if path:
+            Path(path).write_text(md)
 
     def closeEvent(self, event):
         if getattr(self, "_really_quit", False):
