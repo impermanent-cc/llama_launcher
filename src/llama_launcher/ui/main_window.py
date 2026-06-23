@@ -108,9 +108,15 @@ class MainWindow(QMainWindow):
         self.update_badge.setFlat(True)
         self.update_badge.setVisible(False)
         self.update_badge.clicked.connect(self.on_fetch_latest)
+        self.detect_image_btn = QPushButton("Detect")
+        self.detect_image_btn.setToolTip(
+            "Fill the Image field from llama.cpp images already pulled locally "
+            "(podman/docker images).")
+        self.detect_image_btn.clicked.connect(self.detect_image)
         image_row = QHBoxLayout()
         image_row.setContentsMargins(0, 0, 0, 0)
         image_row.addWidget(self.image_edit, 1)
+        image_row.addWidget(self.detect_image_btn)
         image_row.addWidget(self.update_badge)
         image_widget = QWidget()
         image_widget.setLayout(image_row)
@@ -254,6 +260,9 @@ class MainWindow(QMainWindow):
         self.lora_panel.set_browse_resolver(
             lambda h: host_to_container(h, self.mounts_panel.mounts())
         )
+
+        # Auto-insert the local image when there's exactly one and none is set yet.
+        self._autofill_image_if_empty()
 
         from PySide6.QtCore import QTimer
         self._status_timer = QTimer(self)
@@ -446,6 +455,31 @@ class MainWindow(QMainWindow):
         latest = registry.fetch_latest(repo, prefix)
         if latest:
             self.image_edit.setText(f"{repo}:{latest}")
+
+    def detect_image(self):
+        binary = self.binary_combo.currentText()
+        images = runtime.list_local_images(binary)
+        if not images:
+            QMessageBox.information(
+                self, "Detect image",
+                f"No local llama.cpp images found for '{binary}'.\n"
+                f"Pull one (e.g. {binary} pull ghcr.io/ggml-org/llama.cpp:server) "
+                f"or type the image reference yourself.")
+            return
+        if len(images) == 1:
+            self.image_edit.setText(images[0])
+            return
+        choice, ok = QInputDialog.getItem(
+            self, "Detect image", "Local llama.cpp images:", images, 0, False)
+        if ok and choice:
+            self.image_edit.setText(choice)
+
+    def _autofill_image_if_empty(self):
+        if self.image_edit.text().strip():
+            return
+        images = runtime.list_local_images(self.binary_combo.currentText())
+        if len(images) == 1:
+            self.image_edit.setText(images[0])
 
     def check_for_update(self, tags: list[str]) -> str | None:
         repo, tag = split_image(self.image_edit.text())
