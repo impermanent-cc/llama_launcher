@@ -42,6 +42,11 @@ def test_stop_invokes_binary(monkeypatch):
     assert captured["args"] == ["podman", "stop", "llama-x"]
 
 
+def test_stop_argv():
+    assert rt.stop_argv("llama-x", "podman") == ["podman", "stop", "-t", "10", "llama-x"]
+    assert rt.stop_argv("llama-x", "docker", timeout=3) == ["docker", "stop", "-t", "3", "llama-x"]
+
+
 def test_is_rootless_true(monkeypatch):
     monkeypatch.setattr(rt, "_run", lambda args: FakeCompleted(stdout="true\n"))
     assert rt.is_rootless("podman") is True
