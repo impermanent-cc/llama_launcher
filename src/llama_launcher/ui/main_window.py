@@ -14,7 +14,8 @@ from llama_launcher.core.validation import validate
 from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
 )
-from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu
+from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
+from llama_launcher.core import vram
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.ui.widgets.setting_widgets import make_widget
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
@@ -267,9 +268,37 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Warnings", "\n".join(i.message for i in warns))
         return True
 
+    def vram_check(self) -> str | None:
+        p = self.current_profile()
+        meta = model_info.read_gguf_meta(p.model) if p.model else None
+        free = gpu.free_vram_bytes()
+        if meta is None or free is None or not meta.n_layers or not meta.n_embd:
+            return None
+        ctx = p.settings.get("ctx-size") or meta.ctx_train or 4096
+        if ctx == 0:
+            ctx = meta.ctx_train or 4096
+        est = vram.estimate(
+            n_layers=meta.n_layers, n_head=meta.n_head or 1,
+            n_head_kv=meta.n_head_kv or meta.n_head or 1, n_embd=meta.n_embd, ctx=ctx,
+            k_quant=p.settings.get("cache-type-k", "f16"),
+            v_quant=p.settings.get("cache-type-v", "f16"),
+            weights_bytes=model_info.file_size(p.model) or 0,
+        )
+        ok, margin = vram.fits(est.total_bytes, free)
+        if ok:
+            return None
+        gib = 1024 ** 3
+        return (f"Estimated VRAM need ~{est.total_bytes/gib:.1f} GiB exceeds free "
+                f"~{free/gib:.1f} GiB by ~{-margin/gib:.1f} GiB. It may not fit — "
+                f"consider quantized KV cache (-ctk/-ctv q8_0) or a higher --n-cpu-moe. "
+                f"(Estimate is conservative; --n-cpu-moe/-ngl reduce actual GPU use.)")
+
     def on_launch(self):
         if not self._validate_or_warn():
             return
+        warn = self.vram_check()
+        if warn:
+            QMessageBox.warning(self, "VRAM check", warn)
         argv = build_command(self.current_profile())
         terminal.launch(argv)
         self._start_log_follower()
