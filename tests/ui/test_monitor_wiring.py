@@ -8,6 +8,25 @@ def _profile():
                    model="/models/m.gguf", settings={"port": 8080, "metrics": True})
 
 
+def test_on_stop_clears_log_follower(qtbot, monkeypatch):
+    """on_stop() should kill and clear the log follower process."""
+    monkeypatch.setattr(mw.runtime, "stop", lambda name, binary: None)
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w.load_profile(_profile())
+
+    killed = []
+
+    class _FakeProc:
+        def kill(self):
+            killed.append(True)
+
+    w._log_proc = _FakeProc()
+    w.on_stop()
+    assert w._log_proc is None
+    assert killed == [True]
+
+
 def test_collect_monitor_data(qtbot, monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_metrics",
                         lambda port, timeout=1.0: {"llamacpp:predicted_tokens_seconds": 50.0,
