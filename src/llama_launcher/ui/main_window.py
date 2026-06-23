@@ -2,10 +2,12 @@ import os
 import subprocess
 from pathlib import Path
 
+import datetime
+
 from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
-    QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
+    QCheckBox, QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
     QMessageBox, QFileDialog, QInputDialog, QTabWidget
 )
 
@@ -86,7 +88,10 @@ class MainWindow(QMainWindow):
         )
         self.binary_combo.currentTextChanged.connect(self.refresh_preview)
         self.gpu_combo.currentTextChanged.connect(self.refresh_preview)
-        self.update_badge = QLabel("")
+        self.update_badge = QPushButton("")
+        self.update_badge.setFlat(True)
+        self.update_badge.setVisible(False)
+        self.update_badge.clicked.connect(self.on_fetch_latest)
         image_row = QHBoxLayout()
         image_row.setContentsMargins(0, 0, 0, 0)
         image_row.addWidget(self.image_edit, 1)
@@ -112,6 +117,12 @@ class MainWindow(QMainWindow):
         self.lora_section = CollapsibleSection("LoRA adapters", self.lora_panel, collapsed=True)
         left_form.addRow(self.lora_section)
         left_form.addRow("Raw args", self.raw_edit)
+        self.extra_args_edit = QLineEdit()
+        self.extra_args_edit.textChanged.connect(self.refresh_preview)
+        left_form.addRow("Extra podman args", self.extra_args_edit)
+        self.selinux_check = QCheckBox("Disable SELinux labels (--security-opt=label=disable)")
+        self.selinux_check.toggled.connect(self.refresh_preview)
+        left_form.addRow(self.selinux_check)
         self.fetch_btn = QPushButton("Fetch latest build")
         self.fetch_btn.clicked.connect(self.on_fetch_latest)
         left_form.addRow(self.fetch_btn)
@@ -140,6 +151,7 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(configure_tab, "Configure")
         self.monitor_panel = MonitorPanel()
+        self.monitor_panel.enable_metrics_requested.connect(self._on_enable_metrics)
         self.tabs.addTab(self.monitor_panel, "Monitor")
         root.addWidget(self.tabs)
 
@@ -269,6 +281,8 @@ class MainWindow(QMainWindow):
         self.draft_model_edit.setText(p.draft_model or "")
         self.lora_panel.set_loras(p.loras)
         self.raw_edit.setText(p.raw_args)
+        self.extra_args_edit.setText(p.runtime.extra_run_args)
+        self.selinux_check.setChecked(p.runtime.selinux_label_disable)
         for key, w in self._widgets.items():
             w.set_value(w.setting.default)
             if key in p.settings:
@@ -288,8 +302,8 @@ class MainWindow(QMainWindow):
             image=self.image_edit.text(),
             runtime=Runtime(binary=self.binary_combo.currentText(),
                             gpu_mode=self.gpu_combo.currentData(),
-                            selinux_label_disable=self._profile.runtime.selinux_label_disable,
-                            extra_run_args=self._profile.runtime.extra_run_args),
+                            selinux_label_disable=self.selinux_check.isChecked(),
+                            extra_run_args=self.extra_args_edit.text()),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
@@ -393,6 +407,10 @@ class MainWindow(QMainWindow):
         self.on_stop()
         self.on_launch()
 
+    def _on_enable_metrics(self):
+        self._widgets["metrics"].set_value(True)
+        self.on_restart()
+
     def on_fetch_latest(self):
         repo, tag = split_image(self.image_edit.text())
         if not repo:
@@ -422,6 +440,7 @@ class MainWindow(QMainWindow):
         def _on_found(latest: str):
             if latest != current_tag:
                 self.update_badge.setText(f"newer build {latest} available")
+                self.update_badge.setVisible(True)
 
         worker = _UpdateWorker(repo, prefix, parent=self)
         worker.found.connect(_on_found)
@@ -512,7 +531,9 @@ class MainWindow(QMainWindow):
         runtime_txt = (f"binary={p.runtime.binary} gpu_mode={p.runtime.gpu_mode}\n"
                        f"rootless={runtime.is_rootless(p.runtime.binary)}\n"
                        f"{gpu_txt}\nOS={platform.platform()}")
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         return {
+            "generated_at": ts,
             "command": report_mod.redact_secrets(cmd),
             "profile": report_mod.redact_secrets(_json.dumps(profile_to_dict(p), indent=2)),
             "validation": [f"[{i.level}] {i.message}" for i in issues],
@@ -521,6 +542,14 @@ class MainWindow(QMainWindow):
             "image": p.image,
             "logs": report_mod.redact_secrets(self.monitor_panel.log_view.toPlainText()[-4000:]),
         }
+
+    def _save_report(self, md: str) -> Path:
+        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        reports_dir = base_dir() / "reports"
+        reports_dir.mkdir(parents=True, exist_ok=True)
+        out = reports_dir / f"llama-launcher-report-{ts}.md"
+        out.write_text(md)
+        return out
 
     def on_generate_report(self):
         cfg = load_config(base_dir())
@@ -531,12 +560,12 @@ class MainWindow(QMainWindow):
         sections = dlg.selected_sections()
         cfg["report_sections"] = sections
         save_config(cfg, base_dir())
-        md = report_mod.build_report(self.gather_report_data(), sections)
-        from PySide6.QtWidgets import QApplication, QFileDialog
+        data = self.gather_report_data()
+        md = report_mod.build_report(data, sections)
+        from PySide6.QtWidgets import QApplication
         QApplication.clipboard().setText(md)
-        path, _ = QFileDialog.getSaveFileName(self, "Save report", "llama-launcher-report.md")
-        if path:
-            Path(path).write_text(md)
+        saved = self._save_report(md)
+        QMessageBox.information(self, "Report saved", f"Report saved to:\n{saved}")
 
     def closeEvent(self, event):
         if getattr(self, "_really_quit", False) or not self._tray_enabled:

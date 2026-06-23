@@ -53,3 +53,24 @@ def test_loras_roundtrip(qtbot):
     assert len(out.loras) == 1
     assert out.loras[0].path == "/models/lora.gguf"
     assert abs(out.loras[0].scale - 0.5) < 1e-6
+
+
+def test_advanced_podman_settings_roundtrip(qtbot):
+    """load_profile -> current_profile round-trips extra_run_args and selinux_label_disable,
+    and the preview contains the expected flags."""
+    w = MainWindow()
+    qtbot.addWidget(w)
+    p = _profile()
+    p.runtime = Runtime(
+        binary="podman",
+        gpu_mode="cdi",
+        extra_run_args="--cap-add SYS_NICE",
+        selinux_label_disable=True,
+    )
+    w.load_profile(p)
+    out = w.current_profile()
+    assert out.runtime.extra_run_args == "--cap-add SYS_NICE"
+    assert out.runtime.selinux_label_disable is True
+    preview = w.preview_text()
+    assert "--cap-add SYS_NICE" in preview
+    assert "--security-opt=label=disable" in preview

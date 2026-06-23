@@ -28,3 +28,31 @@ def test_append_log(qtbot):
     qtbot.addWidget(p)
     p.append_log("loaded model\n")
     assert "loaded model" in p.log_view.toPlainText()
+
+
+def test_enable_metrics_button_shown_when_metrics_off(qtbot):
+    """'Enable --metrics & relaunch' button is shown (not hidden) when metrics_on is False."""
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.update_stats({"tok_s": None, "prompt_tok_s": None, "kv_pct": None,
+                    "gpus": [], "cpu": "", "mem": "", "uptime": "", "metrics_on": False})
+    assert not p.enable_metrics_btn.isHidden()
+
+
+def test_enable_metrics_button_hidden_when_metrics_on(qtbot):
+    """'Enable --metrics & relaunch' button is hidden when metrics_on is True."""
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.update_stats({"tok_s": 1.0, "prompt_tok_s": None, "kv_pct": None,
+                    "gpus": [], "cpu": "", "mem": "", "uptime": "", "metrics_on": True})
+    assert p.enable_metrics_btn.isHidden()
+
+
+def test_enable_metrics_button_emits_signal(qtbot):
+    """Clicking the button emits enable_metrics_requested signal."""
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.update_stats({"tok_s": None, "prompt_tok_s": None, "kv_pct": None,
+                    "gpus": [], "cpu": "", "mem": "", "uptime": "", "metrics_on": False})
+    with qtbot.waitSignal(p.enable_metrics_requested, timeout=1000):
+        p.enable_metrics_btn.click()
