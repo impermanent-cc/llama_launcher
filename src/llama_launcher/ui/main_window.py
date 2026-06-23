@@ -564,8 +564,9 @@ class MainWindow(QMainWindow):
             "logs": report_mod.redact_secrets(self.monitor_panel.log_view.toPlainText()[-4000:]),
         }
 
-    def _save_report(self, md: str) -> Path:
-        ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    def _save_report(self, md: str, ts: str | None = None) -> Path:
+        if ts is None:
+            ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         reports_dir = base_dir() / "reports"
         reports_dir.mkdir(parents=True, exist_ok=True)
         out = reports_dir / f"llama-launcher-report-{ts}.md"
@@ -585,7 +586,7 @@ class MainWindow(QMainWindow):
         md = report_mod.build_report(data, sections)
         from PySide6.QtWidgets import QApplication
         QApplication.clipboard().setText(md)
-        saved = self._save_report(md)
+        saved = self._save_report(md, data.get("generated_at"))
         QMessageBox.information(self, "Report saved", f"Report saved to:\n{saved}")
 
     def closeEvent(self, event):

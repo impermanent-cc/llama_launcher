@@ -29,7 +29,6 @@ def test_update_badge_is_flat_button(qtbot):
 def test_update_badge_shown_and_clickable_after_newer_build(qtbot, monkeypatch):
     """When run_update_check finds a newer build, the badge shows the tag and clicking
     it triggers on_fetch_latest (verified by capturing registry.fetch_latest)."""
-    fetched = {}
     monkeypatch.setattr(mw.registry, "fetch_latest",
                         lambda repo, prefix, timeout=10.0: "server-cuda12-b9999")
     w = mw.MainWindow(); qtbot.addWidget(w)
