@@ -4,7 +4,10 @@ import subprocess
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess:
-    return subprocess.run(args, capture_output=True, text=True, check=False)
+    try:
+        return subprocess.run(args, capture_output=True, text=True, check=False)
+    except OSError as exc:
+        return subprocess.CompletedProcess(args, returncode=127, stdout="", stderr=str(exc))
 
 
 def binary_available(binary: str) -> bool:

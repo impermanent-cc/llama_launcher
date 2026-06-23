@@ -2,6 +2,7 @@ import os
 import subprocess
 from pathlib import Path
 
+from PySide6.QtCore import QThread, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
     QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
@@ -28,6 +29,23 @@ from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
 from llama_launcher.ui.widgets.collapsible import CollapsibleSection
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+
+
+class _UpdateWorker(QThread):
+    found = Signal(str)
+
+    def __init__(self, repo: str, prefix: str, parent=None):
+        super().__init__(parent)
+        self._repo = repo
+        self._prefix = prefix
+
+    def run(self):
+        try:
+            tag = registry.fetch_latest(self._repo, self._prefix)
+            if tag:
+                self.found.emit(tag)
+        except Exception:
+            pass
 
 
 def base_dir():
@@ -179,17 +197,21 @@ class MainWindow(QMainWindow):
 
         from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QStyle
         self._really_quit = False
-        self.tray = QSystemTrayIcon(self)
-        self.tray.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
-        self.tray.setToolTip("Llama Launcher")
-        menu = QMenu()
-        menu.addAction("Show", self.showNormal)
-        menu.addAction("Launch", self.on_launch)
-        menu.addAction("Stop", self.on_stop)
-        menu.addSeparator()
-        menu.addAction("Quit", self.quit_app)
-        self.tray.setContextMenu(menu)
-        self.tray.show()
+        self._tray_enabled = QSystemTrayIcon.isSystemTrayAvailable()
+        if self._tray_enabled:
+            self.tray = QSystemTrayIcon(self)
+            self.tray.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+            self.tray.setToolTip("Llama Launcher")
+            menu = QMenu()
+            menu.addAction("Show", self.showNormal)
+            menu.addAction("Launch", self.on_launch)
+            menu.addAction("Stop", self.on_stop)
+            menu.addSeparator()
+            menu.addAction("Quit", self.quit_app)
+            self.tray.setContextMenu(menu)
+            self.tray.show()
+        else:
+            self.tray = None
 
         self.lora_panel.set_browse_resolver(
             lambda h: host_to_container(h, self.mounts_panel.mounts())
@@ -236,6 +258,7 @@ class MainWindow(QMainWindow):
         line_edit.setText(container_path)
 
     def load_profile(self, p: Profile) -> None:
+        self._stop_log_follower()
         self._profile = p
         self.image_edit.setText(p.image)
         self.model_edit.setText(p.model)
@@ -288,6 +311,7 @@ class MainWindow(QMainWindow):
         self.profile_combo.addItems(list(self._profiles.keys()))
 
     def _on_pick_profile(self, _index):
+        self._stop_log_follower()
         name = self.profile_combo.currentText()
         if name in self._profiles:
             self.load_profile(self._profiles[name])
@@ -363,6 +387,7 @@ class MainWindow(QMainWindow):
         from llama_launcher.core.spec import slugify
         p = self.current_profile()
         runtime.stop(f"llama-{slugify(self._profile.name)}", p.runtime.binary)
+        self._stop_log_follower()
 
     def on_restart(self):
         self.on_stop()
@@ -388,16 +413,20 @@ class MainWindow(QMainWindow):
         return None
 
     def run_update_check(self):
-        from llama_launcher.services.registry import split_image as _si, fetch_latest
-        repo, tag = _si(self.image_edit.text())
+        repo, tag = split_image(self.image_edit.text())
         if not repo or not tag:
             return
-        try:
-            latest = fetch_latest(repo, variant_prefix(tag))   # network; called off the UI ideally
-            if latest and latest != tag:
+        prefix = variant_prefix(tag)
+        current_tag = tag
+
+        def _on_found(latest: str):
+            if latest != current_tag:
                 self.update_badge.setText(f"newer build {latest} available")
-        except Exception:
-            pass
+
+        worker = _UpdateWorker(repo, prefix, parent=self)
+        worker.found.connect(_on_found)
+        self._update_worker = worker
+        worker.start()
 
     def update_status(self):
         from llama_launcher.core.spec import slugify
@@ -462,7 +491,10 @@ class MainWindow(QMainWindow):
 
     def open_web_ui(self):
         port = self.current_profile().settings.get("port", 8080)
-        subprocess.Popen(["xdg-open", f"http://127.0.0.1:{port}"], start_new_session=True)
+        try:
+            subprocess.Popen(["xdg-open", f"http://127.0.0.1:{port}"], start_new_session=True)
+        except OSError:
+            QMessageBox.warning(self, "Open Web UI", "Could not open browser (xdg-open not found).")
 
     def export_sh(self, path: str):
         cmd = " ".join(build_command(self.current_profile()))
@@ -507,15 +539,19 @@ class MainWindow(QMainWindow):
             Path(path).write_text(md)
 
     def closeEvent(self, event):
-        if getattr(self, "_really_quit", False):
+        if getattr(self, "_really_quit", False) or not self._tray_enabled:
             self._stop_log_follower()
             event.accept()
+            if not self._tray_enabled:
+                from PySide6.QtWidgets import QApplication
+                QApplication.instance().quit()
         else:
             event.ignore()
             self.hide()
 
     def quit_app(self):
         self._really_quit = True
+        self._stop_log_follower()
         from PySide6.QtWidgets import QApplication
         QApplication.instance().quit()
 

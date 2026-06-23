@@ -21,6 +21,17 @@ def test_open_web_ui_invokes_xdg(qtbot, monkeypatch):
     assert captured["argv"][1] == "http://127.0.0.1:8080"
 
 
+def test_open_web_ui_oserror_shows_warning(qtbot, monkeypatch):
+    monkeypatch.setattr(mw.subprocess, "Popen", lambda argv, **k: (_ for _ in ()).throw(OSError("not found")))
+    warned = {}
+    monkeypatch.setattr(mw.QMessageBox, "warning", lambda *a, **k: warned.setdefault("called", True))
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    w.load_profile(_profile())
+    # Should not raise; warning should be shown
+    w.open_web_ui()
+    assert warned.get("called") is True
+
+
 def test_export_sh(qtbot, tmp_path):
     w = mw.MainWindow(); qtbot.addWidget(w)
     w.load_profile(_profile())
