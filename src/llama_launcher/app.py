@@ -67,6 +67,7 @@ def main(argv=None) -> int:
     from llama_launcher.ui.main_window import MainWindow
 
     app = QApplication([sys.argv[0]] + unknown)
+    app.setQuitOnLastWindowClosed(False)
     # Identity so the KDE/Wayland taskbar maps the window to the .desktop entry
     # (correct icon + pin-to-taskbar). Must match the installed .desktop basename.
     app.setApplicationName("Llama Launcher")
