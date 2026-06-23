@@ -163,6 +163,20 @@ class MainWindow(QMainWindow):
 
         self._log_proc = None
 
+        from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QStyle
+        self._really_quit = False
+        self.tray = QSystemTrayIcon(self)
+        self.tray.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+        self.tray.setToolTip("Llama Launcher")
+        menu = QMenu()
+        menu.addAction("Show", self.showNormal)
+        menu.addAction("Launch", self.on_launch)
+        menu.addAction("Stop", self.on_stop)
+        menu.addSeparator()
+        menu.addAction("Quit", self.quit_app)
+        self.tray.setContextMenu(menu)
+        self.tray.show()
+
         self.lora_panel.set_browse_resolver(
             lambda h: host_to_container(h, self.mounts_panel.mounts())
         )
@@ -410,6 +424,19 @@ class MainWindow(QMainWindow):
         cmd = " ".join(build_command(self.current_profile()))
         Path(path).write_text(f"#!/usr/bin/env bash\n{cmd}\n")
         os.chmod(path, 0o755)
+
+    def closeEvent(self, event):
+        if getattr(self, "_really_quit", False):
+            self._stop_log_follower()
+            event.accept()
+        else:
+            event.ignore()
+            self.hide()
+
+    def quit_app(self):
+        self._really_quit = True
+        from PySide6.QtWidgets import QApplication
+        QApplication.instance().quit()
 
     def model_meta_text(self) -> str:
         p = self.current_profile()
