@@ -60,6 +60,9 @@ class MainWindow(QMainWindow):
             self.gpu_combo.addItem(_gpu_label, _gpu_val)
         for w in (self.image_edit, self.model_edit):
             w.textChanged.connect(self.refresh_preview)
+        self.model_edit.textChanged.connect(
+            lambda _: self.model_meta_label.setText(self.model_meta_text())
+        )
         self.binary_combo.currentTextChanged.connect(self.refresh_preview)
         self.gpu_combo.currentTextChanged.connect(self.refresh_preview)
         left_form.addRow("Image", self.image_edit)
@@ -111,14 +114,24 @@ class MainWindow(QMainWindow):
         root.addWidget(self.tabs)
 
         # BOTTOM: preview + buttons (shared, below both tabs)
+        self.model_meta_label = QLabel("")
+        root.addWidget(self.model_meta_label)
+        preview_row = QHBoxLayout()
         self.preview = QPlainTextEdit(); self.preview.setReadOnly(True)
+        preview_row.addWidget(self.preview, 1)
+        self.export_sh_btn = QPushButton("Export .sh")
+        self.export_sh_btn.clicked.connect(self._on_export_sh)
+        preview_row.addWidget(self.export_sh_btn)
         root.addWidget(QLabel("Command preview:"))
-        root.addWidget(self.preview)
+        root.addLayout(preview_row)
         buttons = QHBoxLayout()
         self.launch_btn = QPushButton("▶ Launch")
         self.stop_btn = QPushButton("■ Stop")
         self.restart_btn = QPushButton("⟳ Restart")
-        for b in (self.launch_btn, self.stop_btn, self.restart_btn):
+        self.web_ui_btn = QPushButton("Open Web UI")
+        self.web_ui_btn.setEnabled(False)
+        self.web_ui_btn.clicked.connect(self.open_web_ui)
+        for b in (self.launch_btn, self.stop_btn, self.restart_btn, self.web_ui_btn):
             buttons.addWidget(b)
         root.addLayout(buttons)
 
@@ -202,6 +215,7 @@ class MainWindow(QMainWindow):
             w.set_value(w.setting.default)
             if key in p.settings:
                 w.set_value(p.settings[key])
+        self.model_meta_label.setText(self.model_meta_text())
         self.refresh_preview()
 
     def current_profile(self) -> Profile:
@@ -332,11 +346,13 @@ class MainWindow(QMainWindow):
         p = self.current_profile()
         if not runtime.binary_available(p.runtime.binary):
             self.status_label.setText("● stopped")
+            self.web_ui_btn.setEnabled(False)
             return
         name = f"llama-{slugify(self._profile.name)}"
         state = runtime.container_state(name, p.runtime.binary)
         ok = health.health_ok(p.settings.get("port", 8080)) if state == "running" else False
         self.status_label.setText("● " + health.derive_status(state, ok))
+        self.web_ui_btn.setEnabled(state == "running")
         if state == "running":
             self.monitor_panel.update_stats(self.collect_monitor_data())
 
@@ -379,6 +395,12 @@ class MainWindow(QMainWindow):
         if self._log_proc is not None:
             self._log_proc.kill()
             self._log_proc = None
+
+    def _on_export_sh(self):
+        path, _ = QFileDialog.getSaveFileName(self, "Export shell script", "run.sh",
+                                              "Shell scripts (*.sh);;All files (*)")
+        if path:
+            self.export_sh(path)
 
     def open_web_ui(self):
         port = self.current_profile().settings.get("port", 8080)
