@@ -68,7 +68,14 @@ class MainWindow(QMainWindow):
         )
         self.binary_combo.currentTextChanged.connect(self.refresh_preview)
         self.gpu_combo.currentTextChanged.connect(self.refresh_preview)
-        left_form.addRow("Image", self.image_edit)
+        self.update_badge = QLabel("")
+        image_row = QHBoxLayout()
+        image_row.setContentsMargins(0, 0, 0, 0)
+        image_row.addWidget(self.image_edit, 1)
+        image_row.addWidget(self.update_badge)
+        image_widget = QWidget()
+        image_widget.setLayout(image_row)
+        left_form.addRow("Image", image_widget)
         left_form.addRow("Model", self._field_with_browse(self.model_edit))
         left_form.addRow("Runtime", self.binary_combo)
         left_form.addRow("GPU", self.gpu_combo)
@@ -191,6 +198,12 @@ class MainWindow(QMainWindow):
         self._status_timer.setInterval(2000)
         self._status_timer.timeout.connect(self.update_status)
         self._status_timer.start()
+
+        if load_config(base_dir()).get("update_check", True):
+            self._update_timer = QTimer(self)
+            self._update_timer.setSingleShot(True)
+            self._update_timer.timeout.connect(self.run_update_check)
+            self._update_timer.start(3000)
 
     def _field_with_browse(self, line_edit: QLineEdit) -> QWidget:
         container = QWidget()
@@ -359,6 +372,28 @@ class MainWindow(QMainWindow):
         latest = registry.fetch_latest(repo, prefix)
         if latest:
             self.image_edit.setText(f"{repo}:{latest}")
+
+    def check_for_update(self, tags: list[str]) -> str | None:
+        repo, tag = split_image(self.image_edit.text())
+        if not tag:
+            return None
+        prefix = variant_prefix(tag)
+        latest = registry.latest_build_tag(tags, prefix)
+        if latest and latest != tag:
+            return latest
+        return None
+
+    def run_update_check(self):
+        from llama_launcher.services.registry import split_image as _si, fetch_latest
+        repo, tag = _si(self.image_edit.text())
+        if not repo or not tag:
+            return
+        try:
+            latest = fetch_latest(repo, variant_prefix(tag))   # network; called off the UI ideally
+            if latest and latest != tag:
+                self.update_badge.setText(f"newer build {latest} available")
+        except Exception:
+            pass
 
     def update_status(self):
         from llama_launcher.core.spec import slugify
