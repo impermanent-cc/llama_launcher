@@ -41,3 +41,44 @@ def test_gather_report_data_redacts_logs(qtbot, monkeypatch):
     data = w.gather_report_data()
     assert "SEKRET" not in data["logs"], "api-key secret leaked from logs into report data"
     assert "BEARTOKEN" not in data["logs"], "bearer token leaked from logs into report data"
+
+
+def test_save_report_writes_file_and_contains_timestamp(qtbot, tmp_path, monkeypatch):
+    """_save_report() writes a file under <base_dir>/reports/ with the right name and
+    the markdown contains the _Generated: header."""
+    monkeypatch.setattr(mw, "base_dir", lambda: tmp_path)
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    md = "# Llama Launcher diagnostic report\n\n_Generated: 20260101-120000_\n\nsome content"
+    saved = w._save_report(md)
+    # File exists under reports/ dir
+    import glob
+    matches = list((tmp_path / "reports").glob("llama-launcher-report-*.md"))
+    assert len(matches) == 1
+    assert matches[0] == saved
+    assert "_Generated:" in matches[0].read_text()
+
+
+def test_on_generate_report_auto_saves(qtbot, tmp_path, monkeypatch):
+    """on_generate_report() auto-saves to reports/ without requiring QFileDialog."""
+    monkeypatch.setattr(mw, "base_dir", lambda: tmp_path)
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.runtime, "is_rootless", lambda b: False)
+    # Stub dialogs to avoid blocking
+    monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: None)
+    # Stub ReportDialog to always return accepted with all sections enabled
+    from llama_launcher.core.report import REPORT_SECTIONS
+    class _FakeDialog:
+        def __init__(self, *a, **k): pass
+        def exec(self): return True
+        def selected_sections(self): return {s: True for s in REPORT_SECTIONS}
+    monkeypatch.setattr(mw, "ReportDialog", _FakeDialog)
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    w.load_profile(Profile(name="rpt", image="img", runtime=Runtime(binary="podman"),
+                           mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
+                           model="/models/m.gguf", settings={"port": 8080}))
+    w.on_generate_report()
+    matches = list((tmp_path / "reports").glob("llama-launcher-report-*.md"))
+    assert len(matches) == 1
+    content = matches[0].read_text()
+    assert "_Generated:" in content

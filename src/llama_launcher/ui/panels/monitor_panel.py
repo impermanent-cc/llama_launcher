@@ -1,13 +1,20 @@
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPlainTextEdit
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPlainTextEdit, QPushButton
 
 
 class MonitorPanel(QWidget):
+    enable_metrics_requested = Signal()
+
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         self.summary = QLabel("No server running.")
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
+        self.enable_metrics_btn = QPushButton("Enable --metrics & relaunch")
+        self.enable_metrics_btn.setVisible(False)
+        self.enable_metrics_btn.clicked.connect(self.enable_metrics_requested)
+        layout.addWidget(self.enable_metrics_btn)
         layout.addWidget(QLabel("Logs:"))
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
@@ -19,7 +26,9 @@ class MonitorPanel(QWidget):
         return self._last
 
     def update_stats(self, data: dict):
-        if not data.get("metrics_on"):
+        metrics_on = bool(data.get("metrics_on"))
+        self.enable_metrics_btn.setVisible(not metrics_on)
+        if not metrics_on:
             speed = "throughput: (enable --metrics to see tok/s)"
         else:
             tok = data.get("tok_s")
