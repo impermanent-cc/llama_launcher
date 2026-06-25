@@ -46,6 +46,62 @@ def test_name_field_is_saved(qtbot, tmp_path, monkeypatch):
     assert "Renamed Build" in names
 
 
+def test_on_launch_does_not_follow_logs_before_container_exists(qtbot, monkeypatch):
+    """The container is created asynchronously by the launched terminal, so right
+    after on_launch() it does not exist yet. Attaching `podman logs -f` then just
+    captures 'no such container' and dies, leaving the logs pane stuck on it. So
+    on_launch must NOT start a follower against a not-yet-existing container."""
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    monkeypatch.setattr(mw.terminal, "launch", lambda *a, **k: None)
+    monkeypatch.setattr(mw.runtime, "container_exists", lambda name, binary: False)
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w.load_profile(_profile())
+    w.on_launch()
+    assert w._log_proc is None
+
+
+def test_start_log_follower_skips_when_container_absent(qtbot, monkeypatch):
+    monkeypatch.setattr(mw.runtime, "container_exists", lambda name, binary: False)
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._start_log_follower()
+    assert w._log_proc is None
+
+
+def test_update_status_starts_follower_when_running(qtbot, monkeypatch):
+    """Once the container is actually running and no follower is attached, the
+    status poll starts one (logs replay from the start, so nothing is missed)."""
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
+    monkeypatch.setattr(mw.health, "health_ok", lambda port: True)
+    monkeypatch.setattr(mw.MainWindow, "collect_monitor_data", lambda self: {})
+    monkeypatch.setattr(mw.MainWindow, "_log_follower_active", lambda self: False)
+    calls = []
+    monkeypatch.setattr(mw.MainWindow, "_start_log_follower", lambda self: calls.append(1))
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    calls.clear()
+    w.update_status()
+    assert calls == [1]
+
+
+def test_update_status_does_not_restart_active_follower(qtbot, monkeypatch):
+    """A follower already streaming must not be re-spawned on every poll."""
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
+    monkeypatch.setattr(mw.health, "health_ok", lambda port: True)
+    monkeypatch.setattr(mw.MainWindow, "collect_monitor_data", lambda self: {})
+    monkeypatch.setattr(mw.MainWindow, "_log_follower_active", lambda self: True)
+    calls = []
+    monkeypatch.setattr(mw.MainWindow, "_start_log_follower", lambda self: calls.append(1))
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    calls.clear()
+    w.update_status()
+    assert calls == []
+
+
 def test_on_launch_invokes_terminal(qtbot, monkeypatch):
     captured = {}
     monkeypatch.setattr(mw.terminal, "launch",
