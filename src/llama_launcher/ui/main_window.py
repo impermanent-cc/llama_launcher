@@ -448,7 +448,10 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "VRAM check", warn)
         argv = build_command(self.current_profile())
         terminal.launch(argv)
-        self._start_log_follower()
+        # Don't attach the log follower here: the terminal creates the container
+        # asynchronously, so it doesn't exist yet. update_status() starts the
+        # follower once the container is actually running (podman logs replays
+        # from the start, so no early output is missed).
 
     def _spawn_async(self, argv: list[str], on_done=None):
         """Run argv in the background via QProcess so the UI thread never blocks.
@@ -558,6 +561,8 @@ class MainWindow(QMainWindow):
         self.status_label.setText("● " + health.derive_status(state, ok))
         self.web_ui_btn.setEnabled(state == "running")
         if state == "running":
+            if not self._log_follower_active():
+                self._start_log_follower()
             self.monitor_panel.update_stats(self.collect_monitor_data())
 
     def collect_monitor_data(self) -> dict:
@@ -582,11 +587,22 @@ class MainWindow(QMainWindow):
             "metrics_on": metrics_on,
         }
 
+    def _log_follower_active(self) -> bool:
+        from PySide6.QtCore import QProcess
+        return (self._log_proc is not None
+                and self._log_proc.state() != QProcess.NotRunning)
+
     def _start_log_follower(self):
         from PySide6.QtCore import QProcess
         self._stop_log_follower()
         p = self.current_profile()
         name = self._container_name()
+        # Attaching `podman logs -f` before the container exists just prints
+        # "no such container" and exits, stranding the logs pane on that error.
+        # Skip until it exists; update_status() retries once it's running and
+        # `podman logs` replays from the beginning, so no early output is lost.
+        if not runtime.container_exists(name, p.runtime.binary):
+            return
         proc = QProcess(self)
         proc.setProcessChannelMode(QProcess.MergedChannels)
         proc.readyReadStandardOutput.connect(
