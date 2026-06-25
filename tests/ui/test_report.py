@@ -43,6 +43,49 @@ def test_gather_report_data_redacts_logs(qtbot, monkeypatch):
     assert "BEARTOKEN" not in data["logs"], "bearer token leaked from logs into report data"
 
 
+def test_gather_report_data_includes_metrics(qtbot, monkeypatch):
+    """When --metrics is enabled and the server responds, gather_report_data()
+    captures throughput and KV-cache usage in the report's metrics section."""
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.runtime, "is_rootless", lambda b: False)
+    monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda port, timeout=1.0: {
+        "llamacpp:predicted_tokens_seconds": 42.0,
+        "llamacpp:prompt_tokens_seconds": 800.0,
+    })
+    monkeypatch.setattr(mw.metrics, "fetch_slots", lambda port, timeout=1.0: [
+        {"n_ctx": 100, "n_prompt_tokens_processed": 25},
+    ])
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    w.load_profile(Profile(name="m", image="img", runtime=Runtime(binary="podman"),
+                           mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
+                           model="/models/m.gguf",
+                           settings={"port": 8080, "metrics": True}))
+    data = w.gather_report_data()
+    assert "metrics" in data
+    assert "42" in data["metrics"]       # generation tok/s
+    assert "25%" in data["metrics"]      # KV usage = 25 / 100
+
+
+def test_gather_report_data_metrics_off_note(qtbot, monkeypatch):
+    """With --metrics off, the report explains how to enable it and makes no
+    network call to /metrics."""
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.runtime, "is_rootless", lambda b: False)
+    hits = {"n": 0}
+    monkeypatch.setattr(mw.metrics, "fetch_metrics",
+                        lambda *a, **k: hits.__setitem__("n", hits["n"] + 1) or {})
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    w.load_profile(Profile(name="m", image="img", runtime=Runtime(binary="podman"),
+                           mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
+                           model="/models/m.gguf", settings={"port": 8080}))
+    data = w.gather_report_data()
+    assert "metrics" in data
+    assert "--metrics" in data["metrics"]
+    assert hits["n"] == 0
+
+
 def test_save_report_writes_file_and_contains_timestamp(qtbot, tmp_path, monkeypatch):
     """_save_report() writes a file under <base_dir>/reports/ with the right name and
     the markdown contains the _Generated: header."""

@@ -8,6 +8,7 @@ _LABELS = {
     "command": "Command + profile (API key redacted)",
     "validation": "Validation + status history",
     "runtime": "Runtime + GPU + host",
+    "metrics": "Server metrics (tok/s, KV cache)",
     "logs": "Image build + recent logs",
 }
 

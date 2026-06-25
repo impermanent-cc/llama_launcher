@@ -12,6 +12,23 @@ def _profile():
     )
 
 
+def test_name_field_drives_profile_name_and_container(qtbot):
+    """Typing in the Name field sets the profile name (and thus --name/container)."""
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.name_edit.setText("My Cool Model")
+    assert w.current_profile().name == "My Cool Model"
+    assert w._container_name() == "llama-my-cool-model"
+    assert "--name llama-my-cool-model" in w.preview_text()
+
+
+def test_load_profile_populates_name_field(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.load_profile(_profile())          # name="UI Test"
+    assert w.name_edit.text() == "UI Test"
+
+
 def test_window_constructs(qtbot):
     from llama_launcher.core.settings_catalog import CATALOG
     w = MainWindow()
