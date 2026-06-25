@@ -41,7 +41,7 @@ GenericName=Local LLM launcher
 Comment=Build and launch local llama.cpp servers in a terminal
 Exec=$VENV_PY -m llama_launcher.app
 Path=$REPO
-Icon=llama-launcher
+Icon=$ICON_FILE
 Terminal=false
 Categories=Development;Utility;
 StartupNotify=true
@@ -49,7 +49,13 @@ StartupWMClass=llama-launcher
 EOF
 chmod 644 "$DESKTOP_FILE"
 
+# Refresh the desktop and icon caches so a *changed* icon actually shows up.
+# Without this, KDE/GNOME keep serving the previously-cached (or absent) icon
+# until the next login. All best-effort: missing tools must not fail the install.
+touch "$ICON_DIR" "$DATA_DIR/icons/hicolor" 2>/dev/null || true
 update-desktop-database "$DESKTOP_DIR" 2>/dev/null || true
+gtk-update-icon-cache -f -t "$DATA_DIR/icons/hicolor" 2>/dev/null || true
+kbuildsycoca6 2>/dev/null || kbuildsycoca5 2>/dev/null || true
 
 echo "Installed:"
 echo "  $DESKTOP_FILE"

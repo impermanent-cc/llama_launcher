@@ -204,12 +204,20 @@ class MainWindow(QMainWindow):
 
         # profile bar (added to the top of root via insertLayout)
         bar = QHBoxLayout()
+        self.name_edit = QLineEdit(self._profile.name)
+        self.name_edit.setPlaceholderText("Profile name")
+        self.name_edit.setToolTip(
+            "Name for this profile. Also sets the container name "
+            "(llama-<name>), so pick something filesystem-friendly.")
+        self.name_edit.textChanged.connect(self.refresh_preview)
         self.profile_combo = NoWheelComboBox()
         self.save_btn = QPushButton("Save")
         self.save_as_btn = QPushButton("Save As")
         self.delete_btn = QPushButton("Delete")
         self.report_btn = QPushButton("Generate report")
         self.status_label = QLabel("● stopped")
+        bar.addWidget(QLabel("Name"))
+        bar.addWidget(self.name_edit, 1)
         bar.addWidget(self.profile_combo, 1)
         for b in (self.save_btn, self.save_as_btn, self.delete_btn, self.report_btn):
             bar.addWidget(b)
@@ -278,8 +286,13 @@ class MainWindow(QMainWindow):
             self._update_timer.timeout.connect(self.run_update_check)
             self._update_timer.start(3000)
 
+    def _profile_name(self) -> str:
+        """Current profile name from the Name field, falling back to a default
+        so the container name / preview are never empty."""
+        return self.name_edit.text().strip() or "New Profile"
+
     def _container_name(self) -> str:
-        return f"llama-{slugify(self._profile.name)}"
+        return f"llama-{slugify(self._profile_name())}"
 
     def _field_with_browse(self, line_edit: QLineEdit) -> QWidget:
         container = QWidget()
@@ -312,6 +325,7 @@ class MainWindow(QMainWindow):
     def load_profile(self, p: Profile) -> None:
         self._stop_log_follower()
         self._profile = p
+        self.name_edit.setText(p.name)
         self.image_edit.setText(p.image)
         self.model_edit.setText(p.model)
         self.binary_combo.setCurrentText(p.runtime.binary)
@@ -338,7 +352,7 @@ class MainWindow(QMainWindow):
         # port is always stored
         settings["port"] = self._widgets["port"].value()
         return Profile(
-            name=self._profile.name,
+            name=self._profile_name(),
             image=self.image_edit.text(),
             runtime=Runtime(binary=self.binary_combo.currentText(),
                             gpu_mode=self.gpu_combo.currentData(),
@@ -371,16 +385,17 @@ class MainWindow(QMainWindow):
             self.load_profile(self._profiles[name])
 
     def save_current_profile(self):
-        p = self.current_profile()
-        p.name = self._profile.name
+        p = self.current_profile()       # name comes from the Name field
+        self._profile = p
         save_profile(p, base_dir())
         self._reload_profile_list()
         self.profile_combo.setCurrentText(p.name)
 
     def save_as_profile(self):
-        name, ok = QInputDialog.getText(self, "Save As", "Profile name:")
+        name, ok = QInputDialog.getText(self, "Save As", "Profile name:",
+                                        text=self._profile_name())
         if ok and name:
-            self._profile.name = name
+            self.name_edit.setText(name)
             self.save_current_profile()
 
     def delete_current_profile(self):
@@ -622,9 +637,42 @@ class MainWindow(QMainWindow):
             "validation": [f"[{i.level}] {i.message}" for i in issues],
             "status_history": [self.status_label.text()],
             "runtime": runtime_txt,
+            "metrics": self._metrics_report_text(p),
             "image": p.image,
             "logs": report_mod.redact_secrets(self.monitor_panel.log_view.toPlainText()[-4000:]),
         }
+
+    def _metrics_report_text(self, p: Profile) -> str:
+        """Snapshot of the live /metrics endpoint for the diagnostic report.
+
+        Returns a note (and makes no network call) when --metrics is off, so the
+        report explains why throughput is missing instead of silently omitting it.
+        """
+        from llama_launcher.services.metrics import kv_usage_ratio
+        port = p.settings.get("port", 8080)
+        if not p.settings.get("metrics"):
+            return ("(--metrics not enabled in this profile — turn it on and relaunch "
+                    "to capture tok/s and KV-cache usage here)")
+        m = metrics.fetch_metrics(port)
+        slots = metrics.fetch_slots(port)
+        if not m and not slots:
+            return (f"(no metrics returned from http://127.0.0.1:{port}/metrics — "
+                    "generate the report while the server is running with --metrics)")
+        lines = []
+        gen = m.get("llamacpp:predicted_tokens_seconds")
+        if gen is not None:
+            lines.append(f"generation: {gen:.2f} tok/s")
+        prompt = m.get("llamacpp:prompt_tokens_seconds")
+        if prompt is not None:
+            lines.append(f"prompt: {prompt:.2f} tok/s")
+        kv = kv_usage_ratio(slots)
+        if kv is not None:
+            lines.append(f"KV cache usage: {kv * 100:.0f}%")
+        if m:
+            if lines:
+                lines.append("")
+            lines += [f"{k} {v:g}" for k, v in sorted(m.items())]
+        return "\n".join(lines)
 
     def _save_report(self, md: str, ts: str | None = None) -> Path:
         if ts is None:

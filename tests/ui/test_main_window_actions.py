@@ -32,6 +32,20 @@ def test_save_and_reload_profile(qtbot, tmp_path, monkeypatch):
     assert "Act" in names
 
 
+def test_name_field_is_saved(qtbot, tmp_path, monkeypatch):
+    """A name typed into the Name field is the name the profile saves under."""
+    monkeypatch.setattr(mw, "base_dir", lambda: tmp_path)
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w.load_profile(_profile())            # name="Act"
+    w.name_edit.setText("Renamed Build")
+    w.save_current_profile()
+    w2 = mw.MainWindow()
+    qtbot.addWidget(w2)
+    names = [w2.profile_combo.itemText(i) for i in range(w2.profile_combo.count())]
+    assert "Renamed Build" in names
+
+
 def test_on_launch_invokes_terminal(qtbot, monkeypatch):
     captured = {}
     monkeypatch.setattr(mw.terminal, "launch",

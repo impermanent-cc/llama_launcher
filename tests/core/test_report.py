@@ -35,6 +35,31 @@ def test_build_report_redacts_logs():
     assert "SEKRET2" not in report, "build_report did not redact api-key in logs section"
 
 
+def test_metrics_is_a_report_section():
+    assert "metrics" in REPORT_SECTIONS
+
+
+def test_build_report_includes_metrics_section():
+    data = {
+        "command": "podman run ...",
+        "profile": "{}",
+        "validation": [],
+        "status_history": [],
+        "runtime": "rt",
+        "image": "img",
+        "logs": "log",
+        "metrics": "generation: 42.00 tok/s\nKV cache usage: 25%",
+    }
+    report = build_report(data, {s: True for s in REPORT_SECTIONS})
+    assert "## Metrics" in report
+    assert "42.00 tok/s" in report
+    assert "KV cache usage: 25%" in report
+
+    # togglable like every other section
+    without = build_report(data, {"runtime": True})
+    assert "## Metrics" not in without
+
+
 def test_build_report_sections_toggle():
     data = {
         "generated_at": "2026-06-22T10:00:00",
