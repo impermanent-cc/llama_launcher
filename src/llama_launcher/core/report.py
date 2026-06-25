@@ -1,6 +1,6 @@
 import re
 
-REPORT_SECTIONS = ("command", "validation", "runtime", "logs")
+REPORT_SECTIONS = ("command", "validation", "runtime", "metrics", "logs")
 
 _REDACTIONS = (
     re.compile(r"(--api-key[= ])(\S+)"),
@@ -38,6 +38,9 @@ def build_report(data: dict, sections: dict) -> str:
     if sections.get("runtime"):
         lines += ["## Runtime / GPU / host", "",
                   "```", data.get("runtime", ""), "```", ""]
+    if sections.get("metrics"):
+        lines += ["## Metrics", "",
+                  "```", data.get("metrics", ""), "```", ""]
     if sections.get("logs"):
         lines += ["## Image & recent logs", "",
                   f"Image: `{data.get('image', '')}`", "",
