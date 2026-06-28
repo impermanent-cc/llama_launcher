@@ -22,3 +22,22 @@ def host_to_container(host_path: str, mounts) -> str | None:
             rel = host_path[len(prefix):]
             return container.rstrip("/") + "/" + rel
     return None
+
+
+def container_to_host(container_path: str, mounts) -> str | None:
+    """Inverse of host_to_container: map a container-side path back to the host.
+
+    Exact match -> mount.host; under container + '/' -> host + '/' + relative.
+    First matching mount wins; None if under no mount; empty mounts skipped.
+    """
+    for m in mounts:
+        host = (m.host or "").rstrip("/")
+        container = (m.container or "").rstrip("/")
+        if not host or not container:
+            continue
+        if container_path == container:
+            return host
+        prefix = container + "/"
+        if container_path.startswith(prefix):
+            return host + "/" + container_path[len(prefix):]
+    return None
