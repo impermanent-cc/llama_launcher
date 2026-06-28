@@ -41,3 +41,12 @@ def test_speculative_decoding_group():
     for k in ("spec-type", "spec-draft-ngl", "spec-draft-n-max",
               "spec-draft-n-min", "cache-type-k-draft", "cache-type-v-draft"):
         assert CATALOG[k].group == "Speculative Decoding", k
+
+
+def test_gpu_additions_and_split_mode_tensor():
+    from llama_launcher.core.settings_catalog import CATALOG
+    assert CATALOG["no-mmproj-offload"].type == "bool"
+    assert CATALOG["no-mmproj-offload"].default is False
+    assert CATALOG["override-tensor"].type == "string"
+    assert "-ot" in CATALOG["override-tensor"].aliases
+    assert CATALOG["split-mode"].enum == ("none", "layer", "row", "tensor")

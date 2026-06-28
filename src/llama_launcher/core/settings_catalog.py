@@ -69,9 +69,10 @@ _ALL = [
             tooltip="Lock the model in RAM so the OS never swaps it out, keeping latency "
                     "steady. Needs enough RAM and the privilege to lock memory."),
     Setting("split-mode", "--split-mode", "enum", "layer", "GPU & Memory", ("-sm",),
-            enum=("none", "layer", "row"),
+            enum=("none", "layer", "row", "tensor"),
             tooltip="How to split the model across multiple GPUs. 'layer' (default) splits "
-                    "by layer; 'row' splits tensors by row; 'none' uses a single GPU only."),
+                    "by layer; 'row' splits tensors by row; 'tensor' splits weights and KV "
+                    "(experimental); 'none' uses a single GPU only."),
     Setting("tensor-split", "--tensor-split", "string", "", "GPU & Memory", ("-ts",),
             tooltip="Proportions for spreading the model across GPUs, e.g. '3,1' puts 75% on "
                     "GPU0 and 25% on GPU1. Empty = split evenly."),
@@ -84,6 +85,13 @@ _ALL = [
     Setting("no-kv-offload", "--no-kv-offload", "bool", False, "GPU & Memory", (),
             tooltip="Keep the KV cache in system RAM instead of GPU VRAM. Frees VRAM for "
                     "weights but makes generation slower."),
+    Setting("no-mmproj-offload", "--no-mmproj-offload", "bool", False, "GPU & Memory", (),
+            tooltip="Keep the multimodal (vision/audio) projector on the CPU instead of the "
+                    "GPU. llama.cpp offloads it by default; enable this to save VRAM for the "
+                    "main model."),
+    Setting("override-tensor", "--override-tensor", "string", "", "GPU & Memory", ("-ot",),
+            tooltip="Map tensor-name patterns to buffer types, e.g. keep MoE experts on CPU "
+                    "with 'exps=CPU'. Comma-separated for multiple. Empty = no override."),
 
     # Performance & Batching
     Setting("threads", "--threads", "int", -1, "Performance & Batching", ("-t",), -1, 256, 1,

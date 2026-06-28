@@ -117,3 +117,15 @@ def test_draft_cache_types_render():
     text = " ".join(build_command(p))
     assert "--cache-type-k-draft q8_0" in text
     assert "--spec-draft-n-min 1" in text
+
+
+def test_mmproj_offload_and_override_tensor_render():
+    p = _golden_profile()
+    p.settings["no-mmproj-offload"] = True
+    p.settings["override-tensor"] = "exps=CPU"
+    p.settings["split-mode"] = "tensor"
+    argv = build_command(p)
+    text = " ".join(argv)
+    assert "--no-mmproj-offload" in argv          # bare bool flag
+    assert "--override-tensor exps=CPU" in text
+    assert "--split-mode tensor" in text
