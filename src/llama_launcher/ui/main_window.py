@@ -242,7 +242,13 @@ class MainWindow(QMainWindow):
         self._stop_proc = None
 
         from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QStyle
+        from llama_launcher.ui.icon import app_icon
         self._really_quit = False
+        # Apply our own SVG icon to the window. app.main() also sets it at the
+        # application level, but doing it here means the icon is present even
+        # when the window is constructed without going through main() (tests,
+        # embedding), and is what the window-manager titlebar/Alt-Tab uses.
+        self.setWindowIcon(app_icon())
         # Minimize-to-tray is OPT-IN: enabled only when the user turns it on in
         # config AND the desktop actually provides a system tray. By default,
         # closing the window quits the app (see closeEvent), so a tray-less or
@@ -253,7 +259,10 @@ class MainWindow(QMainWindow):
         )
         if self._minimize_to_tray:
             self.tray = QSystemTrayIcon(self)
-            self.tray.setIcon(self.style().standardIcon(QStyle.SP_ComputerIcon))
+            tray_icon = app_icon()
+            if tray_icon.isNull():   # no asset/theme icon found — keep a visible fallback
+                tray_icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
+            self.tray.setIcon(tray_icon)
             self.tray.setToolTip("Llama Launcher")
             menu = QMenu()
             menu.addAction("Show", self.showNormal)

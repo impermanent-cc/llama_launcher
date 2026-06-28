@@ -65,6 +65,7 @@ def main(argv=None) -> int:
     # GUI path — only import Qt here so that importing app.py never constructs QApplication.
     from PySide6.QtWidgets import QApplication
     from llama_launcher.ui.main_window import MainWindow
+    from llama_launcher.ui.icon import app_icon
 
     app = QApplication([sys.argv[0]] + unknown)
     # Identity so the KDE/Wayland taskbar maps the window to the .desktop entry
@@ -72,6 +73,10 @@ def main(argv=None) -> int:
     app.setApplicationName("Llama Launcher")
     app.setApplicationDisplayName("Llama Launcher")
     app.setDesktopFileName("llama-launcher")
+    # Apply our own SVG to every window and the taskbar; the .desktop
+    # association alone does not set the running window's icon, so without
+    # this the window shows the desktop's default icon.
+    app.setWindowIcon(app_icon())
     win = MainWindow()
     # Only keep the app alive after the last window closes when the user has
     # opted into minimize-to-tray; otherwise closing the window quits.
