@@ -33,3 +33,20 @@ def parse_draft_stats(text: str) -> DraftStats | None:
         accepted=int(last.group(2)),
         generated=int(last.group(3)),
     )
+
+
+_BLOCKS = "▁▂▃▄▅▆▇█"
+
+
+def sparkline(values, width: int = 0) -> str:
+    """Render numbers as a unicode block sparkline. Empty -> ''. Flat -> all low."""
+    vals = list(values)
+    if width > 0:
+        vals = vals[-width:]
+    if not vals:
+        return ""
+    lo, hi = min(vals), max(vals)
+    span = hi - lo
+    if span <= 0:
+        return _BLOCKS[0] * len(vals)
+    return "".join(_BLOCKS[int((v - lo) / span * (len(_BLOCKS) - 1))] for v in vals)

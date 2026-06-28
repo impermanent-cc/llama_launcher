@@ -1,4 +1,4 @@
-from llama_launcher.core.mtp_stats import parse_draft_stats, DraftStats
+from llama_launcher.core.mtp_stats import parse_draft_stats, DraftStats, sparkline
 
 REAL = ("draft acceptance = 0.62008 ( 1797 accepted /  2898 generated), "
         "mean acceptance length =  2.24, acceptance rate per position = (0.727, 0.513)")
@@ -32,3 +32,27 @@ def test_partial_line_returns_none():
     # cut off before the per-position group
     partial = "draft acceptance = 0.6 ( 1 accepted / 2 generated), mean acceptance length = 1.2"
     assert parse_draft_stats(partial) is None
+
+
+def test_sparkline_empty():
+    assert sparkline([]) == ""
+
+
+def test_sparkline_single_value():
+    assert sparkline([5.0]) == "▁"
+
+
+def test_sparkline_flat_series_all_low():
+    assert sparkline([5, 5, 5]) == "▁▁▁"
+
+
+def test_sparkline_ascending_ramp():
+    s = sparkline([1, 2, 3, 4, 5, 6, 7, 8])
+    assert len(s) == 8
+    assert s[0] == "▁" and s[-1] == "█"
+    # monotonically non-decreasing block heights
+    assert list(s) == sorted(s, key="▁▂▃▄▅▆▇█".index)
+
+
+def test_sparkline_width_keeps_last_n():
+    assert sparkline([1, 2, 3, 4, 5], width=2) == "▁█"
