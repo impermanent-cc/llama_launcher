@@ -129,3 +129,15 @@ def test_mmproj_offload_and_override_tensor_render():
     assert "--no-mmproj-offload" in argv          # bare bool flag
     assert "--override-tensor exps=CPU" in text
     assert "--split-mode tensor" in text
+
+
+def test_swa_and_checkpoint_render():
+    p = _golden_profile()
+    p.settings["swa-full"] = True
+    p.settings["ctx-checkpoints"] = 8
+    p.settings["checkpoint-min-step"] = 512
+    argv = build_command(p)
+    text = " ".join(argv)
+    assert "--swa-full" in argv
+    assert "--ctx-checkpoints 8" in text
+    assert "--checkpoint-min-step 512" in text

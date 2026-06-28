@@ -34,6 +34,13 @@ _ALL = [
     Setting("keep", "--keep", "int", 0, "Model & Context", (), -1, 1048576, 1,
             tooltip="When the context overflows, how many tokens from the start of the "
                     "prompt to always retain. -1 = keep the entire prompt; 0 = keep none."),
+    Setting("swa-full", "--swa-full", "bool", False, "Model & Context", (),
+            tooltip="Use a full-size sliding-window-attention (SWA) cache. Models with "
+                    "hybrid local/global attention (e.g. Gemma) use SWA; this trades more "
+                    "memory for fuller context reuse. Off by default."),
+    Setting("context-shift", "--context-shift", "bool", False, "Model & Context", (),
+            tooltip="Shift the context window to keep generating once it fills, instead of "
+                    "stopping. Off by default."),
 
     # GPU & Memory
     Setting("n-gpu-layers", "--n-gpu-layers", "int_or_token", "auto", "GPU & Memory", ("-ngl",),
@@ -128,6 +135,14 @@ _ALL = [
     Setting("cache-ram", "--cache-ram", "int", -1, "Caching", ("-cram",), -1, 1048576, 256,
             tooltip="RAM (MiB) for caching prompt states across requests. -1 = unlimited, "
                     "0 = disable the RAM cache."),
+    Setting("ctx-checkpoints", "--ctx-checkpoints", "int", 32, "Caching", ("-ctxcp",),
+            0, 1024, 1,
+            tooltip="Maximum context checkpoints kept per slot, used by SWA models for fast "
+                    "context reuse. Default 32."),
+    Setting("checkpoint-min-step", "--checkpoint-min-step", "int", 256, "Caching", ("-cms",),
+            0, 1048576, 64,
+            tooltip="Minimum spacing in tokens between context checkpoints. 0 = no minimum. "
+                    "Default 256."),
 
     # Sampling (core)
     Setting("temp", "--temp", "float", 0.80, "Sampling", (), 0.0, 2.0, 0.05,

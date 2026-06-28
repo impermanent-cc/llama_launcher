@@ -50,3 +50,15 @@ def test_gpu_additions_and_split_mode_tensor():
     assert CATALOG["override-tensor"].type == "string"
     assert "-ot" in CATALOG["override-tensor"].aliases
     assert CATALOG["split-mode"].enum == ("none", "layer", "row", "tensor")
+
+
+def test_context_and_caching_additions():
+    from llama_launcher.core.settings_catalog import CATALOG
+    assert CATALOG["swa-full"].type == "bool"
+    assert CATALOG["swa-full"].group == "Model & Context"
+    assert CATALOG["context-shift"].type == "bool"
+    assert CATALOG["ctx-checkpoints"].default == 32
+    assert CATALOG["ctx-checkpoints"].group == "Caching"
+    assert CATALOG["checkpoint-min-step"].default == 256
+    assert "-ctxcp" in CATALOG["ctx-checkpoints"].aliases
+    assert "-cms" in CATALOG["checkpoint-min-step"].aliases
