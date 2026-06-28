@@ -13,6 +13,30 @@ def _kv_u32(key, val):
     return struct.pack("<Q", len(kb)) + kb + struct.pack("<I", 4) + struct.pack("<I", val)
 
 
+def _kv_arr_u32(key, vals):
+    kb = key.encode()
+    out = struct.pack("<Q", len(kb)) + kb
+    out += struct.pack("<I", 9)             # value type = _ARR
+    out += struct.pack("<I", 4)             # element type = _U32
+    out += struct.pack("<Q", len(vals))     # count
+    return out + b"".join(struct.pack("<I", v) for v in vals)
+
+
+def _arr_head_gguf():
+    # A model that stores per-layer attention.head_count[_kv] as arrays
+    # (its layers differ) — valid GGUF that some real models emit.
+    kvs = [
+        _kv_str("general.architecture", "hybrid"),
+        _kv_u32("hybrid.block_count", 4),
+        _kv_arr_u32("hybrid.attention.head_count", [32, 32, 32, 32]),
+        _kv_arr_u32("hybrid.attention.head_count_kv", [8, 8, 4, 4]),
+        _kv_u32("hybrid.embedding_length", 4096),
+        _kv_u32("hybrid.context_length", 8192),
+    ]
+    return (b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0)
+            + struct.pack("<Q", len(kvs)) + b"".join(kvs))
+
+
 def _synthetic_gguf():
     kvs = [
         _kv_str("general.architecture", "qwen3"),
@@ -80,3 +104,24 @@ def test_capability_kv_absent_is_none():
     assert m.expert_count is None
     assert m.sliding_window is None
     assert m.nextn_predict_layers is None
+
+
+def test_array_head_counts_collapse_to_scalar():
+    # GgufMeta is scalar (int | None); per-layer array head counts must
+    # collapse to a single int — the max, a conservative scalar for the
+    # VRAM estimate (and exact when every layer is equal).
+    m = parse_gguf_header(_arr_head_gguf())
+    assert m.n_head == 32 and isinstance(m.n_head, int)
+    assert m.n_head_kv == 8 and isinstance(m.n_head_kv, int)
+    assert m.n_layers == 4 and m.n_embd == 4096 and m.ctx_train == 8192
+
+
+def test_array_head_counts_feed_vram_estimate_without_crash():
+    # Regression: launching such a model used to crash vram_check with
+    # "int() argument must be ... not 'list'".
+    from llama_launcher.core import vram
+    m = parse_gguf_header(_arr_head_gguf())
+    est = vram.estimate(n_layers=m.n_layers, n_head=m.n_head or 1,
+                        n_head_kv=m.n_head_kv or m.n_head or 1,
+                        n_embd=m.n_embd, ctx=m.ctx_train)
+    assert est.total_bytes > 0

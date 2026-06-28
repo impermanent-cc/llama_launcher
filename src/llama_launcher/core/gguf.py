@@ -28,6 +28,21 @@ def ftype_name(ftype) -> str:
     return _FTYPE.get(ftype, f"ftype{ftype}")
 
 
+def _num(v):
+    """Reduce a GGUF numeric metadata value to a single int.
+
+    Some per-layer fields (notably attention.head_count[_kv]) are stored as a
+    one-entry-per-block array when a model's layers differ; GgufMeta is scalar
+    (int | None), so collapse arrays to their max — a conservative scalar for
+    the VRAM estimate, and exact when every layer is equal. Pass scalars and
+    None through unchanged; an empty/non-numeric array yields None.
+    """
+    if isinstance(v, (list, tuple)):
+        nums = [x for x in v if isinstance(x, (int, float))]
+        return max(nums) if nums else None
+    return v
+
+
 @dataclass
 class GgufMeta:
     arch: str = ""
@@ -99,22 +114,22 @@ def parse_gguf_header(data: bytes) -> GgufMeta:
     def a(suffix):
         return kv.get(f"{arch}.{suffix}")
 
-    n_head = a("attention.head_count")
-    n_head_kv = a("attention.head_count_kv")
+    n_head = _num(a("attention.head_count"))
+    n_head_kv = _num(a("attention.head_count_kv"))
     if n_head_kv is None:
         n_head_kv = n_head
 
     return GgufMeta(
         arch=arch,
         name=kv.get("general.name", "") or "",
-        n_layers=a("block_count"),
+        n_layers=_num(a("block_count")),
         n_head=n_head,
         n_head_kv=n_head_kv,
-        n_embd=a("embedding_length"),
-        ctx_train=a("context_length"),
+        n_embd=_num(a("embedding_length")),
+        ctx_train=_num(a("context_length")),
         size_label=kv.get("general.size_label", "") or "",
         quant=ftype_name(kv.get("general.file_type")),
-        expert_count=a("expert_count"),
-        sliding_window=a("attention.sliding_window"),
-        nextn_predict_layers=a("nextn_predict_layers"),
+        expert_count=_num(a("expert_count")),
+        sliding_window=_num(a("attention.sliding_window")),
+        nextn_predict_layers=_num(a("nextn_predict_layers")),
     )
