@@ -245,14 +245,34 @@ _ALL = [
     Setting("props", "--props", "bool", False, "Server & Tools", (),
             tooltip="Allow changing global properties via POST /props. Reading /props "
                     "works without this."),
-    Setting("spec-draft-ngl", "--spec-draft-ngl", "int_or_token", "auto", "Server & Tools",
+
+    # Speculative Decoding
+    Setting("spec-type", "--spec-type", "enum", "none", "Speculative Decoding", (),
+            enum=("none", "draft-simple", "draft-eagle3", "draft-mtp",
+                  "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod",
+                  "ngram-cache"),
+            tooltip="Speculative-decoding strategy. 'draft-mtp' enables a model's built-in "
+                    "multi-token-prediction head (e.g. Gemma 4) with no separate draft "
+                    "model needed. 'none' disables speculation."),
+    Setting("spec-draft-ngl", "--spec-draft-ngl", "int_or_token", "auto", "Speculative Decoding",
             ("-ngld",), 0, 999, 1, tokens=("auto", "all"),
             tooltip="Draft-model layers to offload to GPU for speculative decoding. "
                     "'auto' lets llama.cpp decide."),
-    Setting("spec-draft-n-max", "--spec-draft-n-max", "int", 3, "Server & Tools", (),
+    Setting("spec-draft-n-max", "--spec-draft-n-max", "int", 3, "Speculative Decoding", (),
             1, 64, 1,
             tooltip="Tokens the draft model proposes per step (speculative decoding). "
                     "Default 3."),
+    Setting("spec-draft-n-min", "--spec-draft-n-min", "int", 0, "Speculative Decoding", (),
+            0, 64, 1,
+            tooltip="Minimum draft tokens to use per speculative step. Default 0."),
+    Setting("cache-type-k-draft", "--cache-type-k-draft", "enum", "f16", "Speculative Decoding",
+            ("-ctkd",), enum=KV_CACHE_TYPES,
+            tooltip="K KV-cache quantization for the draft model. Lower precision "
+                    "(e.g. q8_0) saves VRAM at a small quality cost."),
+    Setting("cache-type-v-draft", "--cache-type-v-draft", "enum", "f16", "Speculative Decoding",
+            ("-ctvd",), enum=KV_CACHE_TYPES,
+            tooltip="V KV-cache quantization for the draft model. Lower precision "
+                    "(e.g. q8_0) saves VRAM at a small quality cost."),
 ]
 
 CATALOG: dict = {s.key: s for s in _ALL}

@@ -28,3 +28,16 @@ def test_enum_defaults_are_within_enum():
     for s in CATALOG.values():
         if s.type == "enum":
             assert s.default in s.enum
+
+
+def test_speculative_decoding_group():
+    from llama_launcher.core.settings_catalog import CATALOG, KV_CACHE_TYPES
+    assert CATALOG["spec-type"].type == "enum"
+    assert CATALOG["spec-type"].default == "none"
+    assert "draft-mtp" in CATALOG["spec-type"].enum
+    assert CATALOG["spec-draft-n-min"].default == 0
+    assert CATALOG["cache-type-k-draft"].enum == KV_CACHE_TYPES
+    assert CATALOG["cache-type-v-draft"].default == "f16"
+    for k in ("spec-type", "spec-draft-ngl", "spec-draft-n-max",
+              "spec-draft-n-min", "cache-type-k-draft", "cache-type-v-draft"):
+        assert CATALOG[k].group == "Speculative Decoding", k

@@ -97,3 +97,23 @@ def test_int_or_token_value_all():
     p.settings["n-gpu-layers"] = "all"
     argv = build_command(p)
     assert argv[argv.index("--n-gpu-layers") + 1] == "all"
+
+
+def test_spec_type_mtp_emitted():
+    p = _golden_profile()
+    p.settings["spec-type"] = "draft-mtp"
+    assert "--spec-type draft-mtp" in " ".join(build_command(p))
+
+
+def test_spec_type_absent_when_unset():
+    argv = build_command(_golden_profile())   # no spec-type key
+    assert "--spec-type" not in argv
+
+
+def test_draft_cache_types_render():
+    p = _golden_profile()
+    p.settings["cache-type-k-draft"] = "q8_0"
+    p.settings["spec-draft-n-min"] = 1
+    text = " ".join(build_command(p))
+    assert "--cache-type-k-draft q8_0" in text
+    assert "--spec-draft-n-min 1" in text
