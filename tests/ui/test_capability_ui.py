@@ -50,3 +50,13 @@ def test_suggestion_chip_applies(qtbot, tmp_path):
     assert chips, "expected an MTP suggestion chip"
     chips[0].click()
     assert w._widgets["spec-type"].value() == "draft-mtp"   # in-file MTP suggestion applied
+
+
+def test_no_model_is_neutral(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    # default profile has no model -> every catalog widget is NEUTRAL, no chips
+    from PySide6.QtWidgets import QPushButton
+    assert all(w._widgets[k].property("relevance") in (None, "neutral")
+               for k in ("spec-type", "n-cpu-moe", "swa-full"))
+    assert w.suggestions_strip.findChildren(QPushButton) == []
