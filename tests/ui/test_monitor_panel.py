@@ -56,3 +56,37 @@ def test_enable_metrics_button_emits_signal(qtbot):
                     "gpus": [], "cpu": "", "mem": "", "uptime": "", "metrics_on": False})
     with qtbot.waitSignal(p.enable_metrics_requested, timeout=1000):
         p.enable_metrics_btn.click()
+
+
+_DRAFT_LINE = ("draft acceptance = 0.62008 ( 1797 accepted /  2898 generated), "
+               "mean acceptance length =  2.24, acceptance rate per position = (0.727, 0.513)")
+
+
+def test_mtp_label_appears_from_log(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    assert p.mtp_label.isHidden()
+    p.append_log(_DRAFT_LINE + "\n")
+    assert not p.mtp_label.isHidden()
+    t = p.mtp_label.text()
+    assert "62%" in t and "2.24" in t and "73%" in t
+
+
+def test_mtp_line_split_across_chunks(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    half = len(_DRAFT_LINE) // 2
+    p.append_log(_DRAFT_LINE[:half])           # no newline yet
+    assert p.mtp_label.isHidden()
+    p.append_log(_DRAFT_LINE[half:] + "\n")    # completes the line
+    assert not p.mtp_label.isHidden()
+    assert "62%" in p.mtp_label.text()
+
+
+def test_reset_clears_mtp_and_logs(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.append_log(_DRAFT_LINE + "\n")
+    p.reset()
+    assert p.mtp_label.isHidden()
+    assert p.log_view.toPlainText() == ""

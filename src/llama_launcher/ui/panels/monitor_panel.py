@@ -1,6 +1,8 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPlainTextEdit, QPushButton
 
+from llama_launcher.core.mtp_stats import parse_draft_stats
+
 
 class MonitorPanel(QWidget):
     enable_metrics_requested = Signal()
@@ -21,6 +23,11 @@ class MonitorPanel(QWidget):
         self.log_view.setMaximumBlockCount(5000)
         layout.addWidget(self.log_view, 1)
         self._last = ""
+        self._draft = None
+        self._log_buf = ""
+        self.mtp_label = QLabel("")
+        self.mtp_label.setVisible(False)
+        layout.insertWidget(1, self.mtp_label)   # right after the summary label
 
     def _summary_text(self) -> str:
         return self._last
@@ -50,3 +57,23 @@ class MonitorPanel(QWidget):
 
     def append_log(self, text: str):
         self.log_view.appendPlainText(text.rstrip("\n"))
+        self._log_buf += text
+        *lines, self._log_buf = self._log_buf.split("\n")
+        for line in lines:
+            stats = parse_draft_stats(line)
+            if stats is not None:
+                self._draft = stats
+                self.mtp_label.setText(self._mtp_text(stats))
+                self.mtp_label.setVisible(True)
+
+    @staticmethod
+    def _mtp_text(d) -> str:
+        pos = " / ".join(f"{p * 100:.0f}%" for p in d.per_position)
+        return f"MTP  accept {d.acceptance * 100:.0f}%  ·  len {d.mean_len:.2f}  ·  pos {pos}"
+
+    def reset(self):
+        self._draft = None
+        self._log_buf = ""
+        self.mtp_label.setText("")
+        self.mtp_label.setVisible(False)
+        self.log_view.clear()
