@@ -90,3 +90,33 @@ def test_reset_clears_mtp_and_logs(qtbot):
     p.reset()
     assert p.mtp_label.isHidden()
     assert p.log_view.toPlainText() == ""
+
+
+def _stats(tok, metrics_on=True):
+    return {"tok_s": tok, "prompt_tok_s": None, "kv_pct": None,
+            "gpus": [], "cpu": "", "mem": "", "uptime": "", "metrics_on": metrics_on}
+
+
+def test_throughput_sparkline_appears(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.update_stats(_stats(40.0))
+    p.update_stats(_stats(60.0))
+    assert not p.throughput_label.isHidden()
+    assert "tok/s" in p.throughput_label.text()
+
+
+def test_throughput_hidden_without_metrics(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.update_stats(_stats(None, metrics_on=False))
+    assert p.throughput_label.isHidden()
+
+
+def test_reset_clears_throughput_history(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.update_stats(_stats(40.0))
+    p.reset()
+    assert p.throughput_label.isHidden()
+    assert len(p._tok_history) == 0

@@ -1,7 +1,9 @@
+from collections import deque
+
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QPlainTextEdit, QPushButton
 
-from llama_launcher.core.mtp_stats import parse_draft_stats
+from llama_launcher.core.mtp_stats import parse_draft_stats, sparkline
 
 
 class MonitorPanel(QWidget):
@@ -28,6 +30,10 @@ class MonitorPanel(QWidget):
         self.mtp_label = QLabel("")
         self.mtp_label.setVisible(False)
         layout.insertWidget(1, self.mtp_label)   # right after the summary label
+        self._tok_history = deque(maxlen=60)
+        self.throughput_label = QLabel("")
+        self.throughput_label.setVisible(False)
+        layout.insertWidget(1, self.throughput_label)
 
     def _summary_text(self) -> str:
         return self._last
@@ -54,6 +60,13 @@ class MonitorPanel(QWidget):
             parts.append(f"uptime {data['uptime']}")
         self._last = "    ".join(parts)
         self.summary.setText(self._last)
+        tok = data.get("tok_s")
+        if metrics_on and tok is not None:
+            self._tok_history.append(tok)
+            self.throughput_label.setText(f"gen tok/s  {sparkline(self._tok_history)}  {tok:.0f}")
+            self.throughput_label.setVisible(True)
+        else:
+            self.throughput_label.setVisible(False)
 
     def append_log(self, text: str):
         self.log_view.appendPlainText(text.rstrip("\n"))
@@ -77,3 +90,6 @@ class MonitorPanel(QWidget):
         self.mtp_label.setText("")
         self.mtp_label.setVisible(False)
         self.log_view.clear()
+        self._tok_history.clear()
+        self.throughput_label.setText("")
+        self.throughput_label.setVisible(False)
