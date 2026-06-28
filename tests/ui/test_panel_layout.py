@@ -17,3 +17,18 @@ def test_lora_path_column_stretches(qtbot):
     qtbot.addWidget(p)
     hdr = p.table.horizontalHeader()
     assert hdr.sectionResizeMode(0) == QHeaderView.Stretch   # Path
+
+
+def test_new_flags_and_speculative_group_present(qtbot):
+    from PySide6.QtWidgets import QGroupBox
+    from llama_launcher.ui.main_window import MainWindow
+    w = MainWindow()
+    qtbot.addWidget(w)
+    for key in ["spec-type", "spec-draft-n-min", "cache-type-k-draft",
+                "cache-type-v-draft", "no-mmproj-offload", "override-tensor",
+                "swa-full", "context-shift", "ctx-checkpoints",
+                "checkpoint-min-step", "dry-sequence-breaker", "numa",
+                "threads-http", "no-webui", "reasoning-format"]:
+        assert key in w._widgets, key
+    titles = {b.title() for b in w.findChildren(QGroupBox)}
+    assert "Speculative Decoding" in titles
