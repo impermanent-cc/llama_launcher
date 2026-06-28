@@ -141,3 +141,18 @@ def test_swa_and_checkpoint_render():
     assert "--swa-full" in argv
     assert "--ctx-checkpoints 8" in text
     assert "--checkpoint-min-step 512" in text
+
+
+def test_numa_value_and_server_round_out_render():
+    p = _golden_profile()
+    p.settings["numa"] = "distribute"
+    p.settings["threads-http"] = 8
+    p.settings["no-webui"] = True
+    p.settings["reasoning-format"] = "deepseek"
+    p.settings["dry-sequence-breaker"] = "none"
+    text = " ".join(build_command(p))
+    assert "--numa distribute" in text
+    assert "--threads-http 8" in text
+    assert "--no-webui" in build_command(p)
+    assert "--reasoning-format deepseek" in text
+    assert "--dry-sequence-breaker none" in text

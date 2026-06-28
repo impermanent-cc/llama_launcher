@@ -62,3 +62,16 @@ def test_context_and_caching_additions():
     assert CATALOG["checkpoint-min-step"].default == 256
     assert "-ctxcp" in CATALOG["ctx-checkpoints"].aliases
     assert "-cms" in CATALOG["checkpoint-min-step"].aliases
+
+
+def test_sampling_perf_server_additions():
+    from llama_launcher.core.settings_catalog import CATALOG
+    assert CATALOG["dry-sequence-breaker"].type == "string"
+    assert CATALOG["dry-sequence-breaker"].group == "Sampling"
+    assert CATALOG["numa"].type == "enum"
+    assert CATALOG["numa"].default == "off"
+    assert CATALOG["numa"].enum == ("off", "distribute", "isolate", "numactl")
+    assert CATALOG["threads-http"].default == -1
+    assert CATALOG["no-webui"].type == "bool"
+    assert CATALOG["reasoning-format"].default == "auto"
+    assert CATALOG["reasoning-format"].enum == ("auto", "none", "deepseek", "deepseek-legacy")

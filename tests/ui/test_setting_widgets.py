@@ -111,3 +111,14 @@ def test_tools_multiselect_all_disables_individual(qtbot):
     assert all(not cb.isEnabled() for cb in w._checks.values())
     w.set_value("")
     assert all(cb.isEnabled() for cb in w._checks.values())
+
+
+def test_numa_off_sentinel_is_not_set(qtbot):
+    from llama_launcher.core.settings_catalog import CATALOG
+    from llama_launcher.ui.widgets.setting_widgets import make_widget
+    w = make_widget(CATALOG["numa"])
+    qtbot.addWidget(w)
+    w.set_value("off")
+    assert w.is_set() is False        # equals default -> not stored/emitted
+    w.set_value("distribute")
+    assert w.is_set() is True

@@ -124,6 +124,15 @@ _ALL = [
             tooltip="Disable continuous batching (which is on by default). Continuous "
                     "batching boosts throughput with multiple slots; disabling it is rarely "
                     "needed."),
+    Setting("numa", "--numa", "enum", "off", "Performance & Batching", (),
+            enum=("off", "distribute", "isolate", "numactl"),
+            tooltip="NUMA optimization strategy for multi-socket systems. 'off' does not "
+                    "pass --numa. 'distribute' spreads threads across nodes; 'isolate' pins "
+                    "to one node; 'numactl' follows the numactl map."),
+    Setting("threads-http", "--threads-http", "int", -1, "Performance & Batching", (),
+            -1, 256, 1,
+            tooltip="Threads used to process HTTP requests. -1 = auto. Raise for many "
+                    "concurrent clients."),
 
     # Caching
     Setting("cache-reuse", "--cache-reuse", "int", 0, "Caching", (), 0, 1048576, 1,
@@ -179,6 +188,10 @@ _ALL = [
     Setting("dry-penalty-last-n", "--dry-penalty-last-n", "int", -1, "Sampling", (), -1, 1048576, 1,
             tooltip="DRY look-back: how many recent tokens to scan for repeats. -1 = the "
                     "whole context; 0 = disabled."),
+    Setting("dry-sequence-breaker", "--dry-sequence-breaker", "string", "", "Sampling", (),
+            tooltip="DRY sequence breaker. Setting this REPLACES llama.cpp's defaults "
+                    "(newline : \" *); use 'none' to disable all breakers. Empty = keep "
+                    "defaults. One breaker here; use raw-args for multiple."),
     # Sampling: Penalties
     Setting("repeat-penalty", "--repeat-penalty", "float", 1.0, "Sampling", (), 1.0, 2.0, 0.01,
             tooltip="Penalty applied to recently used tokens to reduce repetition. >1.0 "
@@ -268,6 +281,14 @@ _ALL = [
     Setting("props", "--props", "bool", False, "Server & Tools", (),
             tooltip="Allow changing global properties via POST /props. Reading /props "
                     "works without this."),
+    Setting("no-webui", "--no-webui", "bool", False, "Server & Tools", (),
+            tooltip="Disable the built-in Web UI. The HTTP/OpenAI-compatible API stays "
+                    "available; only the browser chat UI is turned off."),
+    Setting("reasoning-format", "--reasoning-format", "enum", "auto", "Server & Tools", (),
+            enum=("auto", "none", "deepseek", "deepseek-legacy"),
+            tooltip="How thinking/<think> content is parsed and returned. 'auto' follows the "
+                    "template; 'none' leaves it inline; 'deepseek' moves it to "
+                    "reasoning_content; 'deepseek-legacy' keeps tags and also fills it."),
 
     # Speculative Decoding
     Setting("spec-type", "--spec-type", "enum", "none", "Speculative Decoding", (),
