@@ -43,13 +43,13 @@ def test_export_sh(qtbot, tmp_path):
     assert os.access(out, os.X_OK)
 
 
-def test_model_meta_text(qtbot, monkeypatch):
+def test_meta_caps_text(qtbot, monkeypatch):
     monkeypatch.setattr(mw.model_info, "read_gguf_meta",
                         lambda path: GgufMeta(quant="IQ3_S", size_label="30B-A3B"))
     monkeypatch.setattr(mw.model_info, "file_size", lambda path: 15 * 1024**3)
     w = mw.MainWindow(); qtbot.addWidget(w)
     w.load_profile(_profile())
-    t = w.model_meta_text()
+    t = w.model_meta_label.text()
     assert "IQ3_S" in t and "30B-A3B" in t and "GiB" in t
 
 

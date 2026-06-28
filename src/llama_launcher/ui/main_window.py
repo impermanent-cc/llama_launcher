@@ -25,7 +25,8 @@ from llama_launcher.core import vram
 from llama_launcher.core import report as report_mod
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.ui.dialogs.report_dialog import ReportDialog
-from llama_launcher.ui.widgets.setting_widgets import make_widget
+from llama_launcher.core.capabilities import relevance, Tier
+from llama_launcher.ui.widgets.setting_widgets import make_widget, TIER_QSS
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
@@ -167,6 +168,8 @@ class MainWindow(QMainWindow):
             groups[setting.group].addRow(setting.flag, w)
         right_scroll.setWidget(right_inner)
         body.addWidget(right_scroll, 2)
+        self.setStyleSheet((self.styleSheet() or "") + TIER_QSS)
+        self._last_caps = None
         self.configure_tab = configure_tab
 
         # Tabs
@@ -180,9 +183,8 @@ class MainWindow(QMainWindow):
         # BOTTOM: preview + buttons (shared, below both tabs)
         self.model_meta_label = QLabel("")
         root.addWidget(self.model_meta_label)
-        self.model_edit.textChanged.connect(
-            lambda _: self.model_meta_label.setText(self.model_meta_text())
-        )
+        self.model_edit.textChanged.connect(lambda _: self.apply_model_caps())
+        self.mounts_panel.changed.connect(self.apply_model_caps)
         preview_row = QHBoxLayout()
         self.preview = QPlainTextEdit(); self.preview.setReadOnly(True)
         preview_row.addWidget(self.preview, 1)
@@ -350,7 +352,7 @@ class MainWindow(QMainWindow):
             w.set_value(w.setting.default)
             if key in p.settings:
                 w.set_value(p.settings[key])
-        self.model_meta_label.setText(self.model_meta_text())
+        self.apply_model_caps()
         self.refresh_preview()
 
     def current_profile(self) -> Profile:
@@ -428,7 +430,7 @@ class MainWindow(QMainWindow):
 
     def vram_check(self) -> str | None:
         p = self.current_profile()
-        meta = model_info.read_gguf_meta(p.model) if p.model else None
+        meta, weights, _caps = model_info.inspect_model(p.model, self.mounts_panel.mounts()) if p.model else (None, None, None)
         free = gpu.free_vram_bytes()
         if meta is None or free is None or not meta.n_layers or not meta.n_embd:
             return None
@@ -438,7 +440,7 @@ class MainWindow(QMainWindow):
             n_head_kv=meta.n_head_kv or meta.n_head or 1, n_embd=meta.n_embd, ctx=ctx,
             k_quant=p.settings.get("cache-type-k", "f16"),
             v_quant=p.settings.get("cache-type-v", "f16"),
-            weights_bytes=model_info.file_size(p.model) or 0,
+            weights_bytes=weights or 0,
         )
         ok, margin = vram.fits(est.total_bytes, free)
         if ok:
@@ -740,12 +742,26 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QApplication
         QApplication.instance().quit()
 
-    def model_meta_text(self) -> str:
+    def _set_field_relevance(self, edit, tier) -> None:
+        edit.setProperty("relevance", getattr(tier, "value", str(tier)))
+        edit.style().unpolish(edit)
+        edit.style().polish(edit)
+
+    def apply_model_caps(self) -> None:
         p = self.current_profile()
-        if not p.model:
-            return ""
-        meta = model_info.read_gguf_meta(p.model)
-        size = model_info.file_size(p.model)
+        meta, size, caps = (None, None, None)
+        if p.model:
+            meta, size, caps = model_info.inspect_model(p.model, self.mounts_panel.mounts())
+        self._last_caps = caps
+        self.model_meta_label.setText(self._meta_caps_text(meta, size, caps))
+        tiers = relevance(caps) if caps else {}
+        for key, widget in self._widgets.items():
+            widget.set_relevance(tiers.get(key, Tier.NEUTRAL))
+        self._set_field_relevance(self.mmproj_edit, tiers.get("mmproj", Tier.NEUTRAL))
+        self._set_field_relevance(self.draft_model_edit, tiers.get("draft_model", Tier.NEUTRAL))
+
+    @staticmethod
+    def _meta_caps_text(meta, size, caps) -> str:
         bits = []
         if size:
             bits.append(f"{size / 1024**3:.1f} GiB")
@@ -753,4 +769,15 @@ class MainWindow(QMainWindow):
             bits.append(meta.quant)
         if meta and meta.size_label:
             bits.append(meta.size_label)
+        if caps:
+            if caps.is_moe:
+                bits.append(f"MoE {caps.expert_count}")
+            if caps.has_mtp:
+                bits.append("MTP" + (" (file)" if caps.mtp_sibling else ""))
+            if caps.has_vision:
+                bits.append("vision")
+            if caps.has_swa:
+                bits.append("SWA")
+            if caps.ctx_train:
+                bits.append(f"{caps.ctx_train // 1024}K ctx")
         return "  ·  ".join(bits)
