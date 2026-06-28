@@ -34,3 +34,19 @@ def test_model_caps_apply_tiers(qtbot, tmp_path):
     assert w.mmproj_edit.property("relevance") == "na"                      # no vision sibling
     assert w._widgets["swa-full"].property("relevance") == "na"             # no SWA
     assert "MoE" in w.model_meta_label.text() and "MTP" in w.model_meta_label.text()
+
+
+def test_suggestion_chip_applies(qtbot, tmp_path):
+    from PySide6.QtWidgets import QPushButton
+    _write_moe_mtp_gguf(tmp_path / "m.gguf")
+    w = MainWindow()
+    qtbot.addWidget(w)
+    p = Profile(name="t", image="img",
+                runtime=Runtime(binary="podman", gpu_mode="cdi"),
+                mounts=[Mount(host=str(tmp_path), container="/models", role="model", mode="ro")],
+                model="/models/m.gguf", settings={"port": 8080, "spec-type": "none"})
+    w.load_profile(p)
+    chips = [b for b in w.suggestions_strip.findChildren(QPushButton)]
+    assert chips, "expected an MTP suggestion chip"
+    chips[0].click()
+    assert w._widgets["spec-type"].value() == "draft-mtp"   # in-file MTP suggestion applied

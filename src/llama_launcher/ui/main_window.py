@@ -25,7 +25,9 @@ from llama_launcher.core import vram
 from llama_launcher.core import report as report_mod
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.ui.dialogs.report_dialog import ReportDialog
-from llama_launcher.core.capabilities import relevance, Tier
+import posixpath
+from llama_launcher.core.capabilities import relevance, Tier, suggestions as compute_suggestions
+from llama_launcher.core.pathmap import container_to_host
 from llama_launcher.ui.widgets.setting_widgets import make_widget, TIER_QSS
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
@@ -183,6 +185,11 @@ class MainWindow(QMainWindow):
         # BOTTOM: preview + buttons (shared, below both tabs)
         self.model_meta_label = QLabel("")
         root.addWidget(self.model_meta_label)
+        from PySide6.QtWidgets import QHBoxLayout as _HBox
+        self.suggestions_strip = QWidget()
+        self._suggestions_layout = _HBox(self.suggestions_strip)
+        self._suggestions_layout.setContentsMargins(0, 0, 0, 0)
+        root.addWidget(self.suggestions_strip)
         self.model_edit.textChanged.connect(lambda _: self.apply_model_caps())
         self.mounts_panel.changed.connect(self.apply_model_caps)
         preview_row = QHBoxLayout()
@@ -759,6 +766,51 @@ class MainWindow(QMainWindow):
             widget.set_relevance(tiers.get(key, Tier.NEUTRAL))
         self._set_field_relevance(self.mmproj_edit, tiers.get("mmproj", Tier.NEUTRAL))
         self._set_field_relevance(self.draft_model_edit, tiers.get("draft_model", Tier.NEUTRAL))
+        self._rebuild_suggestions(caps)
+
+    def _rebuild_suggestions(self, caps) -> None:
+        while self._suggestions_layout.count():
+            item = self._suggestions_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        if not caps:
+            return
+        sgs = compute_suggestions(
+            caps, self.current_profile().settings,
+            mmproj_set=bool(self.mmproj_edit.text()),
+            draft_set=bool(self.draft_model_edit.text()),
+        )
+        for sg in sgs:
+            btn = QPushButton("💡 " + sg.text)
+            btn.setFlat(True)
+            btn.clicked.connect(lambda _=False, s=sg: self._apply_suggestion(s))
+            self._suggestions_layout.addWidget(btn)
+        self._suggestions_layout.addStretch(1)
+
+    def _resolve_sibling(self, filename) -> str | None:
+        model = self.model_edit.text()
+        mounts = self.mounts_panel.mounts()
+        for d in (posixpath.dirname(model), posixpath.dirname(posixpath.dirname(model))):
+            container = posixpath.join(d, filename)
+            host = container_to_host(container, mounts)
+            if host and os.path.exists(host):
+                return container
+        return None
+
+    def _apply_suggestion(self, sg) -> None:
+        for key, val in sg.settings.items():
+            if key in self._widgets:
+                self._widgets[key].set_value(val)
+        for field, filename in sg.fields.items():
+            container = self._resolve_sibling(filename)
+            if container is None:
+                continue
+            if field == "mmproj":
+                self.mmproj_edit.setText(container)
+            elif field == "draft_model":
+                self.draft_model_edit.setText(container)
+        self.refresh_preview()
+        self.apply_model_caps()
 
     @staticmethod
     def _meta_caps_text(meta, size, caps) -> str:
