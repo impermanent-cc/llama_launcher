@@ -1,6 +1,7 @@
 import struct
 from pathlib import Path
-from llama_launcher.services.model_info import read_gguf_meta, file_size
+from llama_launcher.services.model_info import read_gguf_meta, file_size, sibling_ggufs, inspect_model
+from llama_launcher.core.spec import Mount
 
 
 def _write_gguf(path):
@@ -37,3 +38,28 @@ def test_file_size(tmp_path):
     p.write_bytes(b"12345")
     assert file_size(p) == 5
     assert file_size(tmp_path / "missing") is None
+
+
+def test_sibling_ggufs_dir_and_parent(tmp_path):
+    sub = tmp_path / "mtp"; sub.mkdir()
+    model = sub / "model.gguf"; model.write_bytes(b"x")
+    (sub / "other.gguf").write_bytes(b"x")          # same dir
+    (tmp_path / "mmproj-F16.gguf").write_bytes(b"x")  # parent dir
+    names = sibling_ggufs(model)
+    assert "other.gguf" in names
+    assert "mmproj-F16.gguf" in names
+    assert "model.gguf" not in names                 # excludes the model itself
+
+
+def test_inspect_model_resolves_host(tmp_path):
+    _write_gguf(tmp_path / "m.gguf")                 # arch=llama in helper
+    mounts = [Mount(host=str(tmp_path), container="/models")]
+    meta, size, caps = inspect_model("/models/m.gguf", mounts)
+    assert meta is not None and meta.arch == "llama"
+    assert size and size > 0
+    assert caps is not None
+
+
+def test_inspect_model_not_under_mount(tmp_path):
+    meta, size, caps = inspect_model("/elsewhere/m.gguf", [Mount(host=str(tmp_path), container="/models")])
+    assert (meta, size, caps) == (None, None, None)
