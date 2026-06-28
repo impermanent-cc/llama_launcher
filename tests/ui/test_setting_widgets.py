@@ -122,3 +122,15 @@ def test_numa_off_sentinel_is_not_set(qtbot):
     assert w.is_set() is False        # equals default -> not stored/emitted
     w.set_value("distribute")
     assert w.is_set() is True
+
+
+def test_set_relevance_sets_property(qtbot):
+    from llama_launcher.core.settings_catalog import CATALOG
+    from llama_launcher.core.capabilities import Tier
+    from llama_launcher.ui.widgets.setting_widgets import make_widget
+    w = make_widget(CATALOG["spec-type"])
+    qtbot.addWidget(w)
+    w.set_relevance(Tier.RECOMMENDED)
+    assert w.property("relevance") == "recommended"
+    w.set_relevance(Tier.NA)
+    assert w.property("relevance") == "na"

@@ -8,6 +8,14 @@ from llama_launcher.ui.widgets.no_wheel import (
     NoWheelComboBox, NoWheelSpinBox, NoWheelDoubleSpinBox,
 )
 
+# Applied app-wide by the main window; colors are intentionally subtle and
+# easy to retune. NEUTRAL needs no rule (default styling).
+TIER_QSS = """
+*[relevance="recommended"] { background: rgba(197,106,59,0.18); border-radius: 3px; }
+*[relevance="tune"]        { background: rgba(120,140,170,0.12); border-radius: 3px; }
+*[relevance="na"]          { color: palette(mid); }
+"""
+
 
 class SettingWidget(QWidget):
     changed = Signal()
@@ -165,6 +173,13 @@ class SettingWidget(QWidget):
 
     def is_set(self) -> bool:
         return self.value() != self.setting.default
+
+    def set_relevance(self, tier) -> None:
+        val = getattr(tier, "value", str(tier))
+        for w in (self, self._editor):
+            w.setProperty("relevance", val)
+            w.style().unpolish(w)
+            w.style().polish(w)
 
 
 def make_widget(setting: Setting) -> SettingWidget:
