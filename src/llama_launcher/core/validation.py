@@ -54,4 +54,19 @@ def validate(profile: Profile, running_ports: tuple = (),
         issues.append(Issue("warning",
                             f"Port {port} is already used by a running launcher container."))
 
+    # MTP speculative decoding (--spec-type draft-mtp) has two known limitations
+    # in llama.cpp: it ignores the multimodal projector and only supports a
+    # single slot. Warn (don't block) — these run but silently lose the feature.
+    if profile.settings.get("spec-type") == "draft-mtp":
+        if profile.mmproj:
+            issues.append(Issue("warning",
+                                "MTP (--spec-type draft-mtp) doesn't support --mmproj; the "
+                                "multimodal projector is likely ignored. Drop the mmproj for "
+                                "a text-only MTP run, or use a non-MTP draft for vision."))
+        parallel = profile.settings.get("parallel")
+        if isinstance(parallel, int) and parallel > 1:
+            issues.append(Issue("warning",
+                                "MTP (--spec-type draft-mtp) doesn't support --parallel > 1; "
+                                "set parallel = 1 (a single slot)."))
+
     return issues

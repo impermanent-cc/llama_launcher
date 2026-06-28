@@ -67,3 +67,36 @@ def test_port_collision_warns():
     p = _ok_profile()
     warns = [i for i in validate(p, running_ports=(8080,)) if i.level == "warning"]
     assert any("port" in i.message.lower() for i in warns)
+
+
+def _mtp_profile():
+    p = _ok_profile()
+    p.settings["spec-type"] = "draft-mtp"
+    return p
+
+
+def test_mtp_with_mmproj_warns():
+    p = _mtp_profile()
+    p.mmproj = "/models/mmproj.gguf"   # under the mount, so no path error
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert any("mtp" in i.message.lower() and "mmproj" in i.message.lower() for i in warns)
+
+
+def test_mtp_with_parallel_gt1_warns():
+    p = _mtp_profile()
+    p.settings["parallel"] = 4
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert any("mtp" in i.message.lower() and "parallel" in i.message.lower() for i in warns)
+
+
+def test_mtp_single_slot_text_only_has_no_mtp_warning():
+    p = _mtp_profile()
+    p.settings["parallel"] = 1   # mmproj unset, single slot -> nothing to warn about
+    assert not any("mtp" in i.message.lower() for i in validate(p))
+
+
+def test_non_mtp_profile_gets_no_mtp_warning():
+    p = _ok_profile()                       # no spec-type
+    p.mmproj = "/models/mmproj.gguf"
+    p.settings["parallel"] = 4
+    assert not any("mtp" in i.message.lower() for i in validate(p))
