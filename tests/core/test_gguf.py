@@ -61,3 +61,22 @@ def test_truncated_raises():
     import pytest
     with pytest.raises(ValueError):
         parse_gguf_header(_synthetic_gguf()[:12])
+
+
+def test_parses_capability_kv():
+    kvs = [_kv_str("general.architecture", "qwen35moe"),
+           _kv_u32("qwen35moe.expert_count", 256),
+           _kv_u32("qwen35moe.attention.sliding_window", 1024),
+           _kv_u32("qwen35moe.nextn_predict_layers", 1)]
+    blob = b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0) + struct.pack("<Q", len(kvs)) + b"".join(kvs)
+    m = parse_gguf_header(blob)
+    assert m.expert_count == 256
+    assert m.sliding_window == 1024
+    assert m.nextn_predict_layers == 1
+
+
+def test_capability_kv_absent_is_none():
+    m = parse_gguf_header(_synthetic_gguf())   # has none of these keys
+    assert m.expert_count is None
+    assert m.sliding_window is None
+    assert m.nextn_predict_layers is None

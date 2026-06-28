@@ -39,6 +39,9 @@ class GgufMeta:
     ctx_train: int | None = None
     size_label: str = ""
     quant: str = ""
+    expert_count: int | None = None
+    sliding_window: int | None = None
+    nextn_predict_layers: int | None = None
 
 
 class _Reader:
@@ -111,4 +114,7 @@ def parse_gguf_header(data: bytes) -> GgufMeta:
         ctx_train=a("context_length"),
         size_label=kv.get("general.size_label", "") or "",
         quant=ftype_name(kv.get("general.file_type")),
+        expert_count=a("expert_count"),
+        sliding_window=a("attention.sliding_window"),
+        nextn_predict_layers=a("nextn_predict_layers"),
     )
