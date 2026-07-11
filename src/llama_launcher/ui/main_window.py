@@ -464,8 +464,14 @@ class MainWindow(QMainWindow):
         warn = self.vram_check()
         if warn:
             QMessageBox.warning(self, "VRAM check", warn)
-        argv = build_command(self.current_profile())
+        p = self.current_profile()
+        argv = build_command(p)
         self.monitor_panel.reset()
+        self.monitor_panel.set_endpoints(
+            p.settings.get("port", 8080),
+            bool(p.settings.get("embeddings")),
+            bool(p.settings.get("reranking")),
+        )
         terminal.launch(argv)
         # Don't attach the log follower here: the terminal creates the container
         # asynchronously, so it doesn't exist yet. update_status() starts the

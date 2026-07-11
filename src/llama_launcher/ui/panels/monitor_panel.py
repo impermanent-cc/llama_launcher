@@ -34,9 +34,27 @@ class MonitorPanel(QWidget):
         self.throughput_label = QLabel("")
         self.throughput_label.setVisible(False)
         layout.insertWidget(1, self.throughput_label)
+        self.endpoints_label = QLabel("")
+        self.endpoints_label.setWordWrap(True)
+        self.endpoints_label.setVisible(False)
+        layout.insertWidget(1, self.endpoints_label)
 
     def _summary_text(self) -> str:
         return self._last
+
+    def set_endpoints(self, port: int, embeddings: bool, reranking: bool):
+        base = f"http://127.0.0.1:{port}"
+        urls = []
+        if embeddings:
+            urls.append(f"embeddings: {base}/v1/embeddings")
+        if reranking:
+            urls.append(f"rerank: {base}/v1/rerank")
+        if urls:
+            self.endpoints_label.setText("Endpoints —  " + "    ".join(urls))
+            self.endpoints_label.setVisible(True)
+        else:
+            self.endpoints_label.setText("")
+            self.endpoints_label.setVisible(False)
 
     def update_stats(self, data: dict):
         metrics_on = bool(data.get("metrics_on"))
@@ -93,3 +111,5 @@ class MonitorPanel(QWidget):
         self._tok_history.clear()
         self.throughput_label.setText("")
         self.throughput_label.setVisible(False)
+        self.endpoints_label.setText("")
+        self.endpoints_label.setVisible(False)

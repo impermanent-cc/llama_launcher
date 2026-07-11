@@ -120,3 +120,34 @@ def test_reset_clears_throughput_history(qtbot):
     p.reset()
     assert p.throughput_label.isHidden()
     assert len(p._tok_history) == 0
+
+
+def test_set_endpoints_shows_embedding_url(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.set_endpoints(8080, embeddings=True, reranking=False)
+    assert not p.endpoints_label.isHidden()
+    assert "/v1/embeddings" in p.endpoints_label.text()
+    assert "8080" in p.endpoints_label.text()
+
+
+def test_set_endpoints_shows_rerank_url(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.set_endpoints(9000, embeddings=True, reranking=True)
+    assert "/v1/rerank" in p.endpoints_label.text()
+
+
+def test_set_endpoints_hidden_when_neither(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.set_endpoints(8080, embeddings=False, reranking=False)
+    assert p.endpoints_label.isHidden()
+
+
+def test_reset_clears_endpoints(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.set_endpoints(8080, embeddings=True, reranking=False)
+    p.reset()
+    assert p.endpoints_label.isHidden()
