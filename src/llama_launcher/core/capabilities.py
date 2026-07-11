@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from enum import Enum
 
 from .gguf import GgufMeta
+from .settings_catalog import CATALOG
 
 
 EMBEDDING_ARCHS = frozenset({
@@ -112,7 +113,24 @@ def _rel_swa(caps):
     return {"swa-full": Tier.NA}
 
 
-RELEVANCE_CONTRIBUTORS = [_rel_core, _rel_moe, _rel_mtp, _rel_vision, _rel_swa]
+_EMBED_NA_GROUPS = ("Sampling", "Speculative Decoding")
+
+
+def _rel_embedding(caps):
+    if not caps.is_embedding:
+        return {}
+    t = {"embeddings": Tier.RECOMMENDED, "pooling": Tier.RECOMMENDED,
+         "ubatch-size": Tier.TUNE, "batch-size": Tier.TUNE,
+         "mmproj": Tier.NA, "no-mmproj-offload": Tier.NA}
+    if caps.is_reranker:
+        t["reranking"] = Tier.RECOMMENDED
+    for key, s in CATALOG.items():
+        if s.group in _EMBED_NA_GROUPS:
+            t[key] = Tier.NA
+    return t
+
+
+RELEVANCE_CONTRIBUTORS = [_rel_core, _rel_moe, _rel_mtp, _rel_vision, _rel_swa, _rel_embedding]
 
 
 def relevance(caps: ModelCaps) -> dict:
@@ -148,7 +166,23 @@ def _sug_ctx(caps, settings, mmproj_set, draft_set):
     return []
 
 
-SUGGESTION_DETECTORS = [_sug_mtp, _sug_vision, _sug_ctx]
+def _sug_embedding(caps, settings, mmproj_set, draft_set):
+    if caps.is_reranker:
+        have = (settings.get("reranking") and settings.get("embeddings")
+                and settings.get("pooling") == "rank")
+        if have:
+            return []
+        return [Suggestion(
+            "Reranker → enable rerank (--reranking + --pooling rank + --embeddings)",
+            {"reranking": True, "pooling": "rank", "embeddings": True}, {})]
+    if caps.is_embedding and not settings.get("embeddings"):
+        pool = caps.pooling_type or "mean"
+        return [Suggestion(f"Embedding model → enable --embeddings, pooling = {pool}",
+                          {"embeddings": True, "pooling": pool}, {})]
+    return []
+
+
+SUGGESTION_DETECTORS = [_sug_mtp, _sug_vision, _sug_ctx, _sug_embedding]
 
 
 def suggestions(caps: ModelCaps, settings: dict,

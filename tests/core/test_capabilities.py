@@ -113,3 +113,35 @@ def test_relevance_and_suggestions_registry_preserve_behavior():
     assert any("exceeds trained max" in x for x in texts)
     # registries are the real backing structure
     assert len(RELEVANCE_CONTRIBUTORS) >= 5 and len(SUGGESTION_DETECTORS) >= 3
+
+
+def test_embedding_relevance_nas_sampling_and_promotes_pooling():
+    t = relevance(derive_caps(GgufMeta(arch="bert", pooling_type=1), []))
+    assert t["embeddings"] == Tier.RECOMMENDED
+    assert t["pooling"] == Tier.RECOMMENDED
+    assert t["temp"] == Tier.NA
+    assert t["spec-type"] == Tier.NA
+    assert t["mmproj"] == Tier.NA
+
+
+def test_reranker_relevance_promotes_reranking():
+    t = relevance(derive_caps(GgufMeta(arch="bert", pooling_type=4), []))
+    assert t["reranking"] == Tier.RECOMMENDED
+
+
+def test_embedding_suggestion_sets_flags():
+    caps = derive_caps(GgufMeta(arch="nomic-bert", pooling_type=1), [])
+    sgs = suggestions(caps, {})
+    assert any(s.settings.get("embeddings") is True and s.settings.get("pooling") == "mean"
+               for s in sgs)
+
+
+def test_reranker_suggestion_sets_trio():
+    caps = derive_caps(GgufMeta(arch="bert", pooling_type=4), [])
+    s = [x for x in suggestions(caps, {}) if x.settings.get("reranking")][0]
+    assert s.settings == {"reranking": True, "pooling": "rank", "embeddings": True}
+
+
+def test_no_embedding_suggestion_for_generation_model():
+    caps = derive_caps(GgufMeta(arch="qwen3"), [])
+    assert not any(s.settings.get("embeddings") for s in suggestions(caps, {}))
