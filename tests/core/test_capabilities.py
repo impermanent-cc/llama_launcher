@@ -1,5 +1,8 @@
 from llama_launcher.core.gguf import GgufMeta
-from llama_launcher.core.capabilities import derive_caps, Tier, relevance, suggestions
+from llama_launcher.core.capabilities import (
+    derive_caps, Tier, relevance, suggestions,
+    RELEVANCE_CONTRIBUTORS, SUGGESTION_DETECTORS,
+)
 
 
 def test_qwen_mtp_infile():
@@ -94,3 +97,19 @@ def test_generation_model_is_not_embedding():
     caps = derive_caps(GgufMeta(arch="qwen3", expert_count=256), [])
     assert not caps.is_embedding and not caps.is_reranker
     assert caps.pooling_type is None
+
+
+def test_relevance_and_suggestions_registry_preserve_behavior():
+    # MoE + in-file MTP model: exercises several contributors/detectors at once.
+    caps = derive_caps(GgufMeta(arch="qwen35moe", expert_count=256,
+                                nextn_predict_layers=1, ctx_train=4096), [])
+    t = relevance(caps)
+    assert t["n-cpu-moe"] == Tier.RECOMMENDED
+    assert t["spec-type"] == Tier.RECOMMENDED
+    assert t["mmproj"] == Tier.NA
+    sgs = suggestions(caps, {"ctx-size": 8192}, mmproj_set=False, draft_set=False)
+    texts = [s.text for s in sgs]
+    assert any("draft-mtp" in x for x in texts)
+    assert any("exceeds trained max" in x for x in texts)
+    # registries are the real backing structure
+    assert len(RELEVANCE_CONTRIBUTORS) >= 5 and len(SUGGESTION_DETECTORS) >= 3
