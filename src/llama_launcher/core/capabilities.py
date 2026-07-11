@@ -4,6 +4,13 @@ from enum import Enum
 from .gguf import GgufMeta
 
 
+EMBEDDING_ARCHS = frozenset({
+    "bert", "nomic-bert", "nomic-bert-moe", "jina-bert-v2", "jina-bert",
+    "gte", "gte-qwen2", "roberta", "xlm-roberta", "distilbert", "mpnet",
+})
+_POOLING = {0: "none", 1: "mean", 2: "cls", 3: "last", 4: "rank"}
+
+
 @dataclass(frozen=True)
 class ModelCaps:
     is_moe: bool = False
@@ -14,6 +21,9 @@ class ModelCaps:
     has_swa: bool = False
     sliding_window: int | None = None
     ctx_train: int | None = None
+    is_embedding: bool = False
+    is_reranker: bool = False
+    pooling_type: str | None = None
 
     @property
     def has_mtp(self) -> bool:
@@ -34,6 +44,7 @@ def _match(filenames, substr) -> str | None:
 
 def derive_caps(meta: GgufMeta | None, sibling_filenames) -> ModelCaps:
     meta = meta or GgufMeta()
+    pooling = _POOLING.get(meta.pooling_type) if meta.pooling_type is not None else None
     return ModelCaps(
         is_moe=bool(meta.expert_count and meta.expert_count > 0),
         expert_count=meta.expert_count,
@@ -43,6 +54,9 @@ def derive_caps(meta: GgufMeta | None, sibling_filenames) -> ModelCaps:
         has_swa=bool(meta.sliding_window and meta.sliding_window > 0),
         sliding_window=meta.sliding_window,
         ctx_train=meta.ctx_train,
+        is_embedding=(meta.arch in EMBEDDING_ARCHS or pooling is not None),
+        is_reranker=(pooling == "rank"),
+        pooling_type=pooling,
     )
 
 

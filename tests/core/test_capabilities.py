@@ -71,3 +71,26 @@ def test_suggestion_ctx_cap():
     caps = derive_caps(GgufMeta(ctx_train=262144), [])
     sg = suggestions(caps, {"ctx-size": 999999}, False, False)
     assert any(s.settings.get("ctx-size") == 262144 for s in sg)
+
+
+def test_embedding_detected_by_arch():
+    caps = derive_caps(GgufMeta(arch="nomic-bert"), [])
+    assert caps.is_embedding and not caps.is_reranker
+
+
+def test_embedding_detected_by_pooling_kv():
+    caps = derive_caps(GgufMeta(arch="bert", pooling_type=1), [])
+    assert caps.is_embedding
+    assert caps.pooling_type == "mean"
+
+
+def test_reranker_detected_by_rank_pooling():
+    caps = derive_caps(GgufMeta(arch="bert", pooling_type=4), [])
+    assert caps.is_reranker and caps.is_embedding
+    assert caps.pooling_type == "rank"
+
+
+def test_generation_model_is_not_embedding():
+    caps = derive_caps(GgufMeta(arch="qwen3", expert_count=256), [])
+    assert not caps.is_embedding and not caps.is_reranker
+    assert caps.pooling_type is None
