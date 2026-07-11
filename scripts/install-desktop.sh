@@ -10,7 +10,9 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
-VENV_PY="$REPO/.venv/bin/python"
+# Defaults to this repo's .venv; override with LLAMA_LAUNCHER_VENV_PY (used by
+# the tests to stay hermetic, and handy for a venv in a non-default location).
+VENV_PY="${LLAMA_LAUNCHER_VENV_PY:-$REPO/.venv/bin/python}"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
 DESKTOP_DIR="$DATA_DIR/applications"
 ICON_DIR="$DATA_DIR/icons/hicolor/scalable/apps"

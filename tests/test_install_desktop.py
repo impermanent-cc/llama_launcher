@@ -31,6 +31,14 @@ def _env(tmp_path: Path) -> dict:
     env["XDG_DATA_HOME"] = str(tmp_path / "data")
     env["XDG_CACHE_HOME"] = str(tmp_path / "cache")
     env["PATH"] = f"{_stub_dir(tmp_path)}:{env['PATH']}"
+    # Point the script at a stub interpreter so the test doesn't depend on a
+    # real .venv in the repo root (absent in CI). The script only checks that
+    # it's an executable file; the desktop entry's Exec line isn't asserted.
+    venv_py = tmp_path / "venv" / "bin" / "python"
+    venv_py.parent.mkdir(parents=True)
+    venv_py.write_text("#!/usr/bin/env bash\nexit 0\n")
+    venv_py.chmod(0o755)
+    env["LLAMA_LAUNCHER_VENV_PY"] = str(venv_py)
     return env
 
 
