@@ -57,6 +57,7 @@ class GgufMeta:
     expert_count: int | None = None
     sliding_window: int | None = None
     nextn_predict_layers: int | None = None
+    pooling_type: int | None = None
 
 
 class _Reader:
@@ -132,4 +133,5 @@ def parse_gguf_header(data: bytes) -> GgufMeta:
         expert_count=_num(a("expert_count")),
         sliding_window=_num(a("attention.sliding_window")),
         nextn_predict_layers=_num(a("nextn_predict_layers")),
+        pooling_type=_num(a("pooling_type")),
     )

@@ -125,3 +125,16 @@ def test_array_head_counts_feed_vram_estimate_without_crash():
                         n_head_kv=m.n_head_kv or m.n_head or 1,
                         n_embd=m.n_embd, ctx=m.ctx_train)
     assert est.total_bytes > 0
+
+
+def test_parses_pooling_type():
+    kvs = [_kv_str("general.architecture", "bert"),
+           _kv_u32("bert.pooling_type", 2)]
+    blob = b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0) + struct.pack("<Q", len(kvs)) + b"".join(kvs)
+    m = parse_gguf_header(blob)
+    assert m.pooling_type == 2
+
+
+def test_pooling_type_absent_is_none():
+    m = parse_gguf_header(_synthetic_gguf())
+    assert m.pooling_type is None
