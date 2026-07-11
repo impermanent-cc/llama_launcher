@@ -130,6 +130,8 @@ def _rel_embedding(caps):
     return t
 
 
+# _rel_embedding MUST stay last: its N/A tiers for an embedding model
+# override earlier contributors (e.g. vision's mmproj=RECOMMENDED).
 RELEVANCE_CONTRIBUTORS = [_rel_core, _rel_moe, _rel_mtp, _rel_vision, _rel_swa, _rel_embedding]
 
 

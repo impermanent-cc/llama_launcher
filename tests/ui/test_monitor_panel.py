@@ -145,6 +145,15 @@ def test_set_endpoints_hidden_when_neither(qtbot):
     assert p.endpoints_label.isHidden()
 
 
+def test_set_endpoints_rerank_only(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.set_endpoints(8080, embeddings=False, reranking=True)
+    assert not p.endpoints_label.isHidden()
+    assert "/v1/rerank" in p.endpoints_label.text()
+    assert "/v1/embeddings" not in p.endpoints_label.text()
+
+
 def test_reset_clears_endpoints(qtbot):
     p = MonitorPanel()
     qtbot.addWidget(p)
