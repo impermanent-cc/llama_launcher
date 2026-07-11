@@ -156,3 +156,35 @@ def test_numa_value_and_server_round_out_render():
     assert "--no-webui" in build_command(p)
     assert "--reasoning-format deepseek" in text
     assert "--dry-sequence-breaker none" in text
+
+
+def _embed_profile(**settings):
+    return Profile(
+        name="embed", image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
+        runtime=Runtime(binary="podman", gpu_mode="cdi"),
+        mounts=[Mount(host="/mnt/storage/AI/Models", container="/models",
+                      role="model", mode="ro")],
+        model="/models/nomic-embed.gguf",
+        settings={"port": 8080, **settings},
+    )
+
+
+def test_embedding_flags_render():
+    argv = build_command(_embed_profile(embeddings=True, pooling="mean"))
+    assert "--embeddings" in argv
+    i = argv.index("--pooling")
+    assert argv[i + 1] == "mean"
+    assert "--reranking" not in argv
+
+
+def test_reranking_flags_render():
+    argv = build_command(_embed_profile(reranking=True, pooling="rank", embeddings=True))
+    assert "--reranking" in argv
+    assert "--embeddings" in argv
+    i = argv.index("--pooling")
+    assert argv[i + 1] == "rank"
+
+
+def test_pooling_absent_emits_no_flag():
+    argv = build_command(_embed_profile(embeddings=True))
+    assert "--pooling" not in argv

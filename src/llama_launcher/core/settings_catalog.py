@@ -317,6 +317,17 @@ _ALL = [
             ("-ctvd",), enum=KV_CACHE_TYPES,
             tooltip="V KV-cache quantization for the draft model. Lower precision "
                     "(e.g. q8_0) saves VRAM at a small quality cost."),
+    # Embedding & Reranking
+    Setting("embeddings", "--embeddings", "bool", False, "Embedding & Reranking", (),
+            tooltip="Restrict the server to the embedding use case (serves /embeddings and "
+                    "/v1/embeddings). Use only with dedicated embedding models."),
+    Setting("pooling", "--pooling", "enum", "model default", "Embedding & Reranking", (),
+            enum=("model default", "none", "mean", "cls", "last", "rank"),
+            tooltip="Pooling type for embeddings. 'model default' does not pass --pooling "
+                    "(llama-server uses the model's own default). Rerankers require 'rank'."),
+    Setting("reranking", "--reranking", "bool", False, "Embedding & Reranking", (),
+            tooltip="Enable the reranking endpoint (/rerank, /v1/rerank). A reranker also "
+                    "needs pooling = rank and --embeddings enabled."),
 ]
 
 CATALOG: dict = {s.key: s for s in _ALL}
