@@ -100,3 +100,33 @@ def test_non_mtp_profile_gets_no_mtp_warning():
     p.mmproj = "/models/mmproj.gguf"
     p.settings["parallel"] = 4
     assert not any("mtp" in i.message.lower() for i in validate(p))
+
+
+def _vprofile(**settings):
+    from llama_launcher.core.spec import Profile, Mount, Runtime
+    return Profile(
+        name="e", image="img",
+        runtime=Runtime(binary="podman", gpu_mode="cdi"),
+        mounts=[Mount(host="/m", container="/models", role="model", mode="ro")],
+        model="/models/x.gguf", settings={**settings},
+    )
+
+
+def test_reranking_without_rank_pooling_warns():
+    issues = validate(_vprofile(reranking=True, embeddings=True, pooling="mean"))
+    assert any(i.level == "warning" and "rank" in i.message for i in issues)
+
+
+def test_reranking_without_embeddings_warns():
+    issues = validate(_vprofile(reranking=True, pooling="rank"))
+    assert any(i.level == "warning" and "embedding" in i.message.lower() for i in issues)
+
+
+def test_sampling_changed_in_embedding_mode_warns():
+    issues = validate(_vprofile(embeddings=True, temp=0.5))
+    assert any("sampling" in i.message.lower() for i in issues)
+
+
+def test_clean_embedding_profile_has_no_embed_warnings():
+    issues = validate(_vprofile(embeddings=True, pooling="mean"))
+    assert not any("rank" in i.message or "sampling" in i.message.lower() for i in issues)

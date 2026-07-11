@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from .spec import Profile
+from .settings_catalog import CATALOG
 
 
 @dataclass
@@ -68,5 +69,25 @@ def validate(profile: Profile, running_ports: tuple = (),
             issues.append(Issue("warning",
                                 "MTP (--spec-type draft-mtp) doesn't support --parallel > 1; "
                                 "set parallel = 1 (a single slot)."))
+
+    # Embedding / reranking bad-combo warnings. A reranker needs all three of
+    # --reranking, --pooling rank, and --embeddings; sampling is ignored here.
+    if profile.settings.get("embeddings") or profile.settings.get("reranking"):
+        if profile.settings.get("reranking"):
+            if profile.settings.get("pooling") != "rank":
+                issues.append(Issue("warning",
+                                    "Reranking needs --pooling rank; other pooling types give "
+                                    "near-zero scores. Set pooling = rank."))
+            if not profile.settings.get("embeddings"):
+                issues.append(Issue("warning",
+                                    "Reranking needs --embeddings enabled (embedding "
+                                    "extraction). Enable it."))
+        changed = sorted(k for k, s in CATALOG.items()
+                         if s.group == "Sampling" and k in profile.settings
+                         and profile.settings[k] != s.default)
+        if changed:
+            issues.append(Issue("warning",
+                                "Sampling parameters are ignored in embedding mode "
+                                f"(changed: {', '.join(changed)})."))
 
     return issues
