@@ -148,10 +148,10 @@ _ALL = [
             0, 1024, 1,
             tooltip="Maximum context checkpoints kept per slot, used by SWA models for fast "
                     "context reuse. Default 32."),
-    Setting("checkpoint-min-step", "--checkpoint-min-step", "int", 256, "Caching", ("-cms",),
+    Setting("checkpoint-min-step", "--checkpoint-min-step", "int", 8192, "Caching", ("-cms",),
             0, 1048576, 64,
             tooltip="Minimum spacing in tokens between context checkpoints. 0 = no minimum. "
-                    "Default 256."),
+                    "Default 8192."),
 
     # Sampling (core)
     Setting("temp", "--temp", "float", 0.80, "Sampling", (), 0.0, 2.0, 0.05,
@@ -185,9 +185,9 @@ _ALL = [
     Setting("dry-allowed-length", "--dry-allowed-length", "int", 2, "Sampling", (), 1, 20, 1,
             tooltip="DRY: longest repeated sequence allowed before the penalty kicks in. "
                     "Lower = catches shorter repeats sooner. Default 2."),
-    Setting("dry-penalty-last-n", "--dry-penalty-last-n", "int", -1, "Sampling", (), -1, 1048576, 1,
-            tooltip="DRY look-back: how many recent tokens to scan for repeats. -1 = the "
-                    "whole context; 0 = disabled."),
+    Setting("dry-penalty-last-n", "--dry-penalty-last-n", "int", 64, "Sampling", (), 0, 1048576, 1,
+            tooltip="DRY look-back: how many recent tokens to scan for repeats. "
+                    "0 = disabled. Default 64."),
     Setting("dry-sequence-breaker", "--dry-sequence-breaker", "string", "", "Sampling", (),
             tooltip="DRY sequence breaker. Setting this REPLACES llama.cpp's defaults "
                     "(newline : \" *); use 'none' to disable all breakers. Empty = keep "
@@ -196,9 +196,9 @@ _ALL = [
     Setting("repeat-penalty", "--repeat-penalty", "float", 1.0, "Sampling", (), 1.0, 2.0, 0.01,
             tooltip="Penalty applied to recently used tokens to reduce repetition. >1.0 "
                     "discourages repeats; 1.0 = off. Strong values can harm coherence."),
-    Setting("repeat-last-n", "--repeat-last-n", "int", 64, "Sampling", (), -1, 1048576, 1,
+    Setting("repeat-last-n", "--repeat-last-n", "int", 64, "Sampling", (), 0, 1048576, 1,
             tooltip="How many recent tokens the repeat/frequency/presence penalties look "
-                    "back over. -1 = whole context; 0 = disabled. Default 64."),
+                    "back over. 0 = disabled. Default 64."),
     Setting("frequency-penalty", "--frequency-penalty", "float", 0.0, "Sampling", (), 0.0, 2.0, 0.01,
             tooltip="Penalize tokens in proportion to how often they already appeared. "
                     "Higher = less repetition of frequent words. 0 = off."),

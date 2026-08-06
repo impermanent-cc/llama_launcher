@@ -59,7 +59,7 @@ def test_context_and_caching_additions():
     assert CATALOG["context-shift"].type == "bool"
     assert CATALOG["ctx-checkpoints"].default == 32
     assert CATALOG["ctx-checkpoints"].group == "Caching"
-    assert CATALOG["checkpoint-min-step"].default == 256
+    assert CATALOG["checkpoint-min-step"].default == 8192
     assert "-ctxcp" in CATALOG["ctx-checkpoints"].aliases
     assert "-cms" in CATALOG["checkpoint-min-step"].aliases
 
@@ -75,3 +75,23 @@ def test_sampling_perf_server_additions():
     assert CATALOG["no-webui"].type == "bool"
     assert CATALOG["reasoning-format"].default == "auto"
     assert CATALOG["reasoning-format"].enum == ("auto", "none", "deepseek", "deepseek-legacy")
+
+
+def test_checkpoint_min_step_matches_upstream_default():
+    # llama.cpp b10290 changed this default from 256 to 8192. A stale default
+    # means the widget shows 256, emits nothing, and the server silently uses 8192.
+    assert CATALOG["checkpoint-min-step"].default == 8192
+
+
+def test_dry_penalty_last_n_matches_upstream_default():
+    # b10290: default -1 -> 64, and -1 no longer means "context size".
+    s = CATALOG["dry-penalty-last-n"]
+    assert s.default == 64
+    assert s.minimum == 0
+
+
+def test_repeat_last_n_no_longer_offers_dead_sentinel():
+    # b10290 dropped "-1 = ctx_size" for repeat-last-n.
+    s = CATALOG["repeat-last-n"]
+    assert s.default == 64
+    assert s.minimum == 0
