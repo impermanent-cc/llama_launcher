@@ -174,3 +174,52 @@ def test_server_profile_cannot_emit_router_only_flags(win):
                              settings={"port": 8080, "models-max": 2}))
     # models-max is router-only; a single-model llama-server rejects it.
     assert "--models-max" not in build_command(win.current_profile())
+
+
+def _router_win(win, **kw):
+    base = dict(name="Host", mode="router", image="img",
+                mounts=[Mount(host="/mnt/models", container="/models")],
+                members=[RouterMember(profile="Qwen")], settings={"port": 8080})
+    base.update(kw)
+    win.load_profile(Profile(**base))
+    return win
+
+
+def test_preview_includes_the_router_mount(win):
+    _member_profile(store.default_base_dir())
+    _router_win(win)
+    assert ":/router:ro" in win.preview_text()
+
+
+def test_exported_script_includes_the_router_mount(win, tmp_path):
+    _member_profile(store.default_base_dir())
+    _router_win(win)
+    out = tmp_path / "run.sh"
+    win.export_sh(str(out))
+    text = out.read_text()
+    assert ":/router:ro" in text
+    # The preset and key paths are only reachable because of that mount.
+    assert "--models-preset" in text
+
+
+def test_router_tab_populates_on_profile_load_not_only_on_launch(win):
+    _member_profile(store.default_base_dir())
+    _router_win(win)
+    # Reattach-after-restart is the common path: select the profile, see the key.
+    assert "qwen" in win.router_panel.harness_text.toPlainText()
+    win.router_panel.reveal_key(True)
+    assert win.router_panel.key_label.text().startswith("sk-")
+
+
+def test_exposure_banner_shows_on_load_for_a_non_loopback_router(win):
+    _member_profile(store.default_base_dir())
+    _router_win(win, runtime=Runtime(bind_host="0.0.0.0"))
+    assert "0.0.0.0" in win.router_panel.banner.text()
+
+
+def test_report_validation_does_not_invent_router_errors(win):
+    _member_profile(store.default_base_dir())
+    _router_win(win)
+    data = win.gather_report_data()
+    joined = " ".join(data.get("validation", []))
+    assert "at least one model" not in joined

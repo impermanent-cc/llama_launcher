@@ -486,6 +486,9 @@ class MainWindow(QMainWindow):
         self._on_mode_changed()
         self.apply_model_caps()
         self.refresh_preview()
+        # Reattach-after-restart is the common path: selecting a saved router
+        # must show its key, harness block and exposure banner immediately.
+        self.refresh_router_panel_header()
 
     def current_profile(self) -> Profile:
         # Filtering lives here, in the UI, per the project's catalog contract --
@@ -518,8 +521,23 @@ class MainWindow(QMainWindow):
             members=self.members(),
         )
 
+    def build_current_command(self, p: Profile | None = None) -> list:
+        """argv for the current profile, including the router mount.
+
+        Every path that renders a command (preview, Export .sh, the diagnostic
+        report, launch) must go through here: build_command() omits the
+        -v <dir>:/router:ro mount unless it is told the host directory, and a
+        router command without that mount cannot start -- its --models-preset
+        and --api-key-file paths would not exist inside the container.
+        """
+        p = p or self.current_profile()
+        if p.mode != "router":
+            return build_command(p)
+        return build_command(
+            p, router_host_dir=str(api_key_store.router_dir(self.router_base_dir(), p.name)))
+
     def preview_text(self) -> str:
-        return " ".join(build_command(self.current_profile()))
+        return " ".join(self.build_current_command())
 
     def refresh_preview(self) -> None:
         self.preview.setPlainText(self.preview_text())
@@ -586,7 +604,10 @@ class MainWindow(QMainWindow):
         host = p.runtime.bind_host
         display_host = dial_host(host)
         port = p.settings.get("port", 8080)
-        key = api_key_store.read_api_key(self.router_base_dir(), p.name) or ""
+        # A router without a key is unusable, and the harness block exists so the
+        # key can be copied BEFORE the first launch. Generating here is
+        # idempotent and is the only side effect on this path.
+        key = api_key_store.ensure_api_key(self.router_base_dir(), p.name)
         self.router_panel.set_endpoint(
             f"http://{display_host}:{port}", key,
             [member_model_id(m) for m in p.members])
@@ -911,15 +932,22 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "Open Web UI", "Could not open browser (xdg-open not found).")
 
     def export_sh(self, path: str):
-        cmd = " ".join(build_command(self.current_profile()))
+        cmd = " ".join(self.build_current_command())
         Path(path).write_text(f"#!/usr/bin/env bash\n{cmd}\n")
         os.chmod(path, 0o755)
 
     def gather_report_data(self) -> dict:
         import platform, json as _json
         p = self.current_profile()
-        cmd = " ".join(build_command(p))
-        issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary))
+        cmd = " ".join(self.build_current_command(p))
+        # Pass the router context, or the report claims a healthy router has no
+        # members and is exposed without a key -- in the one artifact users
+        # paste when asking for help.
+        issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
+                          members=self.member_pairs(),
+                          api_key_present=bool(
+                              api_key_store.read_api_key(self.router_base_dir(), p.name))
+                          if p.mode == "router" else False)
         gpus = gpu.query_gpus()
         gpu_txt = "\n".join(f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, "
                             f"util {g.util_pct}%, {g.temp_c}C" for g in gpus) or "(no nvidia-smi)"

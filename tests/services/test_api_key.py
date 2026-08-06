@@ -49,3 +49,26 @@ def test_write_preset_writes_into_the_router_dir(tmp_path):
     path = api_key.write_preset(tmp_path, "R", "version = 1\n")
     assert path == api_key.router_dir(tmp_path, "R") / "models.ini"
     assert path.read_text() == "version = 1\n"
+
+
+def test_router_dir_is_not_group_writable(tmp_path):
+    # The directory guards the key: if it is writable, another local user can
+    # unlink api-key and choose the router's credential, which the 0600 on the
+    # file does nothing to prevent.
+    d = api_key.router_dir(tmp_path, "R")
+    assert stat.S_IMODE(d.stat().st_mode) == 0o700
+
+
+def test_reading_a_key_does_not_create_directories(tmp_path):
+    # read_api_key runs on the monitor tick; a poll must not touch the disk.
+    assert api_key.read_api_key(tmp_path, "Never Launched") is None
+    assert not (tmp_path / "router" / "never-launched").exists()
+
+
+def test_key_file_is_never_world_readable_even_briefly(tmp_path, monkeypatch):
+    # Guards the write-then-chmod window: with chmod neutered, the file must
+    # still have been created 0600 by open(2) itself.
+    monkeypatch.setattr("pathlib.Path.chmod", lambda self, mode: None)
+    api_key.ensure_api_key(tmp_path, "R")
+    path = api_key.router_dir(tmp_path, "R") / "api-key"
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
