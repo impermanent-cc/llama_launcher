@@ -27,6 +27,7 @@ from llama_launcher.store.profiles import (
 )
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
 from llama_launcher.core import vram
+from llama_launcher.core.mtp_stats import spec_counters, spec_delta
 from llama_launcher.core import report as report_mod
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.ui.dialogs.report_dialog import ReportDialog
@@ -230,6 +231,7 @@ class MainWindow(QMainWindow):
         self.setStyleSheet((self.styleSheet() or "") + TIER_QSS)
         self._last_caps = None
         self._router_statuses: dict = {}
+        self._spec_prev = None      # previous /metrics spec-decode counter read
         self.configure_tab = configure_tab
 
         # Tabs
@@ -699,6 +701,32 @@ class MainWindow(QMainWindow):
             f"Bound to {host}: reachable beyond this machine. The API key is required."
             if host not in LOOPBACK_HOSTS else "")
 
+    def _update_spec_stats(self, p: Profile) -> None:
+        """Derive spec-decode acceptance from /metrics counters.
+
+        The log-scraped acceptance line stays the source when --metrics is off,
+        and is the only source in server mode. In router mode the log belongs to
+        the ROUTER, so a child model's acceptance can only be attributed via
+        ?model=<id> -- which is what these counters are for.
+        """
+        if not p.settings.get("metrics"):
+            return
+        model_scope = self._router_pollable_model() if p.mode == "router" else None
+        if p.mode == "router" and model_scope is None:
+            return
+        text = metrics.fetch_metrics_text(
+            p.settings.get("port", 8080), model=model_scope,
+            api_key=api_key_store.read_api_key(self.router_base_dir(), p.name)
+            if p.mode == "router" else None,
+            host=dial_host(p.runtime.bind_host))
+        cur = spec_counters(text) if text else None
+        if cur is None:
+            return
+        if self._spec_prev is not None:
+            self.monitor_panel.set_draft_stats(spec_delta(self._spec_prev, cur),
+                                               source="counters")
+        self._spec_prev = cur
+
     def _report_launch_error(self, text: str) -> None:
         """Show why a detached router failed to start. Non-modal: this fires
         from a QProcess signal, which tests drive."""
@@ -829,6 +857,7 @@ class MainWindow(QMainWindow):
             # both at once: _spawn_async is asynchronous, so an unchained run
             # would race the removal and lose with "name already in use".
             self.monitor_panel.reset()
+            self._spec_prev = None
             self._spawn_async(
                 runtime.rm_argv(self._container_name(), p.runtime.binary),
                 on_done=lambda: self._spawn_async(
@@ -983,6 +1012,7 @@ class MainWindow(QMainWindow):
             if not self._log_follower_active():
                 self._start_log_follower()
             self.monitor_panel.update_stats(self.collect_monitor_data())
+            self._update_spec_stats(p)
         if p.mode == "router" and state == "running":
             self.refresh_router_models()
 

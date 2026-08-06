@@ -314,3 +314,32 @@ def test_member_whose_profile_is_gone_is_an_error_not_a_silent_drop(win):
                              settings={"port": 8080}))
     issues = win.router_issues()
     assert any("Deleted Profile" in i.message for i in issues if i.level == "error")
+
+
+def test_spec_counters_feed_the_monitor_in_router_mode(win, monkeypatch):
+    from llama_launcher.core.router_models import RouterModel
+    _router_win(win, settings={"port": 8080, "metrics": True})
+    monkeypatch.setattr("llama_launcher.ui.main_window.router_api.list_models",
+                        lambda host, port, key, **kw: [RouterModel(id="qwen",
+                                                                   status="loaded")])
+    win.refresh_router_models()
+
+    reads = iter([
+        "llamacpp:spec_decode_num_draft_tokens_total 1000\n"
+        "llamacpp:spec_decode_num_accepted_tokens_total 600\n"
+        "llamacpp:spec_decode_num_drafts_total 300\n",
+        "llamacpp:spec_decode_num_draft_tokens_total 2000\n"
+        "llamacpp:spec_decode_num_accepted_tokens_total 1400\n"
+        "llamacpp:spec_decode_num_drafts_total 700\n",
+    ])
+    seen = {}
+    monkeypatch.setattr("llama_launcher.ui.main_window.metrics.fetch_metrics_text",
+                        lambda port, **kw: seen.update(kw) or next(reads))
+    p = win.current_profile()
+    win._update_spec_stats(p)       # first read only primes the counters
+    assert not win.monitor_panel.mtp_label.isVisibleTo(win.monitor_panel)
+    win._update_spec_stats(p)
+    text = win.monitor_panel.mtp_label.text()
+    assert "80%" in text            # 800 accepted of 1000 drafted since last poll
+    assert "counters" in text       # and it says where the number came from
+    assert seen["model"] == "qwen"  # attributed to the model, not the router

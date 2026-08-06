@@ -94,13 +94,28 @@ class MonitorPanel(QWidget):
             stats = parse_draft_stats(line)
             if stats is not None:
                 self._draft = stats
-                self.mtp_label.setText(self._mtp_text(stats))
+                self.mtp_label.setText(self._mtp_text(stats, "log"))
                 self.mtp_label.setVisible(True)
 
+    def set_draft_stats(self, stats, source: str = "counters") -> None:
+        """Show speculative-decode acceptance from a source other than the log.
+
+        In router mode the log belongs to the router process, so a child's
+        "draft acceptance = ..." line cannot be attributed to a model; the
+        /metrics counters can, via ?model=<id>. The label says which source it
+        used so the two are never confused.
+        """
+        if stats is None:
+            return
+        self._draft = stats
+        self.mtp_label.setText(self._mtp_text(stats, source))
+        self.mtp_label.setVisible(True)
+
     @staticmethod
-    def _mtp_text(d) -> str:
+    def _mtp_text(d, source: str = "log") -> str:
         pos = " / ".join(f"{p * 100:.0f}%" for p in d.per_position)
-        return f"MTP  accept {d.acceptance * 100:.0f}%  ·  len {d.mean_len:.2f}  ·  pos {pos}"
+        return (f"MTP  accept {d.acceptance * 100:.0f}%  ·  len {d.mean_len:.2f}  "
+                f"·  pos {pos}  ({source})")
 
     def reset(self):
         self._draft = None
