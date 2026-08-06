@@ -11,6 +11,7 @@ import llama_launcher.services.health as _health
 import llama_launcher.services.gpu as _gpu
 import llama_launcher.services.metrics as _metrics
 import llama_launcher.services.registry as _registry
+import llama_launcher.services.router_api as _router_api
 import llama_launcher.ui.main_window as _mw
 
 
@@ -24,9 +25,16 @@ def _hermetic_ui_boundaries(monkeypatch):
     monkeypatch.setattr(_runtime, "stats", lambda name, binary: None)
     monkeypatch.setattr(_runtime, "started_at", lambda name, binary: None)
     monkeypatch.setattr(_runtime, "list_local_images", lambda binary: [])
-    monkeypatch.setattr(_health, "health_ok", lambda port, timeout=1.0: False)
+    monkeypatch.setattr(_health, "health_ok", lambda port, timeout=1.0, **kw: False)
     monkeypatch.setattr(_gpu, "query_gpus", lambda: [])
     monkeypatch.setattr(_gpu, "free_vram_bytes", lambda: None)
-    monkeypatch.setattr(_metrics, "fetch_metrics", lambda port, timeout=1.0: {})
-    monkeypatch.setattr(_metrics, "fetch_slots", lambda port, timeout=1.0: [])
+    monkeypatch.setattr(_metrics, "fetch_metrics", lambda port, timeout=1.0, **kw: {})
+    monkeypatch.setattr(_metrics, "fetch_slots", lambda port, timeout=1.0, **kw: [])
+    monkeypatch.setattr(_metrics, "fetch_metrics_text",
+                        lambda port, timeout=1.0, **kw: "")
+    # Router control plane: without these, update_status -> refresh_router_models
+    # would make a real HTTP call from the test suite.
+    monkeypatch.setattr(_router_api, "list_models", lambda host, port, key, **kw: [])
+    monkeypatch.setattr(_router_api, "load_model", lambda *a, **kw: True)
+    monkeypatch.setattr(_router_api, "unload_model", lambda *a, **kw: True)
     monkeypatch.setattr(_registry, "fetch_latest", lambda repo, prefix, timeout=10.0: None)

@@ -9,7 +9,22 @@ from .settings_catalog import CATALOG
 # not be found automatically.
 ODYSSEUS_SCAN_PORTS: frozenset = frozenset(range(8000, 8021)) | {8080, 1234, 11434, 11435}
 
-_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+# Addresses that keep a published port on this machine. Anything else is
+# reachable from the network. Kept deliberately narrow: an unlisted address is
+# treated as exposed, which is the safe direction to be wrong in.
+LOOPBACK_HOSTS: frozenset = frozenset({
+    "127.0.0.1", "localhost", "::1", "[::1]",
+})
+_LOOPBACK_HOSTS = LOOPBACK_HOSTS   # retained: referenced by the router rules below
+
+
+def dial_host(bind_host: str) -> str:
+    """The address to CONNECT to for a server published on `bind_host`.
+
+    0.0.0.0 (and ::) are bind wildcards, not destinations — dialing them is a
+    bug, so they map to loopback.
+    """
+    return "127.0.0.1" if bind_host in ("0.0.0.0", "::", "[::]", "") else bind_host
 
 
 @dataclass
@@ -36,6 +51,19 @@ def validate(profile: Profile, running_ports: tuple = (),
         if bool(m.host) != bool(m.container):
             issues.append(Issue("error",
                                 "Mount row is incomplete (host and container both required)."))
+
+    # Exposure applies to BOTH modes: Runtime.bind_host drives the publish
+    # address for every launch, so a single-model server bound past loopback
+    # with no key is just as open as a router would be. In server mode the key
+    # is the catalog setting; in router mode it comes from the key file.
+    if profile.runtime.bind_host not in LOOPBACK_HOSTS:
+        has_key = api_key_present if profile.mode == "router" \
+            else bool(profile.settings.get("api-key"))
+        if not has_key:
+            issues.append(Issue(
+                "error",
+                f"Binding to {profile.runtime.bind_host} without an API key would expose an "
+                f"unauthenticated server. Generate a key first."))
 
     if profile.mode == "router":
         issues += _validate_router(profile, members, api_key_present)
@@ -147,15 +175,10 @@ def _validate_router(profile: Profile, members: tuple,
                 f"Member '{member_profile.name}' raw args can't all be expressed in a "
                 f"preset and will be dropped: {'; '.join(problems)}"))
 
-    # Exposure. A non-loopback bind with no key puts an unauthenticated
-    # inference server on the network.
-    if profile.runtime.bind_host not in _LOOPBACK_HOSTS and not api_key_present:
-        issues.append(Issue(
-            "error",
-            f"Binding to {profile.runtime.bind_host} without an API key would expose an "
-            f"unauthenticated server. Generate a key first."))
+    # NB: the non-loopback-without-a-key error is raised in validate() for both
+    # modes, so it is deliberately not repeated here.
 
-    models_max = profile.settings.get("models-max", 1)
+    models_max = profile.settings.get("models-max", CATALOG["models-max"].default)
     if isinstance(models_max, int) and models_max > 1:
         issues.append(Issue(
             "warning",
@@ -170,7 +193,9 @@ def _validate_router(profile: Profile, members: tuple,
             f"servers (8000-8020, 8080, 1234, 11434, 11435), so it won't be found "
             f"automatically."))
 
-    origins = str(profile.settings.get("cors-origins", "") or "")
+    # Default to the CATALOG default, not "": cors-origins defaults to "*", so
+    # reading absence as "" made the most dangerous configuration unwarnable.
+    origins = str(profile.settings.get("cors-origins", CATALOG["cors-origins"].default) or "")
     uses_agent_tools = bool(profile.settings.get("tools")
                             or profile.settings.get("agent")
                             or profile.settings.get("mcp-servers-config")

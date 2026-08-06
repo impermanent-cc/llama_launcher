@@ -18,7 +18,7 @@ from llama_launcher.core.router_preset import render_preset
 from llama_launcher.core.settings_catalog import CATALOG
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.pathmap import host_to_container
-from llama_launcher.core.validation import validate
+from llama_launcher.core.validation import validate, LOOPBACK_HOSTS, dial_host
 from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
     load_config, save_config, profile_to_dict,
@@ -551,7 +551,7 @@ class MainWindow(QMainWindow):
         if p.mode != "router":
             return
         host = p.runtime.bind_host
-        display_host = "127.0.0.1" if host == "0.0.0.0" else host
+        display_host = dial_host(host)
         port = p.settings.get("port", 8080)
         key = api_key_store.read_api_key(self.router_base_dir(), p.name) or ""
         self.router_panel.set_endpoint(
@@ -559,7 +559,7 @@ class MainWindow(QMainWindow):
             [member_model_id(m) for m in p.members])
         self.router_panel.set_exposure_warning(
             f"Bound to {host}: reachable beyond this machine. The API key is required."
-            if host not in ("127.0.0.1", "localhost", "::1") else "")
+            if host not in LOOPBACK_HOSTS else "")
 
     def adopt_running_containers(self) -> list:
         """Containers this launcher owns, so a detached router survives a GUI restart."""
@@ -567,9 +567,8 @@ class MainWindow(QMainWindow):
         return runtime.list_launcher_containers(p.runtime.binary)
 
     def _router_host(self, p: Profile) -> str:
-        """The address the GUI itself dials. 0.0.0.0 is a bind wildcard, not a
-        destination, so talk to loopback when the router binds to everything."""
-        return "127.0.0.1" if p.runtime.bind_host == "0.0.0.0" else p.runtime.bind_host
+        """The address the GUI itself dials for this profile."""
+        return dial_host(p.runtime.bind_host)
 
     def refresh_router_models(self) -> None:
         p = self.current_profile()
@@ -792,7 +791,9 @@ class MainWindow(QMainWindow):
             return
         name = self._container_name()
         state = runtime.container_state(name, p.runtime.binary)
-        ok = health.health_ok(p.settings.get("port", 8080)) if state == "running" else False
+        ok = health.health_ok(p.settings.get("port", 8080),
+                              host=dial_host(p.runtime.bind_host)) \
+            if state == "running" else False
         self.status_label.setText("● " + health.derive_status(state, ok))
         self.web_ui_btn.setEnabled(state == "running")
         if state == "running":
@@ -807,7 +808,7 @@ class MainWindow(QMainWindow):
         p = self.current_profile()
         port = p.settings.get("port", 8080)
         metrics_on = bool(p.settings.get("metrics"))
-        host, key, model_scope, poll = "127.0.0.1", None, None, True
+        host, key, model_scope, poll = dial_host(p.runtime.bind_host), None, None, True
         if p.mode == "router":
             host = self._router_host(p)
             key = api_key_store.read_api_key(self.router_base_dir(), p.name)
@@ -868,9 +869,11 @@ class MainWindow(QMainWindow):
             self.export_sh(path)
 
     def open_web_ui(self):
-        port = self.current_profile().settings.get("port", 8080)
+        p = self.current_profile()
+        port = p.settings.get("port", 8080)
         try:
-            subprocess.Popen(["xdg-open", f"http://127.0.0.1:{port}"], start_new_session=True)
+            subprocess.Popen(["xdg-open", f"http://{dial_host(p.runtime.bind_host)}:{port}"],
+                             start_new_session=True)
         except OSError:
             QMessageBox.warning(self, "Open Web UI", "Could not open browser (xdg-open not found).")
 

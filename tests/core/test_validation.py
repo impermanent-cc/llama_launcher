@@ -247,3 +247,27 @@ def test_tools_with_lan_cors_origin_warns():
 def test_server_mode_validation_unchanged():
     p = Profile(name="Solo", image="img")
     assert any("No model selected" in m for m in _errors(validate(p)))
+
+
+def test_server_mode_non_loopback_bind_without_key_is_an_error():
+    # The Bind address control is shown in BOTH modes, so the exposure guard
+    # cannot live only in the router branch.
+    p = Profile(name="Solo", image="img", model="/models/a.gguf",
+                mounts=[Mount(host="/h", container="/models")],
+                runtime=Runtime(bind_host="0.0.0.0"), settings={"port": 8080})
+    assert any("without an API key" in m for m in _errors(validate(p)))
+
+
+def test_server_mode_non_loopback_bind_with_a_typed_key_is_allowed():
+    p = Profile(name="Solo", image="img", model="/models/a.gguf",
+                mounts=[Mount(host="/h", container="/models")],
+                runtime=Runtime(bind_host="0.0.0.0"),
+                settings={"port": 8080, "api-key": "sk-typed"})
+    assert not any("without an API key" in m for m in _errors(validate(p)))
+
+
+def test_server_mode_loopback_bind_is_silent():
+    p = Profile(name="Solo", image="img", model="/models/a.gguf",
+                mounts=[Mount(host="/h", container="/models")],
+                settings={"port": 8080})
+    assert not any("without an API key" in m for m in _errors(validate(p)))

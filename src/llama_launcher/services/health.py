@@ -10,9 +10,9 @@ def derive_status(container_state: str, health_ok: bool) -> str:
     return "running" if health_ok else "starting"
 
 
-def health_ok(port: int, timeout: float = 1.0) -> bool:
+def health_ok(port: int, timeout: float = 1.0, host: str = "127.0.0.1") -> bool:
     try:
-        r = requests.get(f"http://127.0.0.1:{port}/health", timeout=timeout)
+        r = requests.get(f"http://{host}:{port}/health", timeout=timeout)
         return r.status_code == 200
     except requests.RequestException:
         return False
