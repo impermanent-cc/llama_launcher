@@ -130,3 +130,120 @@ def test_sampling_changed_in_embedding_mode_warns():
 def test_clean_embedding_profile_has_no_embed_warnings():
     issues = validate(_vprofile(embeddings=True, pooling="mean"))
     assert not any("rank" in i.message or "sampling" in i.message.lower() for i in issues)
+
+
+from llama_launcher.core.spec import Mount, Profile, RouterMember, Runtime
+from llama_launcher.core.validation import validate
+
+
+def _router(**kw):
+    base = dict(
+        name="Host", mode="router", image="img",
+        mounts=[Mount(host="/mnt/models", container="/models")],
+        members=[RouterMember(profile="Qwen")],
+        settings={"port": 8080},
+    )
+    base.update(kw)
+    return Profile(**base)
+
+
+def _member_profile(name="Qwen", model="/models/qwen.gguf", **kw):
+    return Profile(name=name, model=model, **kw)
+
+
+def _errors(issues):
+    return [i.message for i in issues if i.level == "error"]
+
+
+def _warnings(issues):
+    return [i.message for i in issues if i.level == "warning"]
+
+
+def test_router_does_not_require_its_own_model():
+    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), _member_profile())],
+                      api_key_present=True)
+    assert not any("No model selected" in m for m in _errors(issues))
+
+
+def test_router_with_no_members_is_an_error():
+    issues = validate(_router(members=[]), members=[], api_key_present=True)
+    assert any("at least one model" in m for m in _errors(issues))
+
+
+def test_duplicate_model_ids_are_an_error():
+    m1 = RouterMember(profile="Qwen Big")
+    m2 = RouterMember(profile="Qwen  Big")       # slugifies to the same id
+    issues = validate(_router(), api_key_present=True,
+                      members=[(m1, _member_profile("Qwen Big")),
+                               (m2, _member_profile("Qwen  Big"))])
+    assert any("qwen-big" in m for m in _errors(issues))
+
+
+def test_member_model_must_be_under_a_router_mount():
+    member = (RouterMember(profile="Q"), _member_profile(model="/elsewhere/q.gguf"))
+    issues = validate(_router(), members=[member], api_key_present=True)
+    assert any("not under any mount" in m for m in _errors(issues))
+
+
+def test_non_loopback_bind_without_api_key_is_an_error():
+    p = _router(runtime=Runtime(bind_host="0.0.0.0"))
+    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
+                      api_key_present=False)
+    assert any("without an API key" in m for m in _errors(issues))
+
+
+def test_non_loopback_bind_with_api_key_is_allowed():
+    p = _router(runtime=Runtime(bind_host="0.0.0.0"))
+    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
+                      api_key_present=True)
+    assert not any("without an API key" in m for m in _errors(issues))
+
+
+def test_models_max_above_one_warns():
+    p = _router(settings={"port": 8080, "models-max": 3})
+    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
+                      api_key_present=True)
+    assert any("models-max" in m for m in _warnings(issues))
+
+
+def test_port_outside_discovery_ranges_warns():
+    p = _router(settings={"port": 9999})
+    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
+                      api_key_present=True)
+    assert any("discover" in m.lower() for m in _warnings(issues))
+
+
+def test_port_inside_discovery_ranges_does_not_warn():
+    p = _router(settings={"port": 8080})
+    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
+                      api_key_present=True)
+    assert not any("discover" in m.lower() for m in _warnings(issues))
+
+
+def test_multi_lora_member_warns():
+    from llama_launcher.core.spec import LoraRef
+    member_profile = _member_profile(loras=[LoraRef(path="/models/a.gguf"),
+                                            LoraRef(path="/models/b.gguf")])
+    issues = validate(_router(), api_key_present=True,
+                      members=[(RouterMember(profile="Q"), member_profile)])
+    assert any("LoRA" in m for m in _warnings(issues))
+
+
+def test_unconvertible_member_raw_args_warns():
+    member_profile = _member_profile(raw_args="--foo a --foo b")
+    issues = validate(_router(), api_key_present=True,
+                      members=[(RouterMember(profile="Q"), member_profile)])
+    assert any("preset" in m.lower() for m in _warnings(issues))
+
+
+def test_tools_with_lan_cors_origin_warns():
+    p = _router(settings={"port": 8080, "tools": "all",
+                          "cors-origins": "http://vm.local"})
+    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
+                      api_key_present=True)
+    assert any("clamp" in m.lower() for m in _warnings(issues))
+
+
+def test_server_mode_validation_unchanged():
+    p = Profile(name="Solo", image="img")
+    assert any("No model selected" in m for m in _errors(validate(p)))

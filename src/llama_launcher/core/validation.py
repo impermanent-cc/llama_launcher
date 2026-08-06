@@ -1,7 +1,15 @@
 from dataclasses import dataclass
 
-from .spec import Profile
+from .router_preset import convert_raw_args
+from .spec import Profile, member_model_id
 from .settings_catalog import CATALOG
+
+# Ports Odysseus scans when discovering local model servers
+# (src/model_discovery.py). A router outside these ranges is reachable but will
+# not be found automatically.
+ODYSSEUS_SCAN_PORTS: frozenset = frozenset(range(8000, 8021)) | {8080, 1234, 11434, 11435}
+
+_LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
 
 @dataclass
@@ -16,7 +24,8 @@ def _under_any_mount(path: str, profile: Profile) -> bool:
 
 
 def validate(profile: Profile, running_ports: tuple = (),
-             binary_found: bool = True) -> list[Issue]:
+             binary_found: bool = True, members: tuple = (),
+             api_key_present: bool = False) -> list[Issue]:
     issues: list[Issue] = []
 
     if not binary_found:
@@ -28,19 +37,22 @@ def validate(profile: Profile, running_ports: tuple = (),
             issues.append(Issue("error",
                                 "Mount row is incomplete (host and container both required)."))
 
-    if not profile.model:
-        issues.append(Issue("error", "No model selected."))
-    elif not _under_any_mount(profile.model, profile):
-        issues.append(Issue("error",
-                            "Model path is not under any mounted folder; the "
-                            "container can't see it."))
+    if profile.mode == "router":
+        issues += _validate_router(profile, members, api_key_present)
+    else:
+        if not profile.model:
+            issues.append(Issue("error", "No model selected."))
+        elif not _under_any_mount(profile.model, profile):
+            issues.append(Issue("error",
+                                "Model path is not under any mounted folder; the "
+                                "container can't see it."))
 
-    if profile.mmproj and not _under_any_mount(profile.mmproj, profile):
-        issues.append(Issue("error", "mmproj path is not under any mount."))
+        if profile.mmproj and not _under_any_mount(profile.mmproj, profile):
+            issues.append(Issue("error", "mmproj path is not under any mount."))
 
-    for lora in profile.loras:
-        if not _under_any_mount(lora.path, profile):
-            issues.append(Issue("error", f"LoRA path not under any mount: {lora.path}"))
+        for lora in profile.loras:
+            if not _under_any_mount(lora.path, profile):
+                issues.append(Issue("error", f"LoRA path not under any mount: {lora.path}"))
 
     if profile.settings.get("tools"):
         for m in profile.mounts:
@@ -89,5 +101,92 @@ def validate(profile: Profile, running_ports: tuple = (),
             issues.append(Issue("warning",
                                 "Sampling parameters are ignored in embedding mode "
                                 f"(changed: {', '.join(changed)})."))
+
+    return issues
+
+
+def _validate_router(profile: Profile, members: tuple,
+                     api_key_present: bool) -> list[Issue]:
+    issues: list[Issue] = []
+
+    if not members:
+        issues.append(Issue("error",
+                            "A router needs at least one model; add member profiles."))
+
+    seen_ids: dict = {}
+    for member, member_profile in members:
+        model_id = member_model_id(member)
+        if model_id in seen_ids:
+            issues.append(Issue(
+                "error",
+                f"Two members share the model id '{model_id}' "
+                f"({seen_ids[model_id]} and {member_profile.name}); ids must be unique "
+                f"because harnesses use them to route requests."))
+        else:
+            seen_ids[model_id] = member_profile.name
+
+        if not member_profile.model:
+            issues.append(Issue("error",
+                                f"Member '{member_profile.name}' has no model selected."))
+        elif not _under_any_mount(member_profile.model, profile):
+            issues.append(Issue(
+                "error",
+                f"Member '{member_profile.name}' model path is not under any mount on "
+                f"this router; the router container can't see it."))
+
+        if len(member_profile.loras) > 1:
+            issues.append(Issue(
+                "warning",
+                f"Member '{member_profile.name}' has more than one LoRA; a preset INI "
+                f"can only express the first."))
+
+        _pairs, problems = convert_raw_args(member_profile.raw_args)
+        if problems:
+            issues.append(Issue(
+                "warning",
+                f"Member '{member_profile.name}' raw args can't all be expressed in a "
+                f"preset and will be dropped: {'; '.join(problems)}"))
+
+    # Exposure. A non-loopback bind with no key puts an unauthenticated
+    # inference server on the network.
+    if profile.runtime.bind_host not in _LOOPBACK_HOSTS and not api_key_present:
+        issues.append(Issue(
+            "error",
+            f"Binding to {profile.runtime.bind_host} without an API key would expose an "
+            f"unauthenticated server. Generate a key first."))
+
+    models_max = profile.settings.get("models-max", 1)
+    if isinstance(models_max, int) and models_max > 1:
+        issues.append(Issue(
+            "warning",
+            f"models-max is {models_max}: the router may hold that many models resident "
+            f"at once, which can exceed VRAM. Use 1 unless the members are small."))
+
+    port = profile.settings.get("port", 8080)
+    if port not in ODYSSEUS_SCAN_PORTS:
+        issues.append(Issue(
+            "warning",
+            f"Port {port} is outside the ranges Odysseus scans when it discovers model "
+            f"servers (8000-8020, 8080, 1234, 11434, 11435), so it won't be found "
+            f"automatically."))
+
+    origins = str(profile.settings.get("cors-origins", "") or "")
+    uses_agent_tools = bool(profile.settings.get("tools")
+                            or profile.settings.get("agent")
+                            or profile.settings.get("mcp-servers-config")
+                            or profile.settings.get("mcp-servers-json"))
+    if uses_agent_tools and origins and origins not in ("localhost", "*"):
+        issues.append(Issue(
+            "warning",
+            "--tools/--agent/MCP clamp CORS origins to localhost, so the origin set here "
+            "will be overridden."))
+
+    if (profile.runtime.bind_host not in _LOOPBACK_HOSTS
+            and origins == "*"
+            and not profile.settings.get("cors-credentials")):
+        issues.append(Issue(
+            "warning",
+            "CORS origins '*' with credentials enabled echoes the Origin header back and "
+            "always allows credentials, on a port exposed beyond loopback."))
 
     return issues
