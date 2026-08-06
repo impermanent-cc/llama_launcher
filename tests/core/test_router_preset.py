@@ -31,11 +31,33 @@ def test_renders_settings_as_dashless_keys():
     assert "n-gpu-layers = 99" in text
 
 
-def test_bool_settings_render_true_or_negated_key():
-    # A Setting whose flag is already negative (--no-cors-credentials) must
-    # render under its own flag name, not as "cors-credentials = false".
+def test_enum_settings_render_their_value():
     p = Profile(name="Q", model="/m.gguf", settings={"flash-attn": "on"})
     assert "flash-attn = on" in render_preset([(_member(), p)]).text
+
+
+def test_bool_settings_render_true_under_their_own_flag_name():
+    # A Setting whose flag is already negative (--no-cors-credentials) must
+    # render under its own flag name, not as "cors-credentials = true".
+    # The original test used flash-attn, which is an enum, so it exercised
+    # neither the bool branch nor the flag-name mapping.
+    p = Profile(name="Q", model="/m.gguf", settings={"cors-credentials": True})
+    text = render_preset([(_member(), p)]).text
+    assert "no-cors-credentials = true" in text
+
+
+def test_false_bool_settings_emit_nothing():
+    p = Profile(name="Q", model="/m.gguf", settings={"cors-credentials": False})
+    assert "cors-credentials" not in render_preset([(_member(), p)]).text
+
+
+def test_raw_arg_duplicating_a_form_setting_is_reported():
+    p = Profile(name="Q", model="/m.gguf", settings={"ctx-size": 8192},
+                raw_args="--ctx-size 4096")
+    out = render_preset([(_member(), p)])
+    assert out.text.count("ctx-size = ") == 1
+    assert "ctx-size = 8192" in out.text
+    assert any("duplicates" in w for w in out.warnings)
 
 
 def test_excludes_router_controlled_keys():
@@ -111,3 +133,38 @@ def test_multiple_members_each_get_a_section():
     b = Profile(name="B", model="/b.gguf")
     text = render_preset([(_member("A"), a), (_member("B"), b)]).text
     assert "[a]" in text and "[b]" in text
+
+
+def test_raw_args_negative_values_are_not_mistaken_for_flags():
+    # llama.cpp uses -1 sentinels widely; treating "-1" as a flag silently
+    # turned the real flag into "true" and emitted a junk "1 = true" key.
+    pairs, problems = convert_raw_args("--temp -1")
+    assert pairs == {"temp": "-1"}
+    assert problems == []
+
+
+def test_raw_args_multiple_negative_values():
+    pairs, problems = convert_raw_args("--seed -1 --top-k 40")
+    assert pairs == {"seed": "-1", "top-k": "40"}
+    assert problems == []
+
+
+def test_raw_args_short_flag_with_negative_value():
+    pairs, _ = convert_raw_args("-ngl -1")
+    assert pairs == {"ngl": "-1"}
+
+
+def test_raw_args_equals_form_is_split():
+    pairs, problems = convert_raw_args("--ctx-size=4096")
+    assert pairs == {"ctx-size": "4096"}
+    assert problems == []
+
+
+def test_raw_args_negative_float_value():
+    pairs, _ = convert_raw_args("--top-n-sigma -1.5")
+    assert pairs == {"top-n-sigma": "-1.5"}
+
+
+def test_raw_args_still_treats_a_real_flag_as_a_flag():
+    pairs, _ = convert_raw_args("--flag --other x")
+    assert pairs == {"flag": "true", "other": "x"}

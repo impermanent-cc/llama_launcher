@@ -7,6 +7,7 @@ leading dashes. See tools/server/README.md, "Model presets".
 Pure module: no IO, no Qt.
 """
 
+import re
 import shlex
 from dataclasses import dataclass, field
 
@@ -18,6 +19,15 @@ from .spec import Profile, RouterMember, member_model_id
 EXCLUDED_PRESET_KEYS: frozenset = frozenset({
     "port", "host", "api-key", "alias",
 }) | ROUTER_ONLY_KEYS
+
+# A flag starts with one or two dashes followed by a LETTER. "-1" and "-1.5" are
+# values, not flags — llama.cpp uses negative sentinels all over its interface
+# (--seed -1, --n-gpu-layers -1, --top-n-sigma -1.5).
+_FLAG_RE = re.compile(r"^--?[A-Za-z]")
+
+
+def _is_flag(token: str) -> bool:
+    return bool(_FLAG_RE.match(token))
 
 
 @dataclass
@@ -42,17 +52,23 @@ def convert_raw_args(raw: str) -> tuple[dict, list[str]]:
     i = 0
     while i < len(tokens):
         tok = tokens[i]
-        if not tok.startswith("-"):
+        if not _is_flag(tok):
             problems.append(f"cannot express {tok!r} in a preset (not a --flag)")
             i += 1
             continue
-        key = tok.lstrip("-")
-        if i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
-            value = tokens[i + 1]
-            i += 2
-        else:
-            value = "true"
+        # --key=value is as valid as --key value.
+        if "=" in tok:
+            key, _, value = tok.partition("=")
+            key = key.lstrip("-")
             i += 1
+        else:
+            key = tok.lstrip("-")
+            if i + 1 < len(tokens) and not _is_flag(tokens[i + 1]):
+                value = tokens[i + 1]
+                i += 2
+            else:
+                value = "true"
+                i += 1
         if key in pairs:
             problems.append(f"{key!r} appears more than once; INI keys are unique")
             continue
@@ -103,14 +119,24 @@ def render_preset(pairs: list, catalog: dict = CATALOG) -> PresetResult:
                     f"preset (INI keys are unique); dropped: {dropped}"
                 )
 
+        emitted: set = set()
         for key, value in _setting_pairs(profile, catalog):
             lines.append(f"{key} = {value}")
+            emitted.add(key)
 
         raw_pairs, problems = convert_raw_args(profile.raw_args)
         for key, value in raw_pairs.items():
             if key in EXCLUDED_PRESET_KEYS:
                 continue
+            # INI keys are unique; a raw arg repeating a key already set in the
+            # form would silently depend on the parser's last-wins behaviour.
+            if key in emitted:
+                problems.append(
+                    f"raw arg {key!r} duplicates a value already set in the form; "
+                    f"the form value is kept")
+                continue
             lines.append(f"{key} = {value}")
+            emitted.add(key)
         for problem in problems:
             warnings.append(f"{profile.name}: {problem}")
 
