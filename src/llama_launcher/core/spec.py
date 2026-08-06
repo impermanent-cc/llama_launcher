@@ -19,11 +19,26 @@ class LoraRef:
 
 
 @dataclass
+class RouterMember:
+    """One model served by a router profile.
+
+    `profile` names a saved profile whose settings become this model's preset
+    section. `model_id` is what a harness puts in the request's "model" field;
+    empty means "derive it from the profile name".
+    """
+    profile: str
+    model_id: str = ""
+    load_on_startup: bool = False
+    stop_timeout: int = 10          # seconds to wait before forcing termination
+
+
+@dataclass
 class Runtime:
     binary: str = "podman"        # "podman" | "docker"
     gpu_mode: str = "cdi"         # "cdi" | "gpus-all" | "none"
     selinux_label_disable: bool = False
     extra_run_args: str = ""
+    bind_host: str = "127.0.0.1"  # publish address; non-loopback exposes the port
 
 
 @dataclass
@@ -38,8 +53,15 @@ class Profile:
     loras: list[LoraRef] = field(default_factory=list)
     settings: dict = field(default_factory=dict)
     raw_args: str = ""
+    mode: str = "server"                                # "server" | "router"
+    members: list[RouterMember] = field(default_factory=list)
 
 
 def slugify(name: str) -> str:
     s = re.sub(r"[^a-z0-9]+", "-", name.lower())
     return s.strip("-")
+
+
+def member_model_id(m: RouterMember) -> str:
+    """The id a harness sends in its "model" field for this member."""
+    return m.model_id or slugify(m.profile)

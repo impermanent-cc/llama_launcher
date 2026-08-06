@@ -3,7 +3,9 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
-from llama_launcher.core.spec import Profile, Mount, LoraRef, Runtime, slugify
+from llama_launcher.core.spec import (
+    Profile, Mount, LoraRef, Runtime, RouterMember, slugify,
+)
 
 
 def default_base_dir() -> Path:
@@ -27,6 +29,8 @@ def profile_from_dict(d: dict) -> Profile:
         loras=[LoraRef(**l) for l in d.get("loras", [])],
         settings=dict(d.get("settings", {})),
         raw_args=d.get("raw_args", ""),
+        mode=d.get("mode", "server"),
+        members=[RouterMember(**m) for m in d.get("members", [])],
     )
 
 

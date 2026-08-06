@@ -46,3 +46,30 @@ def test_config_round_trip(tmp_path: Path):
 
 def test_load_config_missing_returns_empty(tmp_path: Path):
     assert load_config(tmp_path) == {}
+
+
+from llama_launcher.core.spec import Profile, RouterMember, Runtime
+from llama_launcher.store.profiles import profile_from_dict, profile_to_dict
+
+
+def test_router_profile_round_trips(tmp_path):
+    p = Profile(
+        name="Router",
+        mode="router",
+        runtime=Runtime(bind_host="0.0.0.0"),
+        members=[RouterMember(profile="Qwen", model_id="qwen", load_on_startup=True,
+                              stop_timeout=30)],
+    )
+    back = profile_from_dict(profile_to_dict(p))
+    assert back.mode == "router"
+    assert back.runtime.bind_host == "0.0.0.0"
+    assert back.members == [RouterMember(profile="Qwen", model_id="qwen",
+                                         load_on_startup=True, stop_timeout=30)]
+
+
+def test_legacy_profile_json_without_new_fields_still_loads():
+    # Profiles written by earlier versions have no mode/members/bind_host.
+    back = profile_from_dict({"name": "Old", "model": "/models/a.gguf"})
+    assert back.mode == "server"
+    assert back.members == []
+    assert back.runtime.bind_host == "127.0.0.1"

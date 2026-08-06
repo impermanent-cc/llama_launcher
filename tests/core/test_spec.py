@@ -29,3 +29,31 @@ def test_independent_default_collections():
 def test_slugify():
     assert slugify("Qwen3-235B coding!") == "qwen3-235b-coding"
     assert slugify("  multiple   spaces ") == "multiple-spaces"
+
+
+from llama_launcher.core.spec import Profile, RouterMember, Runtime, member_model_id
+
+
+def test_profile_defaults_to_server_mode():
+    p = Profile(name="x")
+    assert p.mode == "server"
+    assert p.members == []
+
+
+def test_runtime_defaults_to_loopback_bind():
+    assert Runtime().bind_host == "127.0.0.1"
+
+
+def test_member_model_id_defaults_to_slugified_profile_name():
+    assert member_model_id(RouterMember(profile="Qwen3 235B MoE")) == "qwen3-235b-moe"
+
+
+def test_member_model_id_uses_explicit_override():
+    m = RouterMember(profile="Qwen3 235B MoE", model_id="qwen-big")
+    assert member_model_id(m) == "qwen-big"
+
+
+def test_router_member_defaults():
+    m = RouterMember(profile="p")
+    assert m.load_on_startup is False
+    assert m.stop_timeout == 10
