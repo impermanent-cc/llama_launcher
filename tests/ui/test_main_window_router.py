@@ -282,3 +282,35 @@ def test_failed_router_launch_is_reported(win):
     win._report_launch_error("Error: short-name resolution enforced but cannot prompt")
     assert "failed" in win.status_label.text().lower()
     assert "resolution" in win.router_panel.status_label.text()
+
+
+def test_member_fields_are_editable(win):
+    win.load_profile(Profile(name="Host", mode="router", image="img",
+                             members=[RouterMember(profile="Qwen")]))
+    # The spec's own recommended setup (load-on-startup for the primary model,
+    # a pinned id matching what a harness already uses) must be reachable.
+    win.set_member_fields(0, model_id="pinned-id", load_on_startup=True, stop_timeout=30)
+    [m] = win.current_profile().members
+    assert m.model_id == "pinned-id"
+    assert m.load_on_startup is True
+    assert m.stop_timeout == 30
+
+
+def test_edited_member_fields_survive_a_save_load_round_trip(win):
+    win.load_profile(Profile(name="Host", mode="router", image="img",
+                             members=[RouterMember(profile="Qwen")]))
+    win.set_member_fields(0, model_id="pinned", load_on_startup=True, stop_timeout=45)
+    saved = win.current_profile()
+    store.save_profile(saved, store.default_base_dir())
+    back = store.load_profile(store.default_base_dir() / "profiles" / "host.json")
+    assert back.members == [RouterMember(profile="Qwen", model_id="pinned",
+                                         load_on_startup=True, stop_timeout=45)]
+
+
+def test_member_whose_profile_is_gone_is_an_error_not_a_silent_drop(win):
+    win.load_profile(Profile(name="Host", mode="router", image="img",
+                             mounts=[Mount(host="/mnt/models", container="/models")],
+                             members=[RouterMember(profile="Deleted Profile")],
+                             settings={"port": 8080}))
+    issues = win.router_issues()
+    assert any("Deleted Profile" in i.message for i in issues if i.level == "error")

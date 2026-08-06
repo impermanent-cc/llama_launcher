@@ -18,7 +18,9 @@ from llama_launcher.core.router_preset import render_preset
 from llama_launcher.core.settings_catalog import CATALOG, member_catalog, router_catalog
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.pathmap import host_to_container
-from llama_launcher.core.validation import validate, LOOPBACK_HOSTS, dial_host
+from llama_launcher.core.validation import (
+    validate, Issue, LOOPBACK_HOSTS, dial_host,
+)
 from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
     load_config, save_config, profile_to_dict,
@@ -129,7 +131,7 @@ class MainWindow(QMainWindow):
         image_row.addWidget(self.update_badge)
         image_widget = QWidget()
         image_widget.setLayout(image_row)
-        from PySide6.QtWidgets import QListWidget
+        from PySide6.QtWidgets import QTableWidget, QHeaderView
 
         # NoWheel: an unfocused scroll over these must not silently flip launch
         # semantics (terminal vs detached) or expose the port to the network.
@@ -143,8 +145,17 @@ class MainWindow(QMainWindow):
         self.bind_host_combo.addItems(["127.0.0.1", "0.0.0.0"])
         self.bind_host_combo.currentTextChanged.connect(self.refresh_preview)
 
-        self.members_list = QListWidget()
-        self.members_list.setMaximumHeight(120)
+        # A table, not a list: model id / load-on-startup / stop-timeout are all
+        # per-member settings the spec requires to be editable, and inline
+        # editing keeps them reachable without a modal dialog (which would hang
+        # the headless test run).
+        self.members_list = QTableWidget(0, 4)
+        self.members_list.setHorizontalHeaderLabels(
+            ["Profile", "Model id (harness)", "Load at start", "Stop timeout (s)"])
+        self.members_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        self.members_list.verticalHeader().setVisible(False)
+        self.members_list.setMaximumHeight(140)
+        self.members_list.itemChanged.connect(lambda _i: self.refresh_preview())
         self.add_member_btn = QPushButton("Add member…")
         self.add_member_btn.clicked.connect(self._on_add_member)
         self.remove_member_btn = QPushButton("Remove member")
@@ -397,14 +408,44 @@ class MainWindow(QMainWindow):
         self.lora_panel.setEnabled(not is_router)
         self.refresh_preview()
 
-    def _member_from_item(self, item) -> RouterMember:
-        return item.data(Qt.UserRole)
-
     def _add_member_item(self, member: RouterMember) -> None:
-        from PySide6.QtWidgets import QListWidgetItem
-        item = QListWidgetItem(f"{member.profile}  →  {member_model_id(member)}")
-        item.setData(Qt.UserRole, member)
-        self.members_list.addItem(item)
+        from PySide6.QtWidgets import QTableWidgetItem
+        row = self.members_list.rowCount()
+        # itemChanged fires per setItem; without this the handler reads a
+        # half-populated row and hits None cells.
+        blocked = self.members_list.blockSignals(True)
+        self.members_list.insertRow(row)
+
+        name = QTableWidgetItem(member.profile)
+        name.setFlags(name.flags() & ~Qt.ItemIsEditable)   # the profile is the identity
+        self.members_list.setItem(row, 0, name)
+
+        # Empty means "derive from the profile name"; show the derived value as a
+        # placeholder so the harness-facing id is never a mystery.
+        mid = QTableWidgetItem(member.model_id)
+        mid.setToolTip(f"Empty = {member_model_id(member)}")
+        self.members_list.setItem(row, 1, mid)
+
+        load = QTableWidgetItem()
+        load.setFlags((load.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
+        load.setCheckState(Qt.Checked if member.load_on_startup else Qt.Unchecked)
+        self.members_list.setItem(row, 2, load)
+
+        self.members_list.setItem(row, 3, QTableWidgetItem(str(member.stop_timeout)))
+        self.members_list.blockSignals(blocked)
+
+    def set_member_fields(self, row: int, model_id: str | None = None,
+                          load_on_startup: bool | None = None,
+                          stop_timeout: int | None = None) -> None:
+        """Programmatic equivalent of editing a member row (used by tests)."""
+        if model_id is not None:
+            self.members_list.item(row, 1).setText(model_id)
+        if load_on_startup is not None:
+            self.members_list.item(row, 2).setCheckState(
+                Qt.Checked if load_on_startup else Qt.Unchecked)
+        if stop_timeout is not None:
+            self.members_list.item(row, 3).setText(str(stop_timeout))
+        self.refresh_preview()
 
     def _on_add_member(self) -> None:
         names = [p.name for p in list_profiles(base_dir())
@@ -419,18 +460,59 @@ class MainWindow(QMainWindow):
             self.refresh_preview()
 
     def _on_remove_member(self) -> None:
-        for item in self.members_list.selectedItems():
-            self.members_list.takeItem(self.members_list.row(item))
+        for row in sorted({i.row() for i in self.members_list.selectedIndexes()},
+                          reverse=True):
+            self.members_list.removeRow(row)
         self.refresh_preview()
 
     def members(self) -> list:
-        return [self._member_from_item(self.members_list.item(i))
-                for i in range(self.members_list.count())]
+        out = []
+        for row in range(self.members_list.rowCount()):
+            name = self.members_list.item(row, 0)
+            mid = self.members_list.item(row, 1)
+            load = self.members_list.item(row, 2)
+            timeout_item = self.members_list.item(row, 3)
+            if name is None:
+                continue          # row still being built
+            try:
+                timeout = int(((timeout_item.text() if timeout_item else "") or "10").strip())
+            except ValueError:
+                timeout = 10
+            out.append(RouterMember(
+                profile=name.text(),
+                model_id=((mid.text() if mid else "") or "").strip(),
+                load_on_startup=bool(load is not None and load.checkState() == Qt.Checked),
+                stop_timeout=timeout,
+            ))
+        return out
 
     def member_pairs(self) -> list:
-        """(RouterMember, member Profile) pairs, skipping members whose profile is gone."""
+        """(RouterMember, member Profile) pairs for members whose profile exists."""
         by_name = {p.name: p for p in list_profiles(base_dir())}
         return [(m, by_name[m.profile]) for m in self.members() if m.profile in by_name]
+
+    def missing_member_profiles(self) -> list:
+        """Member profile names that no longer exist on disk.
+
+        Dropping these silently launched a router serving fewer models than the
+        list showed, and any harness pinned to the missing id got a 404 with
+        nothing in the GUI explaining why."""
+        by_name = {p.name: p for p in list_profiles(base_dir())}
+        return [m.profile for m in self.members() if m.profile not in by_name]
+
+    def router_issues(self) -> list:
+        """Validation issues for the current profile, router context included."""
+        p = self.current_profile()
+        key_present = bool(api_key_store.read_api_key(self.router_base_dir(), p.name)) \
+            if p.mode == "router" else False
+        issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
+                          members=self.member_pairs(), api_key_present=key_present)
+        for name in self.missing_member_profiles():
+            issues.append(Issue(
+                "error",
+                f"Member profile {name!r} no longer exists; it would be dropped from "
+                f"the router silently. Remove it or recreate the profile."))
+        return issues
 
     def _field_with_browse(self, line_edit: QLineEdit) -> QWidget:
         container = QWidget()
@@ -482,7 +564,7 @@ class MainWindow(QMainWindow):
         index = self.mode_combo.findData(p.mode)
         self.mode_combo.setCurrentIndex(index if index >= 0 else 0)
         self.bind_host_combo.setCurrentText(p.runtime.bind_host)
-        self.members_list.clear()
+        self.members_list.setRowCount(0)
         for member in p.members:
             self._add_member_item(member)
         self._on_mode_changed()
@@ -686,11 +768,7 @@ class MainWindow(QMainWindow):
         # always gets one at launch, but this runs before prepare_router_files.
         if p.mode == "router":
             api_key_store.ensure_api_key(self.router_base_dir(), p.name)
-        key_present = bool(
-            api_key_store.read_api_key(self.router_base_dir(), p.name)
-        ) if p.mode == "router" else False
-        issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
-                          members=self.member_pairs(), api_key_present=key_present)
+        issues = self.router_issues()
         errors = [i for i in issues if i.level == "error"]
         if errors:
             QMessageBox.critical(self, "Cannot launch",
