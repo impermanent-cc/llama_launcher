@@ -69,7 +69,13 @@ def unload_model(host: str, port: int, api_key: str | None, model_id: str,
 
 
 def iter_sse_events(host: str, port: int, api_key: str | None, timeout: float = 60.0):
-    """Yield RouterEvents from /models/sse until the stream ends or errors."""
+    """Yield RouterEvents from /models/sse until the stream ends or errors.
+
+    This is the one GET without autoload=false, and deliberately so: /models/sse
+    is a broadcast stream that takes no ?model= param, so there is no model for
+    it to autoload. (Stated explicitly because the module docstring's rule reads
+    as absolute.)
+    """
     with requests.get(f"{base_url(host, port)}/models/sse",
                       headers=auth_headers(api_key), stream=True,
                       timeout=timeout) as r:

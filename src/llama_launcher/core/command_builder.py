@@ -1,6 +1,6 @@
 import shlex
 
-from .settings_catalog import CATALOG, router_catalog
+from .settings_catalog import CATALOG, ROUTER_ONLY_KEYS, router_catalog
 from .spec import Profile, slugify
 
 
@@ -129,6 +129,11 @@ def _server_args(profile: Profile, catalog: dict) -> list[str]:
     # Emit changed settings in catalog order, skipping port (handled below).
     for key, setting in catalog.items():
         if key == "port":
+            continue
+        # Router-only flags are rejected by a single-model llama-server. The UI
+        # filters them out by mode, but profile JSON written before that
+        # filtering existed can still carry one.
+        if key in ROUTER_ONLY_KEYS:
             continue
         if key in profile.settings:
             argv += _render_setting(setting, profile.settings[key])

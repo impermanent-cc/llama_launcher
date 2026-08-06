@@ -566,6 +566,8 @@ class MainWindow(QMainWindow):
         index = self.mode_combo.findData(p.mode)
         self.mode_combo.setCurrentIndex(index if index >= 0 else 0)
         self.bind_host_combo.setCurrentText(p.runtime.bind_host)
+        self._router_statuses = {}
+        self._spec_prev = None
         self.members_list.setRowCount(0)
         for member in p.members:
             self._add_member_item(member)
