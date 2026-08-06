@@ -15,7 +15,7 @@ from llama_launcher.core.spec import (
     Profile, Mount, Runtime, RouterMember, member_model_id, slugify,
 )
 from llama_launcher.core.router_preset import render_preset
-from llama_launcher.core.settings_catalog import CATALOG
+from llama_launcher.core.settings_catalog import CATALOG, member_catalog, router_catalog
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.pathmap import host_to_container
 from llama_launcher.core.validation import validate, LOOPBACK_HOSTS, dial_host
@@ -197,15 +197,21 @@ class MainWindow(QMainWindow):
         right_scroll = QScrollArea(); right_scroll.setWidgetResizable(True)
         right_inner = QWidget(); right_layout = QVBoxLayout(right_inner)
         groups: dict[str, QFormLayout] = {}
+        self._group_boxes: dict[str, QGroupBox] = {}
+        # key -> (form layout, widget), so _on_mode_changed can hide whole rows
+        # (label included) for settings that don't apply to the current mode.
+        self._setting_rows: dict[str, tuple] = {}
         for key, setting in CATALOG.items():
             if setting.group not in groups:
                 box = QGroupBox(setting.group)
                 groups[setting.group] = QFormLayout(box)
+                self._group_boxes[setting.group] = box
                 right_layout.addWidget(box)
             w = make_widget(setting)
             w.changed.connect(self.refresh_preview)
             self._widgets[key] = w
             groups[setting.group].addRow(setting.flag, w)
+            self._setting_rows[key] = (groups[setting.group], w)
         right_scroll.setWidget(right_inner)
         body.addWidget(right_scroll, 2)
         self.setStyleSheet((self.styleSheet() or "") + TIER_QSS)
@@ -356,10 +362,33 @@ class MainWindow(QMainWindow):
     def _container_name(self) -> str:
         return f"llama-{slugify(self._profile_name())}"
 
+    def active_catalog(self) -> dict:
+        """The settings that apply to the mode currently selected in the form.
+
+        Router CLI args outrank every member's preset value, so a router must
+        not be able to carry model-level settings; conversely --models-max on a
+        single-model llama-server is rejected outright.
+        """
+        return (router_catalog() if self.mode_combo.currentData() == "router"
+                else member_catalog())
+
+    def _apply_mode_to_settings_form(self) -> None:
+        active = self.active_catalog()
+        for group, box in self._group_boxes.items():
+            box.setVisible(False)
+        for key, (form, widget) in self._setting_rows.items():
+            visible = key in active
+            index = form.getWidgetPosition(widget)[0]
+            if index >= 0:
+                form.setRowVisible(index, visible)
+            if visible:
+                self._group_boxes[CATALOG[key].group].setVisible(True)
+
     def _on_mode_changed(self, _index=0) -> None:
         is_router = self.mode_combo.currentData() == "router"
         for w in (self.members_list, self.add_member_btn, self.remove_member_btn):
             w.setVisible(is_router)
+        self._apply_mode_to_settings_form()
         # A router has no model of its own; its members carry those fields.
         for w in (self.model_edit, self.mmproj_edit, self.draft_model_edit):
             w.setEnabled(not is_router)
@@ -459,9 +488,13 @@ class MainWindow(QMainWindow):
         self.refresh_preview()
 
     def current_profile(self) -> Profile:
+        # Filtering lives here, in the UI, per the project's catalog contract --
+        # never in command_builder. A value left over from the other mode (or
+        # loaded from older profile JSON) must not reach argv.
+        active = self.active_catalog()
         settings = {}
         for key, w in self._widgets.items():
-            if w.is_set():
+            if key in active and w.is_set():
                 settings[key] = w.value()
         # port is always stored
         settings["port"] = self._widgets["port"].value()

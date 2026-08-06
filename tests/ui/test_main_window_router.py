@@ -152,3 +152,25 @@ def test_loaded_model_is_polled_with_its_id(win, monkeypatch):
                         lambda port, **kw: [])
     win.collect_monitor_data()
     assert seen["model"] == "qwen"
+
+
+def test_router_form_hides_model_level_settings(win):
+    win.load_profile(Profile(name="Host", mode="router", image="img"))
+    # The precedence trap: router CLI args outrank every member's preset value.
+    assert not win._widgets["ctx-size"].isVisibleTo(win.configure_tab)
+    assert win._widgets["models-max"].isVisibleTo(win.configure_tab)
+
+
+def test_server_form_hides_router_only_settings(win):
+    win.load_profile(Profile(name="Solo", image="img", model="/m.gguf"))
+    assert not win._widgets["models-max"].isVisibleTo(win.configure_tab)
+    assert win._widgets["ctx-size"].isVisibleTo(win.configure_tab)
+
+
+def test_server_profile_cannot_emit_router_only_flags(win):
+    from llama_launcher.core.command_builder import build_command
+    win.load_profile(Profile(name="Solo", image="img", model="/m.gguf",
+                             mounts=[Mount(host="/h", container="/models")],
+                             settings={"port": 8080, "models-max": 2}))
+    # models-max is router-only; a single-model llama-server rejects it.
+    assert "--models-max" not in build_command(win.current_profile())

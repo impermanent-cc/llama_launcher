@@ -402,7 +402,9 @@ ROUTER_ONLY_KEYS: frozenset = frozenset({"models-max", "models-autoload"})
 # This split is load-bearing, not cosmetic: llama.cpp resolves preset options as
 # `router CLI args > per-model preset section > [*] global`, so CLI args WIN. A
 # router carrying `-c 8192` would silently override every member's own `c` value.
-# Filtering the router form to host-level settings makes that unreachable.
+# MainWindow.active_catalog() consumes these to filter the settings form and to
+# filter what current_profile() collects, which is what makes the trap
+# unreachable -- the form really is filtered, so keep it that way.
 HOST_KEYS: frozenset = frozenset({
     "models-max", "models-autoload", "sleep-idle-seconds",
     "port", "api-key", "threads-http", "metrics", "no-webui",
