@@ -33,9 +33,9 @@ def test_on_stop_clears_log_follower_and_spawns_async_stop(qtbot, monkeypatch):
 
 def test_collect_monitor_data(qtbot, monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_metrics",
-                        lambda port, timeout=1.0: {"llamacpp:predicted_tokens_seconds": 50.0,
-                                                   "llamacpp:prompt_tokens_seconds": 200.0})
-    monkeypatch.setattr(mw.metrics, "fetch_slots", lambda port, timeout=1.0:
+                        lambda port, timeout=1.0, **kw: {"llamacpp:predicted_tokens_seconds": 50.0,
+                                                         "llamacpp:prompt_tokens_seconds": 200.0})
+    monkeypatch.setattr(mw.metrics, "fetch_slots", lambda port, timeout=1.0, **kw:
                         [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
     monkeypatch.setattr(mw.runtime, "stats", lambda name, b: {"cpu_perc": "9%", "mem_usage": "1G / 16G"})

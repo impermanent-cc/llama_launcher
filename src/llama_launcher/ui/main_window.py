@@ -4,14 +4,17 @@ from pathlib import Path
 
 import datetime
 
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import Qt, QThread, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
     QCheckBox, QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
     QMessageBox, QFileDialog, QInputDialog, QTabWidget
 )
 
-from llama_launcher.core.spec import Profile, Mount, Runtime, slugify
+from llama_launcher.core.spec import (
+    Profile, Mount, Runtime, RouterMember, member_model_id, slugify,
+)
+from llama_launcher.core.router_preset import render_preset
 from llama_launcher.core.settings_catalog import CATALOG
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.pathmap import host_to_container
@@ -34,6 +37,9 @@ from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
 from llama_launcher.ui.widgets.collapsible import CollapsibleSection
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+from llama_launcher.ui.panels.router_panel import RouterPanel
+from llama_launcher.services import api_key as api_key_store
+from llama_launcher.services import router_api
 
 
 def _fmt_uptime(started_at: str | None) -> str:
@@ -123,6 +129,38 @@ class MainWindow(QMainWindow):
         image_row.addWidget(self.update_badge)
         image_widget = QWidget()
         image_widget.setLayout(image_row)
+        from PySide6.QtWidgets import QComboBox, QListWidget
+
+        self.mode_combo = QComboBox()
+        self.mode_combo.addItem("Single server", "server")
+        self.mode_combo.addItem("Router (headless host)", "router")
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+
+        self.bind_host_combo = QComboBox()
+        self.bind_host_combo.setEditable(True)
+        self.bind_host_combo.addItems(["127.0.0.1", "0.0.0.0"])
+        self.bind_host_combo.currentTextChanged.connect(self.refresh_preview)
+
+        self.members_list = QListWidget()
+        self.members_list.setMaximumHeight(120)
+        self.add_member_btn = QPushButton("Add member…")
+        self.add_member_btn.clicked.connect(self._on_add_member)
+        self.remove_member_btn = QPushButton("Remove member")
+        self.remove_member_btn.clicked.connect(self._on_remove_member)
+        members_row = QHBoxLayout()
+        members_row.setContentsMargins(0, 0, 0, 0)
+        members_row.addWidget(self.add_member_btn)
+        members_row.addWidget(self.remove_member_btn)
+        members_widget = QWidget()
+        members_box = QVBoxLayout(members_widget)
+        members_box.setContentsMargins(0, 0, 0, 0)
+        members_box.addWidget(self.members_list)
+        members_box.addLayout(members_row)
+
+        left_form.addRow("Mode", self.mode_combo)
+        left_form.addRow("Bind address", self.bind_host_combo)
+        left_form.addRow("Router members", members_widget)
+
         left_form.addRow("Image", image_widget)
         left_form.addRow("Model", self._field_with_browse(self.model_edit))
         left_form.addRow("Runtime", self.binary_combo)
@@ -172,6 +210,7 @@ class MainWindow(QMainWindow):
         body.addWidget(right_scroll, 2)
         self.setStyleSheet((self.styleSheet() or "") + TIER_QSS)
         self._last_caps = None
+        self._router_statuses: dict = {}
         self.configure_tab = configure_tab
 
         # Tabs
@@ -180,6 +219,11 @@ class MainWindow(QMainWindow):
         self.monitor_panel = MonitorPanel()
         self.monitor_panel.enable_metrics_requested.connect(self._on_enable_metrics)
         self.tabs.addTab(self.monitor_panel, "Monitor")
+        self.router_panel = RouterPanel()
+        self.router_panel.load_requested.connect(self._on_router_load)
+        self.router_panel.unload_requested.connect(self._on_router_unload)
+        self.router_panel.regenerate_requested.connect(self._on_regenerate_key)
+        self.tabs.addTab(self.router_panel, "Router")
         root.addWidget(self.tabs)
 
         # BOTTOM: preview + buttons (shared, below both tabs)
@@ -312,6 +356,51 @@ class MainWindow(QMainWindow):
     def _container_name(self) -> str:
         return f"llama-{slugify(self._profile_name())}"
 
+    def _on_mode_changed(self, _index=0) -> None:
+        is_router = self.mode_combo.currentData() == "router"
+        for w in (self.members_list, self.add_member_btn, self.remove_member_btn):
+            w.setVisible(is_router)
+        # A router has no model of its own; its members carry those fields.
+        for w in (self.model_edit, self.mmproj_edit, self.draft_model_edit):
+            w.setEnabled(not is_router)
+        self.lora_panel.setEnabled(not is_router)
+        self.refresh_preview()
+
+    def _member_from_item(self, item) -> RouterMember:
+        return item.data(Qt.UserRole)
+
+    def _add_member_item(self, member: RouterMember) -> None:
+        from PySide6.QtWidgets import QListWidgetItem
+        item = QListWidgetItem(f"{member.profile}  →  {member_model_id(member)}")
+        item.setData(Qt.UserRole, member)
+        self.members_list.addItem(item)
+
+    def _on_add_member(self) -> None:
+        names = [p.name for p in list_profiles(base_dir())
+                 if p.mode != "router" and p.name != self._profile_name()]
+        if not names:
+            QMessageBox.information(self, "No profiles",
+                                    "Save a model profile first; routers serve members.")
+            return
+        name, ok = QInputDialog.getItem(self, "Add member", "Profile:", names, 0, False)
+        if ok and name:
+            self._add_member_item(RouterMember(profile=name))
+            self.refresh_preview()
+
+    def _on_remove_member(self) -> None:
+        for item in self.members_list.selectedItems():
+            self.members_list.takeItem(self.members_list.row(item))
+        self.refresh_preview()
+
+    def members(self) -> list:
+        return [self._member_from_item(self.members_list.item(i))
+                for i in range(self.members_list.count())]
+
+    def member_pairs(self) -> list:
+        """(RouterMember, member Profile) pairs, skipping members whose profile is gone."""
+        by_name = {p.name: p for p in list_profiles(base_dir())}
+        return [(m, by_name[m.profile]) for m in self.members() if m.profile in by_name]
+
     def _field_with_browse(self, line_edit: QLineEdit) -> QWidget:
         container = QWidget()
         row = QHBoxLayout(container)
@@ -359,6 +448,13 @@ class MainWindow(QMainWindow):
             w.set_value(w.setting.default)
             if key in p.settings:
                 w.set_value(p.settings[key])
+        index = self.mode_combo.findData(p.mode)
+        self.mode_combo.setCurrentIndex(index if index >= 0 else 0)
+        self.bind_host_combo.setCurrentText(p.runtime.bind_host)
+        self.members_list.clear()
+        for member in p.members:
+            self._add_member_item(member)
+        self._on_mode_changed()
         self.apply_model_caps()
         self.refresh_preview()
 
@@ -375,7 +471,9 @@ class MainWindow(QMainWindow):
             runtime=Runtime(binary=self.binary_combo.currentText(),
                             gpu_mode=self.gpu_combo.currentData(),
                             selinux_label_disable=self.selinux_check.isChecked(),
-                            extra_run_args=self.extra_args_edit.text()),
+                            extra_run_args=self.extra_args_edit.text(),
+                            bind_host=self.bind_host_combo.currentText().strip()
+                                      or "127.0.0.1"),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
@@ -383,6 +481,8 @@ class MainWindow(QMainWindow):
             loras=self.lora_panel.loras(),
             settings=settings,
             raw_args=self.raw_edit.text(),
+            mode=self.mode_combo.currentData() or "server",
+            members=self.members(),
         )
 
     def preview_text(self) -> str:
@@ -422,9 +522,102 @@ class MainWindow(QMainWindow):
             delete_profile(name, base_dir())
             self._reload_profile_list()
 
+    def router_base_dir(self):
+        return base_dir()
+
+    def router_api_key(self) -> str:
+        return api_key_store.ensure_api_key(self.router_base_dir(), self._profile_name())
+
+    def prepare_router_files(self) -> tuple:
+        """Write models.ini + api-key for the current router. Returns (dir, warnings)."""
+        name = self._profile_name()
+        result = render_preset(self.member_pairs())
+        api_key_store.ensure_api_key(self.router_base_dir(), name)
+        api_key_store.write_preset(self.router_base_dir(), name, result.text)
+        return str(api_key_store.router_dir(self.router_base_dir(), name)), result.warnings
+
+    def _on_regenerate_key(self) -> None:
+        name = self._profile_name()
+        answer = QMessageBox.question(
+            self, "Regenerate API key",
+            "This invalidates the key any configured harness is using. Continue?")
+        if answer != QMessageBox.Yes:
+            return
+        api_key_store.regenerate_api_key(self.router_base_dir(), name)
+        self.refresh_router_panel_header()
+
+    def refresh_router_panel_header(self) -> None:
+        p = self.current_profile()
+        if p.mode != "router":
+            return
+        host = p.runtime.bind_host
+        display_host = "127.0.0.1" if host == "0.0.0.0" else host
+        port = p.settings.get("port", 8080)
+        key = api_key_store.read_api_key(self.router_base_dir(), p.name) or ""
+        self.router_panel.set_endpoint(
+            f"http://{display_host}:{port}", key,
+            [member_model_id(m) for m in p.members])
+        self.router_panel.set_exposure_warning(
+            f"Bound to {host}: reachable beyond this machine. The API key is required."
+            if host not in ("127.0.0.1", "localhost", "::1") else "")
+
+    def adopt_running_containers(self) -> list:
+        """Containers this launcher owns, so a detached router survives a GUI restart."""
+        p = self.current_profile()
+        return runtime.list_launcher_containers(p.runtime.binary)
+
+    def _router_host(self, p: Profile) -> str:
+        """The address the GUI itself dials. 0.0.0.0 is a bind wildcard, not a
+        destination, so talk to loopback when the router binds to everything."""
+        return "127.0.0.1" if p.runtime.bind_host == "0.0.0.0" else p.runtime.bind_host
+
+    def refresh_router_models(self) -> None:
+        p = self.current_profile()
+        if p.mode != "router":
+            return
+        host = self._router_host(p)
+        port = p.settings.get("port", 8080)
+        key = api_key_store.read_api_key(self.router_base_dir(), p.name)
+        models = router_api.list_models(host, port, key)
+        self._router_statuses = {m.id: m.status for m in models}
+        self.router_panel.set_models(models)
+        self.router_panel.set_connected(bool(models))
+
+    def _router_pollable_model(self) -> str | None:
+        """The resident model to scope Monitor polling to, or None.
+
+        Sleeping and unloaded models are skipped: there is nothing to measure,
+        and not polling them is the whole point of an idle-unloading host."""
+        for model_id, status in self._router_statuses.items():
+            if status == "loaded":
+                return model_id
+        return None
+
+    def _on_router_load(self, model_id: str) -> None:
+        p = self.current_profile()
+        key = api_key_store.read_api_key(self.router_base_dir(), p.name)
+        router_api.load_model(self._router_host(p), p.settings.get("port", 8080),
+                              key, model_id)
+        self.refresh_router_models()
+
+    def _on_router_unload(self, model_id: str) -> None:
+        p = self.current_profile()
+        key = api_key_store.read_api_key(self.router_base_dir(), p.name)
+        router_api.unload_model(self._router_host(p), p.settings.get("port", 8080),
+                                key, model_id)
+        self.refresh_router_models()
+
     def _validate_or_warn(self) -> bool:
         p = self.current_profile()
-        issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary))
+        # The key must exist before the exposure rule is evaluated: a router
+        # always gets one at launch, but this runs before prepare_router_files.
+        if p.mode == "router":
+            api_key_store.ensure_api_key(self.router_base_dir(), p.name)
+        key_present = bool(
+            api_key_store.read_api_key(self.router_base_dir(), p.name)
+        ) if p.mode == "router" else False
+        issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
+                          members=self.member_pairs(), api_key_present=key_present)
         errors = [i for i in issues if i.level == "error"]
         if errors:
             QMessageBox.critical(self, "Cannot launch",
@@ -461,10 +654,27 @@ class MainWindow(QMainWindow):
     def on_launch(self):
         if not self._validate_or_warn():
             return
+        p = self.current_profile()
+
+        if p.mode == "router":
+            router_host_dir, warnings = self.prepare_router_files()
+            if warnings:
+                QMessageBox.warning(self, "Preset warnings", "\n".join(warnings))
+            argv = build_command(p, router_host_dir=router_host_dir)
+            # A stopped container of the same name would block the new run,
+            # since router mode deliberately omits --rm. Chain rather than fire
+            # both at once: _spawn_async is asynchronous, so an unchained run
+            # would race the removal and lose with "name already in use".
+            self.monitor_panel.reset()
+            self._spawn_async(
+                runtime.rm_argv(self._container_name(), p.runtime.binary),
+                on_done=lambda: self._spawn_async(argv, on_done=self.update_status))
+            self.refresh_router_panel_header()
+            return
+
         warn = self.vram_check()
         if warn:
             QMessageBox.warning(self, "VRAM check", warn)
-        p = self.current_profile()
         argv = build_command(p)
         self.monitor_panel.reset()
         self.monitor_panel.set_endpoints(
@@ -589,14 +799,24 @@ class MainWindow(QMainWindow):
             if not self._log_follower_active():
                 self._start_log_follower()
             self.monitor_panel.update_stats(self.collect_monitor_data())
+        if p.mode == "router" and state == "running":
+            self.refresh_router_models()
 
     def collect_monitor_data(self) -> dict:
         from llama_launcher.services.metrics import kv_usage_ratio
         p = self.current_profile()
         port = p.settings.get("port", 8080)
         metrics_on = bool(p.settings.get("metrics"))
-        m = metrics.fetch_metrics(port) if metrics_on else {}
-        slots = metrics.fetch_slots(port)
+        host, key, model_scope, poll = "127.0.0.1", None, None, True
+        if p.mode == "router":
+            host = self._router_host(p)
+            key = api_key_store.read_api_key(self.router_base_dir(), p.name)
+            model_scope = self._router_pollable_model()
+            poll = model_scope is not None
+        m = (metrics.fetch_metrics(port, model=model_scope, api_key=key, host=host)
+             if metrics_on and poll else {})
+        slots = (metrics.fetch_slots(port, model=model_scope, api_key=key, host=host)
+                 if poll else [])
         name = self._container_name()
         st = runtime.stats(name, p.runtime.binary) or {}
         started = runtime.started_at(name, p.runtime.binary)
