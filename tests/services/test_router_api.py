@@ -54,17 +54,25 @@ def test_list_models_never_autoloads(monkeypatch):
     assert models[0].status == "sleeping"
 
 
-def test_list_models_returns_empty_on_error(monkeypatch):
+def test_list_models_returns_none_when_unreachable(monkeypatch):
+    # None (can't reach it) must be distinguishable from [] (up, serving
+    # nothing) -- it is the only status signal an unattended host has.
     def boom(*a, **kw):
         raise router_api.requests.RequestException("down")
 
     monkeypatch.setattr(router_api.requests, "get", boom)
-    assert router_api.list_models("127.0.0.1", 8080, None) == []
+    assert router_api.list_models("127.0.0.1", 8080, None) is None
 
 
-def test_list_models_returns_empty_on_non_200(monkeypatch):
+def test_list_models_returns_none_on_non_200(monkeypatch):
     monkeypatch.setattr(router_api.requests, "get",
                         lambda *a, **kw: FakeResponse(status_code=401))
+    assert router_api.list_models("127.0.0.1", 8080, None) is None
+
+
+def test_list_models_returns_empty_list_for_a_reachable_empty_router(monkeypatch):
+    monkeypatch.setattr(router_api.requests, "get",
+                        lambda *a, **kw: FakeResponse(payload={"data": []}))
     assert router_api.list_models("127.0.0.1", 8080, None) == []
 
 

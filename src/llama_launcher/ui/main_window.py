@@ -632,9 +632,14 @@ class MainWindow(QMainWindow):
         port = p.settings.get("port", 8080)
         key = api_key_store.read_api_key(self.router_base_dir(), p.name)
         models = router_api.list_models(host, port, key)
+        if models is None:            # unreachable, as opposed to serving nothing
+            self._router_statuses = {}
+            self.router_panel.set_models([])
+            self.router_panel.set_connected(False)
+            return
         self._router_statuses = {m.id: m.status for m in models}
         self.router_panel.set_models(models)
-        self.router_panel.set_connected(bool(models))
+        self.router_panel.set_connected(True)
 
     def _router_pollable_model(self) -> str | None:
         """The resident model to scope Monitor polling to, or None.
@@ -649,16 +654,22 @@ class MainWindow(QMainWindow):
     def _on_router_load(self, model_id: str) -> None:
         p = self.current_profile()
         key = api_key_store.read_api_key(self.router_base_dir(), p.name)
-        router_api.load_model(self._router_host(p), p.settings.get("port", 8080),
-                              key, model_id)
+        ok = router_api.load_model(self._router_host(p), p.settings.get("port", 8080),
+                                   key, model_id)
         self.refresh_router_models()
+        if not ok:
+            # Silently discarding this left a failed load looking identical to a
+            # slow one: the row just stayed "unloaded" forever.
+            self.router_panel.set_error(f"load failed: {model_id}")
 
     def _on_router_unload(self, model_id: str) -> None:
         p = self.current_profile()
         key = api_key_store.read_api_key(self.router_base_dir(), p.name)
-        router_api.unload_model(self._router_host(p), p.settings.get("port", 8080),
-                                key, model_id)
+        ok = router_api.unload_model(self._router_host(p), p.settings.get("port", 8080),
+                                     key, model_id)
         self.refresh_router_models()
+        if not ok:
+            self.router_panel.set_error(f"unload failed: {model_id}")
 
     def _validate_or_warn(self) -> bool:
         p = self.current_profile()
@@ -714,6 +725,18 @@ class MainWindow(QMainWindow):
             if warnings:
                 QMessageBox.warning(self, "Preset warnings", "\n".join(warnings))
             argv = build_command(p, router_host_dir=router_host_dir)
+            # Relaunching over a LIVE router would drop a resident model and any
+            # in-flight harness requests, so confirm before tearing it down.
+            if runtime.container_state(self._container_name(),
+                                       p.runtime.binary) == "running":
+                answer = QMessageBox.question(
+                    self, "Router already running",
+                    "This router is already running. Relaunching stops it, "
+                    "unloading any resident model and dropping in-flight "
+                    "requests. Continue?")
+                if answer != QMessageBox.Yes:
+                    return
+
             # A stopped container of the same name would block the new run,
             # since router mode deliberately omits --rm. Chain rather than fire
             # both at once: _spawn_async is asynchronous, so an unchained run

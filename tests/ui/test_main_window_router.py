@@ -223,3 +223,43 @@ def test_report_validation_does_not_invent_router_errors(win):
     data = win.gather_report_data()
     joined = " ".join(data.get("validation", []))
     assert "at least one model" not in joined
+
+
+def test_relaunch_does_not_force_kill_a_running_router(win, monkeypatch):
+    _member_profile(store.default_base_dir())
+    _router_win(win)
+    monkeypatch.setattr(win, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr("llama_launcher.ui.main_window.runtime.container_state",
+                        lambda name, binary: "running")
+    spawned = []
+    monkeypatch.setattr(win, "_spawn_async",
+                        lambda argv, on_done=None: spawned.append(argv))
+    # A live headless host may have a 100GB model resident and requests in
+    # flight; Launch must not tear it down without asking.
+    monkeypatch.setattr("llama_launcher.ui.main_window.QMessageBox.question",
+                        staticmethod(lambda *a, **k: __import__(
+                            "PySide6.QtWidgets", fromlist=["QMessageBox"]).QMessageBox.No))
+    win.on_launch()
+    assert spawned == []
+
+
+def test_router_load_failure_is_surfaced(win, monkeypatch):
+    _router_win(win)
+    monkeypatch.setattr("llama_launcher.ui.main_window.router_api.load_model",
+                        lambda *a, **kw: False)
+    win._on_router_load("qwen")
+    assert "fail" in win.router_panel.status_label.text().lower()
+
+
+def test_connected_state_distinguishes_down_from_empty(win, monkeypatch):
+    _router_win(win)
+    monkeypatch.setattr("llama_launcher.ui.main_window.router_api.list_models",
+                        lambda host, port, key, **kw: None)
+    win.refresh_router_models()
+    assert "disconnected" in win.router_panel.status_label.text().lower()
+
+    monkeypatch.setattr("llama_launcher.ui.main_window.router_api.list_models",
+                        lambda host, port, key, **kw: [])
+    win.refresh_router_models()
+    # Reachable, just serving nothing -- not the same as unreachable.
+    assert "disconnected" not in win.router_panel.status_label.text().lower()
