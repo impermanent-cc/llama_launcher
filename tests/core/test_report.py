@@ -80,3 +80,16 @@ def test_build_report_sections_toggle():
     only_runtime = build_report(data, {"runtime": True})
     assert "## Runtime / GPU / host" in only_runtime
     assert "## Command & profile" not in only_runtime
+
+
+def test_api_key_is_redacted_from_report_text():
+    from llama_launcher.core.report import redact_secrets
+    text = "llama-server --api-key sk-abcdef1234567890abcdef --port 8080"
+    out = redact_secrets(text)
+    assert "sk-abcdef1234567890abcdef" not in out
+    assert "8080" in out
+
+
+def test_bare_sk_token_is_redacted():
+    from llama_launcher.core.report import redact_secrets
+    assert "sk-supersecretvalue123456" not in redact_secrets("key: sk-supersecretvalue123456")
