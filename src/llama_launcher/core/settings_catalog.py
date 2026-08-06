@@ -331,13 +331,20 @@ _ALL = [
 
     # Router (llama-server started with no model; see tools/server/README.md
     # "Using multiple models"). These are meaningful only on a router process.
-    Setting("models-max", "--models-max", "int", 1, "Router", (), 0, 64, 1,
+    # The default MUST mirror upstream, not our advice: widgets emit only when
+    # value != default, so a default of 1 meant "leave it alone" emitted nothing
+    # and the server silently ran 4.
+    Setting("models-max", "--models-max", "int", 4, "Router", (), 0, 64, 1,
             tooltip="Maximum number of models the router keeps loaded at once. "
-                    "0 = unlimited. llama.cpp defaults to 4; 1 is safer on a "
-                    "single consumer GPU, where two large models will not co-fit."),
-    Setting("models-autoload", "--models-autoload", "bool", True, "Router", (),
-            tooltip="Load a model automatically when a request names it. Turning this "
-                    "off means models must be loaded explicitly via /models/load."),
+                    "0 = unlimited. llama.cpp defaults to 4; SET THIS TO 1 on a "
+                    "single consumer GPU, where two large models will not co-fit.",
+            suggestions=(1, 2, 4, 0)),
+    # Negative form, like cors-credentials: a bool defaulting to True can never
+    # emit (checked == default stores nothing; unchecked renders no flag).
+    Setting("models-autoload", "--no-models-autoload", "bool", False, "Router", (),
+            tooltip="Disable automatic loading when a request names a model. "
+                    "Checked = models must be loaded explicitly via /models/load; "
+                    "unchecked leaves llama.cpp's autoload default on."),
 
     # Server lifecycle
     Setting("sleep-idle-seconds", "--sleep-idle-seconds", "int", -1, "Server", (),

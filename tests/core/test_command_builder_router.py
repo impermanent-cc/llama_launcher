@@ -70,3 +70,24 @@ def test_server_mode_is_unchanged():
     assert argv[argv.index("-m") + 1] == "/models/a.gguf"
     assert "127.0.0.1:8080:8080" in argv
     assert "llama-launcher.mode=server" in argv
+
+
+def test_models_max_is_emitted_when_set_away_from_upstream_default():
+    argv = build_command(_router(settings={"port": 8080, "models-max": 1}),
+                         router_host_dir="/cfg/r")
+    assert argv[argv.index("--models-max") + 1] == "1"
+
+
+def test_disabling_autoload_actually_emits_a_flag():
+    argv = build_command(_router(settings={"port": 8080, "models-autoload": True}),
+                         router_host_dir="/cfg/r")
+    assert "--no-models-autoload" in argv
+
+
+def test_api_key_setting_never_reaches_router_argv():
+    # The whole point of --api-key-file: argv is visible in podman inspect, ps,
+    # the exported .sh and the diagnostic report.
+    argv = build_command(_router(settings={"port": 8080, "api-key": "sk-LEAKED"}),
+                         router_host_dir="/cfg/r")
+    assert not any("sk-LEAKED" in a for a in argv)
+    assert "--api-key" not in argv

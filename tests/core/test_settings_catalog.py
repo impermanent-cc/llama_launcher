@@ -104,7 +104,7 @@ from llama_launcher.core.settings_catalog import (
 
 def test_router_settings_present():
     assert CATALOG["models-max"].flag == "--models-max"
-    assert CATALOG["models-max"].default == 1          # upstream is 4; 1 suits a 16GB card
+    assert CATALOG["models-max"].default == 4          # mirrors upstream; see the test below
     assert CATALOG["models-autoload"].type == "bool"
     assert CATALOG["sleep-idle-seconds"].flag == "--sleep-idle-seconds"
     assert CATALOG["sleep-idle-seconds"].default == -1  # -1 = disabled
@@ -146,3 +146,18 @@ def test_member_catalog_excludes_router_only_settings():
     assert "models-autoload" not in mc
     assert "ctx-size" in mc
     assert "sleep-idle-seconds" in mc  # valid in single-model mode too
+
+
+def test_models_max_default_matches_upstream_not_advice():
+    # Widgets emit only when value != default, so a default of 1 (the *advice*)
+    # meant leaving the field alone emitted nothing and the server ran 4.
+    assert CATALOG["models-max"].default == 4
+
+
+def test_models_autoload_uses_the_negative_flag():
+    # A bool with default True can never emit: checked == default (nothing
+    # stored), unchecked renders [] because _render_setting skips falsy bools.
+    # The controllable form is the negative one, as with cors-credentials.
+    s = CATALOG["models-autoload"]
+    assert s.flag == "--no-models-autoload"
+    assert s.default is False
