@@ -16,8 +16,11 @@ def _base_profile():
 
 def test_run_prefix_cdi():
     argv = build_command(_base_profile())
-    assert argv[:6] == ["podman", "run", "--rm", "--name", "llama-my-model",
-                        "--device"]
+    # Membership rather than position: reattach labels are inserted between
+    # --name and --device, and the builder's ordering is not part of the contract.
+    assert argv[:3] == ["podman", "run", "--rm"]
+    assert argv[argv.index("--name") + 1] == "llama-my-model"
+    assert "--device" in argv
     assert "nvidia.com/gpu=all" in argv
     assert "-p" in argv and "127.0.0.1:8080:8080" in argv
     assert "-v" in argv and "/mnt/storage/AI/Models:/models:ro" in argv

@@ -1,6 +1,6 @@
 import shlex
 
-from .settings_catalog import CATALOG
+from .settings_catalog import CATALOG, router_catalog
 from .spec import Profile, slugify
 
 
@@ -19,6 +19,11 @@ def _mount_opts(mount) -> str:
 _TOOLS_VARIANTS = ("full", "light")
 _SERVER_ENTRYPOINT = "/app/llama-server"
 
+# Where the launcher-managed router files land inside the container.
+CONTAINER_ROUTER_DIR = "/router"
+CONTAINER_PRESET_PATH = f"{CONTAINER_ROUTER_DIR}/models.ini"
+CONTAINER_KEY_PATH = f"{CONTAINER_ROUTER_DIR}/api-key"
+
 
 def image_tag(image: str) -> str:
     """Return the tag portion of an image ref, or '' when none is present."""
@@ -34,9 +39,19 @@ def needs_server_entrypoint(image: str) -> bool:
     return image_tag(image).split("-", 1)[0] in _TOOLS_VARIANTS
 
 
-def _run_level_args(profile: Profile) -> list[str]:
+def _run_level_args(profile: Profile, router_host_dir: str = "") -> list[str]:
     rt = profile.runtime
-    argv = [rt.binary, "run", "--rm", "--name", f"llama-{slugify(profile.name)}"]
+    is_router = profile.mode == "router"
+
+    argv = [rt.binary, "run"]
+    # A router is a persistent headless host: run it detached, and keep the
+    # container after exit so a crash leaves a readable exit code and logs.
+    argv += ["-d"] if is_router else ["--rm"]
+    argv += ["--name", f"llama-{slugify(profile.name)}"]
+
+    # Labels let the launcher find and reattach to its own containers on restart.
+    argv += ["--label", f"llama-launcher.profile={profile.name}"]
+    argv += ["--label", f"llama-launcher.mode={profile.mode}"]
 
     if rt.gpu_mode == "cdi":
         argv += ["--device", "nvidia.com/gpu=all"]
@@ -47,7 +62,7 @@ def _run_level_args(profile: Profile) -> list[str]:
         argv.append("--security-opt=label=disable")
 
     port = profile.settings.get("port", 8080)
-    argv += ["-p", f"127.0.0.1:{port}:{port}"]
+    argv += ["-p", f"{rt.bind_host}:{port}:{port}"]
 
     workdir = None
     for m in profile.mounts:
@@ -58,6 +73,10 @@ def _run_level_args(profile: Profile) -> list[str]:
         argv += ["-v", spec]
         if m.workdir:
             workdir = m.container
+
+    if is_router and router_host_dir:
+        argv += ["-v", f"{router_host_dir}:{CONTAINER_ROUTER_DIR}:ro"]
+
     if workdir:
         argv += ["-w", workdir]
         # The official llama.cpp images resolve their bundled shared libraries
@@ -116,5 +135,28 @@ def _server_args(profile: Profile, catalog: dict) -> list[str]:
     return argv
 
 
-def build_command(profile: Profile, catalog: dict = CATALOG) -> list[str]:
+def _router_server_args(profile: Profile) -> list[str]:
+    """Server args for a router: no model, host-level settings only."""
+    argv: list[str] = []
+    port = profile.settings.get("port", 8080)
+
+    for key, setting in router_catalog().items():
+        if key == "port" or key == "api-key":
+            continue          # port is emitted below; the key comes from a file
+        if key in profile.settings:
+            argv += _render_setting(setting, profile.settings[key])
+
+    argv += ["--models-preset", CONTAINER_PRESET_PATH]
+    argv += ["--api-key-file", CONTAINER_KEY_PATH]
+    argv += ["--host", "0.0.0.0", "--port", str(port)]
+
+    if profile.raw_args.strip():
+        argv += shlex.split(profile.raw_args)
+    return argv
+
+
+def build_command(profile: Profile, catalog: dict = CATALOG,
+                  router_host_dir: str = "") -> list[str]:
+    if profile.mode == "router":
+        return _run_level_args(profile, router_host_dir) + _router_server_args(profile)
     return _run_level_args(profile) + _server_args(profile, catalog)
