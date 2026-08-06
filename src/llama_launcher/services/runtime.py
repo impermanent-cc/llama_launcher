@@ -88,3 +88,63 @@ def list_local_images(binary: str) -> list[str]:
     if res.returncode != 0:
         return []
     return parse_images(res.stdout)
+
+
+_PROFILE_LABEL = "llama-launcher.profile"
+_MODE_LABEL = "llama-launcher.mode"
+
+
+def parse_ps_json(output: str) -> list[dict]:
+    """Normalise `podman ps -a --format json` rows this launcher owns.
+
+    Containers created before labels existed are still adopted, by falling back
+    to the `llama-` name prefix. Anything else is ignored.
+    """
+    try:
+        data = json.loads(output)
+    except (json.JSONDecodeError, TypeError):
+        return []
+    if not isinstance(data, list):
+        return []
+
+    rows: list[dict] = []
+    for item in data:
+        if not isinstance(item, dict):
+            continue
+        names = item.get("Names")
+        name = names[0] if isinstance(names, list) and names else names
+        if not isinstance(name, str) or not name:
+            continue
+
+        labels = item.get("Labels")
+        labels = labels if isinstance(labels, dict) else {}
+        profile = labels.get(_PROFILE_LABEL)
+        mode = labels.get(_MODE_LABEL)
+
+        if not profile:
+            if not name.startswith("llama-"):
+                continue
+            profile = name[len("llama-"):]
+            mode = mode or "server"
+
+        rows.append({
+            "name": name,
+            "running": str(item.get("State", "")).lower() == "running",
+            "profile": profile,
+            "mode": mode or "server",
+        })
+    return rows
+
+
+def list_launcher_containers(binary: str) -> list[dict]:
+    """Every container this launcher created, running or not."""
+    res = _run([binary, "ps", "-a", "--filter", f"label={_PROFILE_LABEL}",
+                "--format", "json"])
+    if res.returncode != 0:
+        return []
+    return parse_ps_json(res.stdout)
+
+
+def rm_argv(name: str, binary: str) -> list[str]:
+    """Argv to remove a container (for the pre-launch cleanup of a stopped router)."""
+    return [binary, "rm", "-f", name]
