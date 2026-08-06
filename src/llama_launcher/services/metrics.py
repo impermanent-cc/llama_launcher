@@ -3,19 +3,47 @@ import requests
 from llama_launcher.core.prometheus import parse_metrics
 
 
-def fetch_metrics(port, timeout: float = 1.0) -> dict:
+_NO_AUTOLOAD = {"autoload": "false"}
+
+
+def _scope(model: str | None) -> dict | None:
+    """Query params for a router-scoped GET, or None in single-model mode.
+
+    `autoload=false` matters: without it, polling /metrics?model=X would LOAD X.
+    """
+    if not model:
+        return None
+    return {"model": model, **_NO_AUTOLOAD}
+
+
+def _headers(api_key: str | None) -> dict | None:
+    return {"Authorization": f"Bearer {api_key}"} if api_key else None
+
+
+def fetch_metrics_text(port, timeout: float = 1.0, model: str | None = None,
+                       api_key: str | None = None, host: str = "127.0.0.1") -> str:
+    """Raw /metrics body (needed for label-aware parsing), '' on any failure."""
     try:
-        r = requests.get(f"http://127.0.0.1:{port}/metrics", timeout=timeout)
+        r = requests.get(f"http://{host}:{port}/metrics", timeout=timeout,
+                         params=_scope(model), headers=_headers(api_key))
         if r.status_code != 200:
-            return {}
-        return parse_metrics(r.text)
+            return ""
+        return r.text
     except requests.RequestException:
-        return {}
+        return ""
 
 
-def fetch_slots(port, timeout: float = 1.0) -> list:
+def fetch_metrics(port, timeout: float = 1.0, model: str | None = None,
+                  api_key: str | None = None, host: str = "127.0.0.1") -> dict:
+    text = fetch_metrics_text(port, timeout, model, api_key, host)
+    return parse_metrics(text) if text else {}
+
+
+def fetch_slots(port, timeout: float = 1.0, model: str | None = None,
+                api_key: str | None = None, host: str = "127.0.0.1") -> list:
     try:
-        r = requests.get(f"http://127.0.0.1:{port}/slots", timeout=timeout)
+        r = requests.get(f"http://{host}:{port}/slots", timeout=timeout,
+                         params=_scope(model), headers=_headers(api_key))
         if r.status_code != 200:
             return []
         data = r.json()
