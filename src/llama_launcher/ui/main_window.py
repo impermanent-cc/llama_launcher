@@ -129,14 +129,16 @@ class MainWindow(QMainWindow):
         image_row.addWidget(self.update_badge)
         image_widget = QWidget()
         image_widget.setLayout(image_row)
-        from PySide6.QtWidgets import QComboBox, QListWidget
+        from PySide6.QtWidgets import QListWidget
 
-        self.mode_combo = QComboBox()
+        # NoWheel: an unfocused scroll over these must not silently flip launch
+        # semantics (terminal vs detached) or expose the port to the network.
+        self.mode_combo = NoWheelComboBox()
         self.mode_combo.addItem("Single server", "server")
         self.mode_combo.addItem("Router (headless host)", "router")
         self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
 
-        self.bind_host_combo = QComboBox()
+        self.bind_host_combo = NoWheelComboBox()
         self.bind_host_combo.setEditable(True)
         self.bind_host_combo.addItems(["127.0.0.1", "0.0.0.0"])
         self.bind_host_combo.currentTextChanged.connect(self.refresh_preview)
@@ -615,6 +617,13 @@ class MainWindow(QMainWindow):
             f"Bound to {host}: reachable beyond this machine. The API key is required."
             if host not in LOOPBACK_HOSTS else "")
 
+    def _report_launch_error(self, text: str) -> None:
+        """Show why a detached router failed to start. Non-modal: this fires
+        from a QProcess signal, which tests drive."""
+        self.status_label.setText("● failed to start")
+        self.router_panel.set_error(f"launch failed: {text.splitlines()[-1][:200]}"
+                                    if text else "launch failed")
+
     def adopt_running_containers(self) -> list:
         """Containers this launcher owns, so a detached router survives a GUI restart."""
         p = self.current_profile()
@@ -744,7 +753,12 @@ class MainWindow(QMainWindow):
             self.monitor_panel.reset()
             self._spawn_async(
                 runtime.rm_argv(self._container_name(), p.runtime.binary),
-                on_done=lambda: self._spawn_async(argv, on_done=self.update_status))
+                on_done=lambda: self._spawn_async(
+                    argv, on_done=self.update_status,
+                    # Detached means no terminal, so a bad image ref or a CDI
+                    # failure would otherwise produce nothing but a status label
+                    # stuck on "stopped".
+                    on_error=self._report_launch_error))
             self.refresh_router_panel_header()
             return
 
@@ -764,13 +778,27 @@ class MainWindow(QMainWindow):
         # follower once the container is actually running (podman logs replays
         # from the start, so no early output is missed).
 
-    def _spawn_async(self, argv: list[str], on_done=None):
+    def _spawn_async(self, argv: list[str], on_done=None, on_error=None):
         """Run argv in the background via QProcess so the UI thread never blocks.
-        Calls on_done() when the process finishes."""
+        Calls on_done() when the process finishes.
+
+        on_error(text) receives podman's stderr on a non-zero exit, and a
+        message if the binary could not be started at all — `finished` is NOT
+        emitted on FailedToStart, so without errorOccurred a launch that never
+        began would report nothing whatsoever.
+        """
         from PySide6.QtCore import QProcess
         proc = QProcess(self)
         if on_done is not None:
             proc.finished.connect(lambda *_: on_done())
+        if on_error is not None:
+            def _finished(code, _status):
+                if code != 0:
+                    err = bytes(proc.readAllStandardError()).decode(errors="replace").strip()
+                    on_error(err or f"{argv[0]} exited {code}")
+            proc.finished.connect(_finished)
+            proc.errorOccurred.connect(
+                lambda _e: on_error(f"could not run {argv[0]}: {proc.errorString()}"))
         proc.start(argv[0], argv[1:])
         return proc
 

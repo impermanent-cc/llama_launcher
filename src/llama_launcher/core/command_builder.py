@@ -75,7 +75,12 @@ def _run_level_args(profile: Profile, router_host_dir: str = "") -> list[str]:
             workdir = m.container
 
     if is_router and router_host_dir:
-        argv += ["-v", f"{router_host_dir}:{CONTAINER_ROUTER_DIR}:ro"]
+        # Honour the profile's SELinux preference like every other mount: on an
+        # enforcing host an unlabelled mount gives the container EACCES on the
+        # preset and key, and the router fails to start with a confusing error.
+        selinux = next((m.selinux for m in profile.mounts if m.selinux), None)
+        opts = f"ro,{selinux}" if selinux else "ro"
+        argv += ["-v", f"{router_host_dir}:{CONTAINER_ROUTER_DIR}:{opts}"]
 
     if workdir:
         argv += ["-w", workdir]

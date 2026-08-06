@@ -9,8 +9,10 @@ _REDACTIONS = (
 )
 
 # A bare router API key pasted into logs or echoed by a harness, with no
-# --api-key flag or Authorization header in front of it to anchor on.
-_SK_TOKEN = re.compile(r"sk-[A-Za-z0-9_\-]{16,}")
+# --api-key flag or Authorization header in front of it to anchor on. The
+# left boundary matters: without it this also eats "disk-cache_enabled_true"
+# and "task-0000000000000001", which is exactly what logs are full of.
+_SK_TOKEN = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]{16,}")
 
 
 def redact_secrets(text: str) -> str:
@@ -19,7 +21,7 @@ def redact_secrets(text: str) -> str:
     text = _REDACTIONS[0].sub(r"\1***", text)
     text = _REDACTIONS[1].sub(r"\1***\3", text)
     text = _REDACTIONS[2].sub(r"\1***", text)
-    text = _SK_TOKEN.sub("«redacted»", text)
+    text = _SK_TOKEN.sub("***", text)      # same marker as the rules above
     return text
 
 

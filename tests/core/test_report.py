@@ -93,3 +93,19 @@ def test_api_key_is_redacted_from_report_text():
 def test_bare_sk_token_is_redacted():
     from llama_launcher.core.report import redact_secrets
     assert "sk-supersecretvalue123456" not in redact_secrets("key: sk-supersecretvalue123456")
+
+
+def test_sk_redaction_does_not_chew_through_ordinary_log_words():
+    # No left boundary meant disk-/task-/risk- prefixed tokens were mangled,
+    # and the logs section is exactly where those appear.
+    from llama_launcher.core.report import redact_secrets
+    for text in ("disk-cache_enabled_true", "task-0000000000000001",
+                 "risk-assessment_score_9"):
+        assert redact_secrets(text) == text
+
+
+def test_sk_redaction_still_catches_a_real_token_after_punctuation():
+    from llama_launcher.core.report import redact_secrets
+    for text in ("key=sk-abcdefghijklmnopqrst", "(sk-abcdefghijklmnopqrst)",
+                 "sk-abcdefghijklmnopqrst"):
+        assert "sk-abcdefghijklmnopqrst" not in redact_secrets(text)

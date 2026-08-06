@@ -347,7 +347,7 @@ _ALL = [
                     "unchecked leaves llama.cpp's autoload default on."),
 
     # Server lifecycle
-    Setting("sleep-idle-seconds", "--sleep-idle-seconds", "int", -1, "Server", (),
+    Setting("sleep-idle-seconds", "--sleep-idle-seconds", "int", -1, "Server & Tools", (),
             -1, 86400, 30,
             tooltip="Unload the model and its KV cache after this many idle seconds; "
                     "the next request reloads it automatically. -1 = never sleep. "
@@ -355,37 +355,37 @@ _ALL = [
             suggestions=(-1, 300, 600, 1800, 3600)),
 
     # CORS
-    Setting("cors-origins", "--cors-origins", "string", "*", "Server", (),
+    Setting("cors-origins", "--cors-origins", "string", "*", "Networking & CORS", (),
             tooltip="Comma-separated allowed CORS origins. The special value "
                     "'localhost' reflects the Origin header only when it is localhost. "
                     "Note: --tools/--agent/MCP clamp this to localhost."),
-    Setting("cors-methods", "--cors-methods", "string", "", "Server", (),
+    Setting("cors-methods", "--cors-methods", "string", "", "Networking & CORS", (),
             tooltip="Comma-separated allowed CORS methods. Empty = llama.cpp default "
                     "(GET, POST, DELETE, OPTIONS)."),
-    Setting("cors-headers", "--cors-headers", "string", "", "Server", (),
+    Setting("cors-headers", "--cors-headers", "string", "", "Networking & CORS", (),
             tooltip="Comma-separated allowed CORS headers. Empty = llama.cpp default (*)."),
-    Setting("cors-credentials", "--no-cors-credentials", "bool", False, "Server", (),
+    Setting("cors-credentials", "--no-cors-credentials", "bool", False, "Networking & CORS", (),
             tooltip="Disable CORS credentials. llama.cpp enables them by default; with "
                     "origins set to '*' the Origin header is echoed back and credentials "
                     "are always allowed."),
-    Setting("sse-ping-interval", "--sse-ping-interval", "int", 15, "Server", (),
+    Setting("sse-ping-interval", "--sse-ping-interval", "int", 15, "Networking & CORS", (),
             -1, 3600, 5,
             tooltip="Seconds between SSE keep-alive pings while a stream is silent, so a "
                     "long prompt-processing phase does not look like a dead connection. "
                     "-1 = disabled."),
 
     # MCP (built-in agent)
-    Setting("mcp-servers-config", "--mcp-servers-config", "string", "", "Server", (),
+    Setting("mcp-servers-config", "--mcp-servers-config", "string", "", "Networking & CORS", (),
             tooltip="Path (inside the container) to a JSON file of MCP server definitions, "
                     "Cursor-compatible format. Experimental; clamps CORS origins to localhost.",
             danger=True),
-    Setting("mcp-servers-json", "--mcp-servers-json", "string", "", "Server", (),
+    Setting("mcp-servers-json", "--mcp-servers-json", "string", "", "Networking & CORS", (),
             tooltip="Inline JSON of MCP server definitions, Cursor-compatible format. "
                     "Experimental; clamps CORS origins to localhost.",
             danger=True),
 
     # Chat behaviour
-    Setting("reasoning-preserve", "--reasoning-preserve", "bool", False, "Chat", (),
+    Setting("reasoning-preserve", "--reasoning-preserve", "bool", False, "Server & Tools", (),
             tooltip="Preserve the reasoning trace across the whole history rather than only "
                     "the last assistant message. Needs a template advertising "
                     "'supports_preserve_reasoning'."),

@@ -68,18 +68,29 @@ def test_router_launch_uses_detached_command(win, monkeypatch, tmp_path):
     monkeypatch.setattr(win, "_validate_or_warn", lambda: True)
     monkeypatch.setattr(win, "vram_check", lambda: None)
 
-    def fake_spawn(argv, on_done=None):
+    pending = []
+
+    def fake_spawn(argv, on_done=None, on_error=None):
         spawned.append(argv)
+        # Do NOT call on_done inline: the real QProcess fires it later, so
+        # calling it here would make a chained and an unchained implementation
+        # produce identical output, which is exactly what this test must tell
+        # apart.
         if on_done is not None:
-            on_done()           # the real QProcess fires this when it exits
+            pending.append(on_done)
 
     monkeypatch.setattr(win, "_spawn_async", fake_spawn)
     win.on_launch()
-    # The stale container is removed first, then the run is chained off it.
-    assert spawned[0][:3] == ["podman", "rm", "-f"]
+
+    # Only the removal has been spawned so far; the run must be waiting on it.
+    assert [a[:3] for a in spawned] == [["podman", "rm", "-f"]]
+    assert pending, "the rm must carry a completion callback to chain the run"
+    pending.pop(0)()            # rm finishes -> run starts
+
     run_argv = next(a for a in spawned if "run" in a)
     assert "-d" in run_argv
     assert "--models-preset" in run_argv
+    assert ":/router:ro" in " ".join(run_argv)
 
 
 def test_server_launch_still_uses_the_terminal(win, monkeypatch):
@@ -263,3 +274,11 @@ def test_connected_state_distinguishes_down_from_empty(win, monkeypatch):
     win.refresh_router_models()
     # Reachable, just serving nothing -- not the same as unreachable.
     assert "disconnected" not in win.router_panel.status_label.text().lower()
+
+
+def test_failed_router_launch_is_reported(win):
+    # Detached means no terminal: without this the only signal was a status
+    # label stuck on "stopped".
+    win._report_launch_error("Error: short-name resolution enforced but cannot prompt")
+    assert "failed" in win.status_label.text().lower()
+    assert "resolution" in win.router_panel.status_label.text()
