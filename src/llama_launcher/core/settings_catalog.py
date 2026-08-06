@@ -328,6 +328,88 @@ _ALL = [
     Setting("reranking", "--reranking", "bool", False, "Embedding & Reranking", (),
             tooltip="Enable the reranking endpoint (/rerank, /v1/rerank). A reranker also "
                     "needs pooling = rank and --embeddings enabled."),
+
+    # Router (llama-server started with no model; see tools/server/README.md
+    # "Using multiple models"). These are meaningful only on a router process.
+    Setting("models-max", "--models-max", "int", 1, "Router", (), 0, 64, 1,
+            tooltip="Maximum number of models the router keeps loaded at once. "
+                    "0 = unlimited. llama.cpp defaults to 4; 1 is safer on a "
+                    "single consumer GPU, where two large models will not co-fit."),
+    Setting("models-autoload", "--models-autoload", "bool", True, "Router", (),
+            tooltip="Load a model automatically when a request names it. Turning this "
+                    "off means models must be loaded explicitly via /models/load."),
+
+    # Server lifecycle
+    Setting("sleep-idle-seconds", "--sleep-idle-seconds", "int", -1, "Server", (),
+            -1, 86400, 30,
+            tooltip="Unload the model and its KV cache after this many idle seconds; "
+                    "the next request reloads it automatically. -1 = never sleep. "
+                    "/health, /props and /models do not reset the idle timer.",
+            suggestions=(-1, 300, 600, 1800, 3600)),
+
+    # CORS
+    Setting("cors-origins", "--cors-origins", "string", "*", "Server", (),
+            tooltip="Comma-separated allowed CORS origins. The special value "
+                    "'localhost' reflects the Origin header only when it is localhost. "
+                    "Note: --tools/--agent/MCP clamp this to localhost."),
+    Setting("cors-methods", "--cors-methods", "string", "", "Server", (),
+            tooltip="Comma-separated allowed CORS methods. Empty = llama.cpp default "
+                    "(GET, POST, DELETE, OPTIONS)."),
+    Setting("cors-headers", "--cors-headers", "string", "", "Server", (),
+            tooltip="Comma-separated allowed CORS headers. Empty = llama.cpp default (*)."),
+    Setting("cors-credentials", "--no-cors-credentials", "bool", False, "Server", (),
+            tooltip="Disable CORS credentials. llama.cpp enables them by default; with "
+                    "origins set to '*' the Origin header is echoed back and credentials "
+                    "are always allowed."),
+    Setting("sse-ping-interval", "--sse-ping-interval", "int", 15, "Server", (),
+            -1, 3600, 5,
+            tooltip="Seconds between SSE keep-alive pings while a stream is silent, so a "
+                    "long prompt-processing phase does not look like a dead connection. "
+                    "-1 = disabled."),
+
+    # MCP (built-in agent)
+    Setting("mcp-servers-config", "--mcp-servers-config", "string", "", "Server", (),
+            tooltip="Path (inside the container) to a JSON file of MCP server definitions, "
+                    "Cursor-compatible format. Experimental; clamps CORS origins to localhost.",
+            danger=True),
+    Setting("mcp-servers-json", "--mcp-servers-json", "string", "", "Server", (),
+            tooltip="Inline JSON of MCP server definitions, Cursor-compatible format. "
+                    "Experimental; clamps CORS origins to localhost.",
+            danger=True),
+
+    # Chat behaviour
+    Setting("reasoning-preserve", "--reasoning-preserve", "bool", False, "Chat", (),
+            tooltip="Preserve the reasoning trace across the whole history rather than only "
+                    "the last assistant message. Needs a template advertising "
+                    "'supports_preserve_reasoning'."),
 ]
 
 CATALOG: dict = {s.key: s for s in _ALL}
+
+# Settings that exist ONLY on a router process.
+ROUTER_ONLY_KEYS: frozenset = frozenset({"models-max", "models-autoload"})
+
+# Settings a router profile may set. Everything not listed here is model-level
+# and belongs on member profiles instead.
+#
+# This split is load-bearing, not cosmetic: llama.cpp resolves preset options as
+# `router CLI args > per-model preset section > [*] global`, so CLI args WIN. A
+# router carrying `-c 8192` would silently override every member's own `c` value.
+# Filtering the router form to host-level settings makes that unreachable.
+HOST_KEYS: frozenset = frozenset({
+    "models-max", "models-autoload", "sleep-idle-seconds",
+    "port", "api-key", "threads-http", "metrics", "no-webui",
+    "tools",
+    "cors-origins", "cors-methods", "cors-headers", "cors-credentials",
+    "sse-ping-interval", "mcp-servers-config", "mcp-servers-json",
+}) & frozenset(CATALOG)
+
+
+def router_catalog() -> dict:
+    """Settings shown on a router profile's form."""
+    return {k: s for k, s in CATALOG.items() if k in HOST_KEYS}
+
+
+def member_catalog() -> dict:
+    """Settings shown on an ordinary (member/single-server) profile's form."""
+    return {k: s for k, s in CATALOG.items() if k not in ROUTER_ONLY_KEYS}

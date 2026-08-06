@@ -95,3 +95,54 @@ def test_repeat_last_n_no_longer_offers_dead_sentinel():
     s = CATALOG["repeat-last-n"]
     assert s.default == 64
     assert s.minimum == 0
+
+
+from llama_launcher.core.settings_catalog import (
+    HOST_KEYS, ROUTER_ONLY_KEYS, member_catalog, router_catalog,
+)
+
+
+def test_router_settings_present():
+    assert CATALOG["models-max"].flag == "--models-max"
+    assert CATALOG["models-max"].default == 1          # upstream is 4; 1 suits a 16GB card
+    assert CATALOG["models-autoload"].type == "bool"
+    assert CATALOG["sleep-idle-seconds"].flag == "--sleep-idle-seconds"
+    assert CATALOG["sleep-idle-seconds"].default == -1  # -1 = disabled
+
+
+def test_ride_along_settings_present():
+    for key, flag in [
+        ("cors-origins", "--cors-origins"),
+        ("cors-methods", "--cors-methods"),
+        ("cors-headers", "--cors-headers"),
+        ("cors-credentials", "--no-cors-credentials"),
+        ("sse-ping-interval", "--sse-ping-interval"),
+        ("mcp-servers-config", "--mcp-servers-config"),
+        ("mcp-servers-json", "--mcp-servers-json"),
+        ("reasoning-preserve", "--reasoning-preserve"),
+    ]:
+        assert CATALOG[key].flag == flag
+
+
+def test_host_and_router_key_sets_reference_real_settings():
+    # A typo in either set would silently drop a setting from a form.
+    assert HOST_KEYS <= set(CATALOG)
+    assert ROUTER_ONLY_KEYS <= HOST_KEYS
+
+
+def test_router_catalog_excludes_model_level_settings():
+    rc = router_catalog()
+    # The precedence trap: router CLI args OVERRIDE per-model preset values, so
+    # model-level settings must not be settable on a router profile.
+    for key in ("ctx-size", "n-gpu-layers", "temp", "spec-type", "n-cpu-moe"):
+        assert key not in rc
+    assert "models-max" in rc
+    assert "port" in rc
+
+
+def test_member_catalog_excludes_router_only_settings():
+    mc = member_catalog()
+    assert "models-max" not in mc
+    assert "models-autoload" not in mc
+    assert "ctx-size" in mc
+    assert "sleep-idle-seconds" in mc  # valid in single-model mode too
