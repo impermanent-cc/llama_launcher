@@ -25,7 +25,7 @@ def _hermetic_ui_boundaries(monkeypatch):
     monkeypatch.setattr(_runtime, "stats", lambda name, binary: None)
     monkeypatch.setattr(_runtime, "started_at", lambda name, binary: None)
     monkeypatch.setattr(_runtime, "list_local_images", lambda binary: [])
-    monkeypatch.setattr(_health, "health_ok", lambda port, timeout=1.0, **kw: False)
+    monkeypatch.setattr(_health, "probe_health", lambda port, timeout=1.0, **kw: "down")
     monkeypatch.setattr(_gpu, "query_gpus", lambda: [])
     monkeypatch.setattr(_gpu, "free_vram_bytes", lambda: None)
     monkeypatch.setattr(_metrics, "fetch_metrics", lambda port, timeout=1.0, **kw: {})

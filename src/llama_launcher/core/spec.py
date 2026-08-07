@@ -29,7 +29,10 @@ class RouterMember:
     profile: str
     model_id: str = ""
     load_on_startup: bool = False
-    stop_timeout: int = 10          # seconds to wait before forcing termination
+    # Kill-delay after an unload is requested: seconds llama.cpp waits before
+    # forcing this model's process down. NOT an idle timer — idle unloading is
+    # the server-wide `--sleep-idle-seconds` setting, a separate concept.
+    stop_timeout: int = 10
 
 
 @dataclass

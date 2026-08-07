@@ -35,6 +35,10 @@ def test_speculative_decoding_group():
     assert CATALOG["spec-type"].type == "enum"
     assert CATALOG["spec-type"].default == "none"
     assert "draft-mtp" in CATALOG["spec-type"].enum
+    # Full llama.cpp strategy set (build b9755): the two draft-d* variants were
+    # missing from the enum, so the UI couldn't select them.
+    assert "draft-dflash" in CATALOG["spec-type"].enum
+    assert "draft-dspark" in CATALOG["spec-type"].enum
     assert CATALOG["spec-draft-n-min"].default == 0
     assert CATALOG["cache-type-k-draft"].enum == KV_CACHE_TYPES
     assert CATALOG["cache-type-v-draft"].default == "f16"

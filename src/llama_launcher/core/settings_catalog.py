@@ -292,7 +292,8 @@ _ALL = [
 
     # Speculative Decoding
     Setting("spec-type", "--spec-type", "enum", "none", "Speculative Decoding", (),
-            enum=("none", "draft-simple", "draft-eagle3", "draft-mtp",
+            enum=("none", "draft-simple", "draft-eagle3", "draft-dflash",
+                  "draft-dspark", "draft-mtp",
                   "ngram-simple", "ngram-map-k", "ngram-map-k4v", "ngram-mod",
                   "ngram-cache"),
             tooltip="Speculative-decoding strategy. 'draft-mtp' enables a model's built-in "

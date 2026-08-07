@@ -74,7 +74,7 @@ def test_update_status_starts_follower_when_running(qtbot, monkeypatch):
     status poll starts one (logs replay from the start, so nothing is missed)."""
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
-    monkeypatch.setattr(mw.health, "health_ok", lambda port, **kw: True)
+    monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
     monkeypatch.setattr(mw.MainWindow, "collect_monitor_data", lambda self: {})
     monkeypatch.setattr(mw.MainWindow, "_log_follower_active", lambda self: False)
     calls = []
@@ -90,7 +90,7 @@ def test_update_status_does_not_restart_active_follower(qtbot, monkeypatch):
     """A follower already streaming must not be re-spawned on every poll."""
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
-    monkeypatch.setattr(mw.health, "health_ok", lambda port, **kw: True)
+    monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
     monkeypatch.setattr(mw.MainWindow, "collect_monitor_data", lambda self: {})
     monkeypatch.setattr(mw.MainWindow, "_log_follower_active", lambda self: True)
     calls = []

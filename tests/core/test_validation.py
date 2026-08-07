@@ -102,6 +102,26 @@ def test_non_mtp_profile_gets_no_mtp_warning():
     assert not any("mtp" in i.message.lower() for i in validate(p))
 
 
+def test_draft_model_without_spec_type_warns():
+    p = _ok_profile()
+    p.draft_model = "/models/draft.gguf"    # loaded but spec-type left at 'none'
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert any("draft" in i.message.lower() and "spec-type" in i.message.lower()
+               for i in warns)
+
+
+def test_draft_model_with_spec_type_has_no_draft_warning():
+    p = _ok_profile()
+    p.draft_model = "/models/draft.gguf"
+    p.settings["spec-type"] = "draft-simple"   # now actually used
+    assert not any("draft model" in i.message.lower() for i in validate(p))
+
+
+def test_no_draft_model_has_no_draft_warning():
+    p = _ok_profile()
+    assert not any("draft model" in i.message.lower() for i in validate(p))
+
+
 def _vprofile(**settings):
     from llama_launcher.core.spec import Profile, Mount, Runtime
     return Profile(

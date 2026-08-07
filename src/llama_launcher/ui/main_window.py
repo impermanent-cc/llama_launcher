@@ -1005,10 +1005,10 @@ class MainWindow(QMainWindow):
             return
         name = self._container_name()
         state = runtime.container_state(name, p.runtime.binary)
-        ok = health.health_ok(p.settings.get("port", 8080),
-                              host=dial_host(p.runtime.bind_host)) \
-            if state == "running" else False
-        self.status_label.setText("● " + health.derive_status(state, ok))
+        hstatus = health.probe_health(p.settings.get("port", 8080),
+                                     host=dial_host(p.runtime.bind_host)) \
+            if state == "running" else "down"
+        self.status_label.setText("● " + health.derive_status(state, hstatus))
         self.web_ui_btn.setEnabled(state == "running")
         if state == "running":
             if not self._log_follower_active():

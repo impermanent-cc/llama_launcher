@@ -110,6 +110,15 @@ def validate(profile: Profile, running_ports: tuple = (),
                                 "MTP (--spec-type draft-mtp) doesn't support --parallel > 1; "
                                 "set parallel = 1 (a single slot)."))
 
+    # A draft model is inert unless a speculation strategy is selected: llama.cpp
+    # defaults --spec-type to 'none', so the draft is loaded (costing VRAM) and
+    # never used. Warn (don't block).
+    if profile.draft_model and profile.settings.get("spec-type", "none") in ("none", "", None):
+        issues.append(Issue("warning",
+                            "A draft model is selected but spec-type is 'none', so the draft "
+                            "model is loaded and never used. Set spec-type (e.g. draft-simple) "
+                            "to enable speculative decoding, or clear the draft model."))
+
     # Embedding / reranking bad-combo warnings. A reranker needs all three of
     # --reranking, --pooling rank, and --embeddings; sampling is ignored here.
     if profile.settings.get("embeddings") or profile.settings.get("reranking"):
