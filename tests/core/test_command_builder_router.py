@@ -102,3 +102,27 @@ def test_server_args_never_emit_router_only_flags():
     argv = build_command(p)
     assert "--models-max" not in argv
     assert "--no-models-autoload" not in argv
+
+
+def _router_raw(raw="", **settings):
+    return Profile(
+        name="r", image="img", runtime=Runtime(bind_host="127.0.0.1"), mode="router",
+        settings={"port": 8080, **settings}, raw_args=raw,
+    )
+
+
+def test_router_raw_ctx_overrides_setting():
+    argv = build_command(_router_raw(raw="-c 4096", **{"ctx-size": "8192"}))
+    assert argv.count("--ctx-size") == 1
+    assert argv[argv.index("--ctx-size") + 1] == "4096"
+
+
+def test_router_raw_models_preset_cannot_override():
+    argv = build_command(_router_raw(raw="--models-preset /evil.ini"))
+    assert argv.count("--models-preset") == 1
+    assert "/evil.ini" not in argv       # launcher keeps its container path
+
+
+def test_router_noncolliding_raw_appended():
+    argv = build_command(_router_raw(raw="--numa distribute"))
+    assert argv[-2:] == ["--numa", "distribute"]

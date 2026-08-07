@@ -108,6 +108,10 @@ def _merge_raw_args(owned, raw_pairs, protected_canon, repeatable_canon):
 
     raw wins for owned single-valued flags (replaced in place); protected
     canon flags keep the launcher value; repeatable/unknown flags append.
+    Extras with a recognised catalog alias (e.g. "-c") are folded to their
+    canonical long form even when there is no owned pair to collide with, so
+    a mode that doesn't own a flag (e.g. ctx-size on a router) still dedups
+    against it consistently. Flags with no catalog alias pass through as-is.
     Returns (argv, warnings).
     """
     owned = [list(pair) for pair in owned]          # mutable copy for in-place override
@@ -131,7 +135,7 @@ def _merge_raw_args(owned, raw_pairs, protected_canon, repeatable_canon):
                 shown = f"{flag} {value}" if value is not None else flag
                 warnings.append(f"raw arg '{shown}' overrides '{canon}' (was {old})")
             continue
-        extras.append((flag, value))
+        extras.append((canon, value))
     return _flatten_pairs(owned) + _flatten_pairs(extras), warnings
 
 
@@ -271,23 +275,32 @@ def _server_args(profile: Profile, catalog: dict) -> list[str]:
     return argv
 
 
-def _router_server_args(profile: Profile) -> list[str]:
-    """Server args for a router: no model, host-level settings only."""
-    argv: list[str] = []
+def _owned_router_pairs(profile: Profile) -> list:
+    pairs: list = []
     port = profile.settings.get("port", 8080)
-
     for key, setting in router_catalog().items():
         if key == "port" or key == "api-key":
-            continue          # port is emitted below; the key comes from a file
+            continue
         if key in profile.settings:
-            argv += _render_setting(setting, profile.settings[key])
+            rendered = _render_setting(setting, profile.settings[key])
+            if not rendered:
+                continue
+            pairs.append((rendered[0], rendered[1] if len(rendered) > 1 else None))
+    pairs.append(("--models-preset", CONTAINER_PRESET_PATH))
+    pairs.append(("--api-key-file", CONTAINER_KEY_PATH))
+    pairs.append(("--host", "0.0.0.0"))
+    pairs.append(("--port", str(port)))
+    return pairs
 
-    argv += ["--models-preset", CONTAINER_PRESET_PATH]
-    argv += ["--api-key-file", CONTAINER_KEY_PATH]
-    argv += ["--host", "0.0.0.0", "--port", str(port)]
 
-    if profile.raw_args.strip():
-        argv += shlex.split(profile.raw_args)
+_ROUTER_PROTECTED = {"--host", "--port", "--models-preset", "--api-key-file"}
+
+
+def _router_server_args(profile: Profile) -> list[str]:
+    """Server args for a router: no model, host-level settings only."""
+    owned = _owned_router_pairs(profile)
+    argv, _warnings = _merge_raw_args(
+        owned, _parse_raw_pairs(profile.raw_args), _ROUTER_PROTECTED, _REPEATABLE)
     return argv
 
 
