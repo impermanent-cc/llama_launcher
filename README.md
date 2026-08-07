@@ -34,6 +34,31 @@ The launcher offers two GPU modes (Configure tab → **Runtime**):
   Interface spec.
 - **Legacy — `--gpus all`** — the older runtime hook; doesn't read the CDI spec.
 
+## Headless router control
+
+Drive a **router** profile without the GUI (for test harnesses). Runs on the
+host with podman + the GPU; the harness connects in over the network.
+
+    llama-launcher --launch --profile ROUTER [--wait[=SECONDS]]
+    llama-launcher --stop   --profile ROUTER
+    llama-launcher --health --profile ROUTER
+
+`--profile` falls back to the last-used profile. `--launch --wait` blocks until
+the router answers `/health` (default 60s; models still load on demand).
+Router profiles only; a non-router profile or a validation error is refused
+(exit 2) before anything starts.
+
+Exit codes:
+
+| code | `--launch` | `--stop` | `--health` |
+|------|-----------|----------|-----------|
+| 0 | started (ready, with `--wait`) | stopped / already stopped | ready |
+| 1 | container run failed | stop failed | — |
+| 2 | usage/config error | usage/config error | usage/config error |
+| 3 | — | — | loading |
+| 4 | — | — | down / stopped |
+| 5 | `--wait` timed out (started, not ready) | — | — |
+
 ## Troubleshooting
 
 ### `crun: cannot stat /usr/lib/libnvidia-*.so.<version>: No such file or directory`
