@@ -236,15 +236,20 @@ class MonitorPanel(QWidget):
             for c, val in enumerate(values):
                 self.bench_table.setItem(r, c, QTableWidgetItem("" if val is None else str(val)))
         if delta:
-            shared = delta.get("shared") or {}
-            deltas = []
-            pp = shared.get("pp_pct")
-            gen = shared.get("gen_pct")
-            if pp is not None:
-                deltas.append(f"pp {pp:+.0f}%")
-            if gen is not None:
-                deltas.append(f"gen {gen:+.0f}%")
-            summary = "Δ " + " · ".join(deltas) if deltas else "Δ"
+            # "shared" is a list of {"size","pp_pct","gen_pct"} -- one entry
+            # per target size present in both runs (see benchmark_store.delta).
+            parts = []
+            for entry in delta.get("shared") or []:
+                bits = []
+                pp = entry.get("pp_pct")
+                gen = entry.get("gen_pct")
+                if pp is not None:
+                    bits.append(f"pp {pp:+.0f}%")
+                if gen is not None:
+                    bits.append(f"gen {gen:+.0f}%")
+                if bits:
+                    parts.append(f"{entry.get('size')}: " + " ".join(bits))
+            summary = "Δ " + " · ".join(parts) if parts else "Δ"
             if delta.get("sizes_differ"):
                 summary += " (sizes differ)"
             current = self.bench_progress.text()
