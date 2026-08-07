@@ -63,6 +63,30 @@ Exit codes:
 | 4 | — | — | down / stopped |
 | 5 | `--wait` timed out (started, not ready) | — | — |
 
+### JSON output
+
+Add `--json` to any of the three commands to get one JSON object on stdout
+(and nothing on stderr) instead of a human-readable line — for scripting and
+test harnesses:
+
+    llama-launcher --launch --profile ROUTER --json
+
+Every outcome — success, warnings, action failure, and the pre-flight gate
+refusal — is a single object. Warnings live inside the object, not on stderr.
+The process exit code is unchanged (there is no `exit` field; `ok` mirrors it):
+
+    {"action": "launch", "ok": true, "status": "started", "name": "llama-router",
+     "host": "0.0.0.0", "port": 8080, "warnings": [], "error": null}
+
+| field | meaning |
+|-------|---------|
+| `action` | `"launch"`, `"stop"`, or `"health"` |
+| `ok` | `true` iff the process exit code is 0 |
+| `status` | launch: `"started"` / `"ready"`; stop: `"stopped"`; health: `"ready"` / `"loading"` / raw state; `null` on failure |
+| `name` / `host` / `port` | container name and address when known, else `null` |
+| `warnings` | preset/router warnings (empty list when none) |
+| `error` | failure or gate-refusal message, else `null` |
+
 ## Troubleshooting
 
 ### `crun: cannot stat /usr/lib/libnvidia-*.so.<version>: No such file or directory`
