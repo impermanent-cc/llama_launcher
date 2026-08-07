@@ -240,3 +240,57 @@ def test_text_gate_refusal_unchanged(monkeypatch, capsys):
     cap = capsys.readouterr()
     assert "not found" in cap.err            # text mode: message still on stderr
     assert cap.out == ""                      # text mode: nothing on stdout
+
+
+def test_json_launch_no_wait_started(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    monkeypatch.setattr(app.headless, "launch",
+                        lambda p, base, binary: LaunchResult(True, "llama-r", "0.0.0.0", 8080, [], None))
+    assert app.main(["--launch", "--profile", "r", "--json"]) == 0
+    cap = capsys.readouterr()
+    obj = json.loads(cap.out)
+    assert obj == {"action": "launch", "ok": True, "status": "started",
+                   "name": "llama-r", "host": "0.0.0.0", "port": 8080,
+                   "warnings": [], "error": None}
+    assert cap.err == ""
+
+
+def test_json_launch_with_warning(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    monkeypatch.setattr(app.headless, "launch",
+                        lambda p, base, binary: LaunchResult(True, "llama-r", "0.0.0.0", 8080, ["dropped m2"], None))
+    assert app.main(["--launch", "--profile", "r", "--json"]) == 0
+    cap = capsys.readouterr()
+    obj = json.loads(cap.out)
+    assert obj["warnings"] == ["dropped m2"]   # warning is INSIDE the object
+    assert cap.err == ""                        # not on stderr in JSON mode
+
+
+def test_json_launch_run_failed(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    monkeypatch.setattr(app.headless, "launch",
+                        lambda p, base, binary: LaunchResult(False, "llama-r", "0.0.0.0", 8080, [], "img not found"))
+    assert app.main(["--launch", "--profile", "r", "--json"]) == 1
+    obj = json.loads(capsys.readouterr().out)
+    assert obj["ok"] is False and obj["status"] is None and obj["error"] == "img not found"
+
+
+def test_json_launch_wait_timeout(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    monkeypatch.setattr(app.headless, "launch",
+                        lambda p, base, binary: LaunchResult(True, "llama-r", "0.0.0.0", 8080, [], None))
+    monkeypatch.setattr(app.headless, "wait_ready", lambda host, port, timeout=60.0: False)
+    assert app.main(["--launch", "--profile", "r", "--wait=30", "--json"]) == 5
+    obj = json.loads(capsys.readouterr().out)
+    assert obj["ok"] is False and obj["status"] == "started"
+    assert "30s" in obj["error"]                # error mentions the timeout
+
+
+def test_json_launch_wait_ready(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    monkeypatch.setattr(app.headless, "launch",
+                        lambda p, base, binary: LaunchResult(True, "llama-r", "0.0.0.0", 8080, [], None))
+    monkeypatch.setattr(app.headless, "wait_ready", lambda host, port, timeout=60.0: True)
+    assert app.main(["--launch", "--profile", "r", "--wait", "--json"]) == 0
+    obj = json.loads(capsys.readouterr().out)
+    assert obj["status"] == "ready" and obj["ok"] is True

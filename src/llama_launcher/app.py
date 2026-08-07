@@ -100,19 +100,22 @@ def _emit(as_json, action, exit_code, *, status=None, name=None, host=None,
 
 def _do_launch(p, base_dir, wait, as_json=False):
     res = headless.launch(p, base_dir, p.runtime.binary)
-    for w in res.warnings:
-        print(w, file=sys.stderr)
     if not res.ok:
-        print(f"'{p.name}' failed to start: {res.error}", file=sys.stderr)
-        return 1
+        return _emit(as_json, "launch", 1, name=res.name, host=res.host,
+                     port=res.port, warnings=res.warnings, error=res.error,
+                     text_err=f"'{p.name}' failed to start: {res.error}")
     if wait is None:
-        print(f"'{p.name}' started ({res.name}) on {res.host}:{res.port}")
-        return 0
+        return _emit(as_json, "launch", 0, status="started", name=res.name,
+                     host=res.host, port=res.port, warnings=res.warnings,
+                     text_out=f"'{p.name}' started ({res.name}) on {res.host}:{res.port}")
     if headless.wait_ready(dial_host(res.host), res.port, timeout=wait):
-        print(f"'{p.name}' ready on {res.host}:{res.port}")
-        return 0
-    print(f"'{p.name}' started but not ready after {int(wait)}s", file=sys.stderr)
-    return 5
+        return _emit(as_json, "launch", 0, status="ready", name=res.name,
+                     host=res.host, port=res.port, warnings=res.warnings,
+                     text_out=f"'{p.name}' ready on {res.host}:{res.port}")
+    return _emit(as_json, "launch", 5, status="started", name=res.name,
+                 host=res.host, port=res.port, warnings=res.warnings,
+                 error=f"not ready after {int(wait)}s",
+                 text_err=f"'{p.name}' started but not ready after {int(wait)}s")
 
 
 def _do_stop(p, base_dir, as_json=False):
