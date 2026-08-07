@@ -1,3 +1,4 @@
+import re
 import shlex
 
 from .settings_catalog import CATALOG, ROUTER_ONLY_KEYS, router_catalog
@@ -54,6 +55,43 @@ _ALIAS_FOLD = _build_alias_fold(CATALOG)
 
 def _canonical_flag(flag: str) -> str:
     return _ALIAS_FOLD.get(flag, flag)
+
+
+# Same flag rule as router_preset._FLAG_RE: one/two dashes then a letter, so
+# llama.cpp negative sentinels (-ngl -1, --top-n-sigma -1.5, --seed -1) are read
+# as values, not flags.
+_FLAG_RE = re.compile(r"^--?[A-Za-z]")
+
+
+def _parse_raw_pairs(raw: str) -> list:
+    """['--ctx-size', '8192', '--mlock'] -> [('--ctx-size','8192'), ('--mlock',None)].
+
+    Order- and repeat-preserving (unlike router_preset.convert_raw_args, which
+    collapses to a unique-key INI dict).
+    """
+    pairs: list = []
+    if not raw.strip():
+        return pairs
+    tokens = shlex.split(raw)
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if not _FLAG_RE.match(tok):
+            i += 1                      # stray positional; nothing to pair it with
+            continue
+        if "=" in tok:
+            flag, _, value = tok.partition("=")
+            pairs.append((flag, value))
+            i += 1
+            continue
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if nxt is not None and not _FLAG_RE.match(nxt):
+            pairs.append((tok, nxt))
+            i += 2
+        else:
+            pairs.append((tok, None))
+            i += 1
+    return pairs
 
 
 def image_tag(image: str) -> str:
