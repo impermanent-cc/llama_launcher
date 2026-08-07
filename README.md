@@ -4,7 +4,8 @@ A PySide6/Qt6 desktop app that builds a `podman`/`docker` `llama-server` command
 and launches it in a terminal (konsole, foreground so `Ctrl-C` works), then observes the named
 container from outside. Tabbed **Configure / Monitor** UI with profiles, a curated `llama-server`
 settings catalog (plus a raw-args escape hatch), typed mounts, mmproj/LoRA/draft-model pickers,
-model-aware capability detection, VRAM preflight, and a live throughput/MTP monitor.
+model-aware capability detection, VRAM preflight, a live throughput/MTP monitor, and a
+repeatable speed benchmark for A/B-ing config changes.
 
 ## Requirements
 
@@ -33,6 +34,26 @@ The launcher offers two GPU modes (Configure tab → **Runtime**):
 - **CDI — `--device nvidia.com/gpu=all`** (recommended) — uses the NVIDIA Container Device
   Interface spec.
 - **Legacy — `--gpus all`** — the older runtime hook; doesn't read the CDI spec.
+
+## Benchmark (Monitor tab)
+
+The Monitor tab has a **Benchmark** section for a controlled, repeatable speed
+measurement so a config change (flags or model) can be compared apples-to-apples.
+It POSTs standardized filler prompts to the running server and reads llama.cpp's
+`timings` to report **prompt-eval** and **generation** tok/s at each prompt size.
+
+Configure the run inline: prompt **sizes** (default `128, 512, 2048` tokens),
+**n_predict** (128), **warmup** runs (1, discarded), and **repeats** (3, averaged).
+Requests always use `temperature 0` / `stream false`. **Run** is enabled only when
+the server is running and ready (in router mode, also only while a model is
+loaded); results fill a table of size · prompt_n · pp t/s · gen t/s · total s.
+
+Each run is saved to a **per-profile history** (last 5, newest first), labelled
+with a compact snapshot of the config it ran under (e.g. `-ngl99 fa=on`). The
+latest run shows a **delta** versus the previous one (e.g. `Δ pp +8% · gen +3%`),
+so changing a flag and re-running tells you immediately whether it helped. Works
+for both single-model **server** and **router** profiles (router scopes the
+request to the loaded model).
 
 ## Headless control
 
