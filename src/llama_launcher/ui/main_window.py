@@ -782,11 +782,16 @@ class MainWindow(QMainWindow):
                                                source="counters")
         self._spec_prev = cur
 
-    def _refresh_props(self, p: Profile) -> None:
+    def _refresh_props(self, p: Profile) -> str | None:
         """Fetch /props once per model load and cache it (static per load).
 
         Keyed on the router-polled model id so a router swap re-fetches; in
         single-model mode the key is constant, so it fetches exactly once.
+
+        Returns the router model key it resolved (None in server mode, or
+        when router mode has nothing loaded), so callers that already need
+        that value -- e.g. the benchmark-availability gate -- can reuse it
+        instead of polling `_router_pollable_model()` again.
         """
         port = p.settings.get("port", 8080)
         if p.mode == "router":
@@ -795,15 +800,16 @@ class MainWindow(QMainWindow):
             model_key = self._router_pollable_model()
         else:
             host = dial_host(p.runtime.bind_host)
-            key, model_key = None, ""
+            key, model_key = None, None
         if self._props is not None and self._props_model == model_key:
-            return
+            return model_key
         info = metrics.fetch_props(port, api_key=key, host=host)
         if info is None:
-            return                     # leave cache empty; retry next ready poll
+            return model_key           # leave cache empty; retry next ready poll
         self._props = info
         self._props_model = model_key
         self.monitor_panel.set_props(info)
+        return model_key
 
     def _report_launch_error(self, text: str) -> None:
         """Show why a detached router failed to start. Non-modal: this fires
@@ -935,6 +941,8 @@ class MainWindow(QMainWindow):
             # both at once: _spawn_async is asynchronous, so an unchained run
             # would race the removal and lose with "name already in use".
             self.monitor_panel.reset()
+            self.monitor_panel.set_benchmark_history(
+                benchmark_store.load(default_base_dir(), p.name))
             self._spec_prev = None
             self._props = None
             self._props_model = None
@@ -954,6 +962,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "VRAM check", warn)
         argv = build_command(p)
         self.monitor_panel.reset()
+        self.monitor_panel.set_benchmark_history(
+            benchmark_store.load(default_base_dir(), p.name))
         self.monitor_panel.set_endpoints(
             p.settings.get("port", 8080),
             bool(p.settings.get("embeddings")),
@@ -1209,6 +1219,7 @@ class MainWindow(QMainWindow):
         if not runtime.binary_available(p.runtime.binary):
             self.status_label.setText("● stopped")
             self.web_ui_btn.setEnabled(False)
+            self.monitor_panel.set_benchmark_available(False)
             return
         name = self._container_name()
         state = runtime.container_state(name, p.runtime.binary)
@@ -1217,15 +1228,23 @@ class MainWindow(QMainWindow):
             if state == "running" else "down"
         self.status_label.setText("● " + health.derive_status(state, hstatus))
         self.web_ui_btn.setEnabled(state == "running")
+        router_model_key = None
         if state == "running":
             if not self._log_follower_active():
                 self._start_log_follower()
             if hstatus == "ready":
-                self._refresh_props(p)
+                router_model_key = self._refresh_props(p)
             self.monitor_panel.update_stats(self.collect_monitor_data())
             self._update_spec_stats(p)
         if p.mode == "router" and state == "running":
             self.refresh_router_models()
+        # router_model_key was resolved from _refresh_props above (when ready)
+        # rather than polled again here, so this reuses that single call to
+        # _router_pollable_model() instead of doubling it.
+        ready = state == "running" and hstatus == "ready"
+        if ready and p.mode == "router":
+            ready = router_model_key is not None
+        self.monitor_panel.set_benchmark_available(ready)
 
     def collect_monitor_data(self) -> dict:
         from llama_launcher.services.metrics import kv_usage_ratio

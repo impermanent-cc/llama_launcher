@@ -1,8 +1,10 @@
 import pytest
 
+import llama_launcher.ui.main_window as mw
 from llama_launcher.core.spec import Mount, Profile, RouterMember
 from llama_launcher.services import benchmark, benchmark_store
 from llama_launcher.services.benchmark import BenchmarkRow, BenchmarkRun
+from llama_launcher.store import profiles as store
 from llama_launcher.store.profiles import default_base_dir
 from llama_launcher.ui.main_window import MainWindow
 
@@ -140,3 +142,110 @@ def test_stop_timers_cancels_and_stops_a_running_benchmark_thread(win, monkeypat
 
     assert thread.isFinished()
     assert win._benchmark_thread is None
+
+
+# --- Task 6: availability gate + per-profile history on reset ---------------
+
+def _ready_status_stubs(monkeypatch):
+    """Stub the status-poll dependencies so update_status() reads server/ready
+    without touching the network or real container runtime."""
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
+    monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
+    monkeypatch.setattr(MainWindow, "collect_monitor_data", lambda self: {})
+    monkeypatch.setattr(MainWindow, "_log_follower_active", lambda self: True)
+    monkeypatch.setattr(MainWindow, "_update_spec_stats", lambda self, p: None)
+
+
+def _member_profile(base, name="Qwen"):
+    p = Profile(name=name, image="img", model="/models/qwen.gguf",
+               mounts=[Mount(host="/mnt/models", container="/models")],
+               settings={"ctx-size": 8192})
+    store.save_profile(p, base)
+    return p
+
+
+def test_benchmark_run_enabled_when_server_running_and_ready(win, monkeypatch):
+    _load_server_profile(win)
+    _ready_status_stubs(monkeypatch)
+
+    win.update_status()
+
+    assert win.monitor_panel.bench_run_btn.isEnabled()
+
+
+def test_benchmark_run_disabled_when_not_running(win, monkeypatch):
+    _load_server_profile(win)
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "exited")
+    # Prove the gate actively disables rather than merely defaulting to off.
+    win.monitor_panel.set_benchmark_available(True)
+
+    win.update_status()
+
+    assert not win.monitor_panel.bench_run_btn.isEnabled()
+
+
+def test_benchmark_run_disabled_when_binary_unavailable(win, monkeypatch):
+    _load_server_profile(win)
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: False)
+    win.monitor_panel.set_benchmark_available(True)
+
+    win.update_status()
+
+    assert not win.monitor_panel.bench_run_btn.isEnabled()
+
+
+def test_benchmark_run_disabled_for_router_with_no_pollable_model(win, monkeypatch):
+    p = Profile(name="Host", mode="router", image="img",
+               members=[RouterMember(profile="Qwen")], settings={"port": 8080})
+    win.load_profile(p)
+    _ready_status_stubs(monkeypatch)
+    monkeypatch.setattr(MainWindow, "refresh_router_models", lambda self: None)
+    win._router_statuses = {}       # nothing loaded -> nothing pollable
+
+    win.update_status()
+
+    assert not win.monitor_panel.bench_run_btn.isEnabled()
+
+
+def test_benchmark_run_enabled_for_router_with_pollable_model(win, monkeypatch):
+    p = Profile(name="Host", mode="router", image="img",
+               members=[RouterMember(profile="Qwen")], settings={"port": 8080})
+    win.load_profile(p)
+    _ready_status_stubs(monkeypatch)
+    monkeypatch.setattr(MainWindow, "refresh_router_models", lambda self: None)
+    win._router_statuses = {"qwen": "loaded"}
+
+    win.update_status()
+
+    assert win.monitor_panel.bench_run_btn.isEnabled()
+
+
+def test_history_loaded_on_server_launch_reset(win, monkeypatch):
+    p = _load_server_profile(win)
+    benchmark_store.append(default_base_dir(), p.name, _canned_run())
+    monkeypatch.setattr(mw.terminal, "launch", lambda *a, **k: None)
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+
+    win.on_launch()
+
+    assert win.monitor_panel.bench_history.count() >= 1
+
+
+def test_history_loaded_on_router_launch_reset(win, monkeypatch):
+    base = store.default_base_dir()
+    _member_profile(base)
+    p = Profile(name="Host", mode="router", image="img",
+               mounts=[Mount(host="/mnt/models", container="/models")],
+               members=[RouterMember(profile="Qwen")], settings={"port": 8080})
+    win.load_profile(p)
+    benchmark_store.append(base, p.name, _canned_run())
+    monkeypatch.setattr(win, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(win, "vram_check", lambda: None)
+    monkeypatch.setattr(win, "_spawn_async", lambda argv, on_done=None, on_error=None: None)
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "exited")
+
+    win.on_launch()
+
+    assert win.monitor_panel.bench_history.count() >= 1
