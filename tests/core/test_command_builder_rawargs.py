@@ -50,3 +50,56 @@ def test_parse_preserves_order_and_repeats():
 def test_parse_empty_is_empty():
     assert cb._parse_raw_pairs("") == []
     assert cb._parse_raw_pairs("   ") == []
+
+
+PORTCANON = {"--host", "--port"}
+LORACANON = {"--lora", "--lora-scaled"}
+
+
+def test_merge_override_raw_wins_in_place():
+    owned = [("-m", "/m.gguf"), ("--n-gpu-layers", "99"), ("--host", "0.0.0.0")]
+    argv, warns = cb._merge_raw_args(owned, [("-ngl", "50")], PORTCANON, LORACANON)
+    assert argv == ["-m", "/m.gguf", "--n-gpu-layers", "50", "--host", "0.0.0.0"]
+    assert len(warns) == 1 and "overrides '--n-gpu-layers'" in warns[0] and "was 99" in warns[0]
+
+
+def test_merge_alias_folds_both_directions():
+    # raw long form overrides owned short form
+    owned = [("-ngl", "99")]
+    argv, warns = cb._merge_raw_args(owned, [("--n-gpu-layers", "7")], PORTCANON, LORACANON)
+    assert argv == ["-ngl", "7"] and len(warns) == 1
+
+
+def test_merge_protected_port_dropped_and_warned():
+    owned = [("--port", "8080")]
+    argv, warns = cb._merge_raw_args(owned, [("--port", "9000")], PORTCANON, LORACANON)
+    assert argv == ["--port", "8080"]
+    assert len(warns) == 1 and "ignored" in warns[0] and "--port" in warns[0]
+
+
+def test_merge_repeatable_lora_appends_no_warning():
+    owned = [("--lora", "/b.gguf")]
+    argv, warns = cb._merge_raw_args(owned, [("--lora", "/a.gguf")], PORTCANON, LORACANON)
+    assert argv == ["--lora", "/b.gguf", "--lora", "/a.gguf"]
+    assert warns == []
+
+
+def test_merge_unknown_flag_appended_no_warning():
+    owned = [("--ctx-size", "4096")]
+    argv, warns = cb._merge_raw_args(owned, [("--numa", "distribute")], PORTCANON, LORACANON)
+    assert argv == ["--ctx-size", "4096", "--numa", "distribute"]
+    assert warns == []
+
+
+def test_merge_bare_bool_duplicate_warns():
+    owned = [("--mlock", None)]
+    argv, warns = cb._merge_raw_args(owned, [("--mlock", None)], PORTCANON, LORACANON)
+    assert argv == ["--mlock"]
+    assert len(warns) == 1 and "duplicates" in warns[0]
+
+
+def test_merge_no_raw_is_owned_unchanged():
+    owned = [("-m", "/m.gguf"), ("--host", "0.0.0.0"), ("--port", "8080")]
+    argv, warns = cb._merge_raw_args(owned, [], PORTCANON, LORACANON)
+    assert argv == ["-m", "/m.gguf", "--host", "0.0.0.0", "--port", "8080"]
+    assert warns == []

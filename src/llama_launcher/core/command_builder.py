@@ -94,6 +94,47 @@ def _parse_raw_pairs(raw: str) -> list:
     return pairs
 
 
+def _flatten_pairs(pairs) -> list:
+    argv: list = []
+    for flag, value in pairs:
+        argv.append(flag)
+        if value is not None:
+            argv.append(value)
+    return argv
+
+
+def _merge_raw_args(owned, raw_pairs, protected_canon, repeatable_canon):
+    """Fold raw_args pairs onto the launcher's owned pairs.
+
+    raw wins for owned single-valued flags (replaced in place); protected
+    canon flags keep the launcher value; repeatable/unknown flags append.
+    Returns (argv, warnings).
+    """
+    owned = [list(pair) for pair in owned]          # mutable copy for in-place override
+    owned_index: dict = {}
+    for pos, (flag, _value) in enumerate(owned):
+        owned_index.setdefault(_canonical_flag(flag), pos)   # first owner wins the slot
+    warnings: list = []
+    extras: list = []
+    for flag, value in raw_pairs:
+        canon = _canonical_flag(flag)
+        if canon in protected_canon:
+            warnings.append(f"raw arg '{flag}' ignored; the launcher controls '{canon}'")
+            continue
+        if canon in owned_index and canon not in repeatable_canon:
+            pos = owned_index[canon]
+            old = owned[pos][1]
+            owned[pos][1] = value
+            if old is None:
+                warnings.append(f"raw arg '{flag}' duplicates '{canon}'")
+            else:
+                shown = f"{flag} {value}" if value is not None else flag
+                warnings.append(f"raw arg '{shown}' overrides '{canon}' (was {old})")
+            continue
+        extras.append((flag, value))
+    return _flatten_pairs(owned) + _flatten_pairs(extras), warnings
+
+
 def image_tag(image: str) -> str:
     """Return the tag portion of an image ref, or '' when none is present."""
     _, sep, tag = image.rpartition(":")
