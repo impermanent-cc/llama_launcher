@@ -25,6 +25,37 @@ CONTAINER_PRESET_PATH = f"{CONTAINER_ROUTER_DIR}/models.ini"
 CONTAINER_KEY_PATH = f"{CONTAINER_ROUTER_DIR}/api-key"
 
 
+# Structural launcher flags that are not catalog settings but that raw_args
+# might collide with. Maps each spelling to its canonical (long) form.
+_STRUCTURAL_ALIASES = {
+    "-m": "--model",
+    "--model": "--model",
+    "--mmproj": "--mmproj",
+    "--spec-draft-model": "--spec-draft-model",
+    "--host": "--host",
+    "--port": "--port",
+    "--models-preset": "--models-preset",
+    "--api-key-file": "--api-key-file",
+}
+
+
+def _build_alias_fold(catalog: dict) -> dict:
+    """alias/spelling -> canonical long flag, from catalog + structural flags."""
+    fold: dict = dict(_STRUCTURAL_ALIASES)
+    for setting in catalog.values():
+        fold[setting.flag] = setting.flag          # long form is its own canonical
+        for alias in setting.aliases:
+            fold[alias] = setting.flag
+    return fold
+
+
+_ALIAS_FOLD = _build_alias_fold(CATALOG)
+
+
+def _canonical_flag(flag: str) -> str:
+    return _ALIAS_FOLD.get(flag, flag)
+
+
 def image_tag(image: str) -> str:
     """Return the tag portion of an image ref, or '' when none is present."""
     _, sep, tag = image.rpartition(":")
