@@ -111,10 +111,10 @@ def _router_raw(raw="", **settings):
     )
 
 
-def test_router_raw_ctx_overrides_setting():
-    argv = build_command(_router_raw(raw="-c 4096", **{"ctx-size": "8192"}))
-    assert argv.count("--ctx-size") == 1
-    assert argv[argv.index("--ctx-size") + 1] == "4096"
+def test_router_raw_overrides_owned_setting():
+    argv = build_command(_router_raw(raw="--models-max 3", **{"models-max": 1}))
+    assert argv.count("--models-max") == 1
+    assert argv[argv.index("--models-max") + 1] == "3"   # raw wins in place
 
 
 def test_router_raw_models_preset_cannot_override():

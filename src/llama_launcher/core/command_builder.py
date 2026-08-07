@@ -108,10 +108,6 @@ def _merge_raw_args(owned, raw_pairs, protected_canon, repeatable_canon):
 
     raw wins for owned single-valued flags (replaced in place); protected
     canon flags keep the launcher value; repeatable/unknown flags append.
-    Extras with a recognised catalog alias (e.g. "-c") are folded to their
-    canonical long form even when there is no owned pair to collide with, so
-    a mode that doesn't own a flag (e.g. ctx-size on a router) still dedups
-    against it consistently. Flags with no catalog alias pass through as-is.
     Returns (argv, warnings).
     """
     owned = [list(pair) for pair in owned]          # mutable copy for in-place override
@@ -135,7 +131,7 @@ def _merge_raw_args(owned, raw_pairs, protected_canon, repeatable_canon):
                 shown = f"{flag} {value}" if value is not None else flag
                 warnings.append(f"raw arg '{shown}' overrides '{canon}' (was {old})")
             continue
-        extras.append((canon, value))
+        extras.append((flag, value))
     return _flatten_pairs(owned) + _flatten_pairs(extras), warnings
 
 
