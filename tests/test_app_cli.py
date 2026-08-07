@@ -34,10 +34,38 @@ def test_gate_unknown_profile_exits_2(monkeypatch, capsys):
     assert "not found" in capsys.readouterr().err
 
 
-def test_gate_non_router_exits_2(monkeypatch, capsys):
-    _profiles(monkeypatch, [_router("s", mode="server")])
+def _server(name="s", bind="127.0.0.1", **settings):
+    return Profile(
+        name=name, image="img", runtime=Runtime(bind_host=bind), mode="server",
+        mounts=[Mount(host="/host/models", container="/models", role="model")],
+        model="/models/m.gguf", settings={"port": 8080, **settings},
+    )
+
+
+def test_gate_valid_server_passes_and_launches_exit_0(monkeypatch, capsys):
+    # Real validate(): loopback bind + model-under-mount = no errors, gate passes.
+    _profiles(monkeypatch, [_server("s")], last="s")
+    monkeypatch.setattr(app, "binary_available", lambda b: True)
+    monkeypatch.setattr(app.headless, "launch",
+                        lambda p, base, binary: LaunchResult(True, "llama-s", "127.0.0.1", 8080, [], None))
+    assert app.main(["--launch", "--profile", "s"]) == 0
+    assert "started (llama-s) on 127.0.0.1:8080" in capsys.readouterr().out
+
+
+def test_gate_exposed_keyless_server_exits_2(monkeypatch, capsys):
+    # bind_host past loopback + no api-key setting → real validate() refuses it.
+    _profiles(monkeypatch, [_server("s", bind="0.0.0.0")], last="s")
+    monkeypatch.setattr(app, "binary_available", lambda b: True)
     assert app.main(["--launch", "--profile", "s"]) == 2
-    assert "not a router" in capsys.readouterr().err
+    assert "without an API key" in capsys.readouterr().err
+
+
+def test_launch_router_still_works_via_dispatcher(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    monkeypatch.setattr(app.headless, "launch",
+                        lambda p, base, binary: LaunchResult(True, "llama-r", "0.0.0.0", 8080, [], None))
+    assert app.main(["--launch", "--profile", "r"]) == 0
+    assert "started (llama-r) on 0.0.0.0:8080" in capsys.readouterr().out
 
 
 def test_gate_validation_error_exits_2(monkeypatch, capsys):
@@ -107,7 +135,7 @@ def _ready_router(monkeypatch):
 
 def test_launch_no_wait_prints_started_exit_0(monkeypatch, capsys):
     _ready_router(monkeypatch)
-    monkeypatch.setattr(app.headless, "launch_router",
+    monkeypatch.setattr(app.headless, "launch",
                         lambda p, base, binary: LaunchResult(True, "llama-r", "0.0.0.0", 8080, [], None))
     assert app.main(["--launch", "--profile", "r"]) == 0
     assert "started (llama-r) on 0.0.0.0:8080" in capsys.readouterr().out
@@ -115,7 +143,7 @@ def test_launch_no_wait_prints_started_exit_0(monkeypatch, capsys):
 
 def test_launch_podman_failure_exit_1(monkeypatch, capsys):
     _ready_router(monkeypatch)
-    monkeypatch.setattr(app.headless, "launch_router",
+    monkeypatch.setattr(app.headless, "launch",
                         lambda p, base, binary: LaunchResult(False, "llama-r", "0.0.0.0", 8080, [], "img not found"))
     assert app.main(["--launch", "--profile", "r"]) == 1
     assert "img not found" in capsys.readouterr().err
@@ -123,7 +151,7 @@ def test_launch_podman_failure_exit_1(monkeypatch, capsys):
 
 def test_launch_wait_ready_exit_0(monkeypatch, capsys):
     _ready_router(monkeypatch)
-    monkeypatch.setattr(app.headless, "launch_router",
+    monkeypatch.setattr(app.headless, "launch",
                         lambda p, base, binary: LaunchResult(True, "llama-r", "0.0.0.0", 8080, [], None))
     monkeypatch.setattr(app.headless, "wait_ready", lambda host, port, timeout=60.0: True)
     assert app.main(["--launch", "--profile", "r", "--wait"]) == 0
@@ -132,7 +160,7 @@ def test_launch_wait_ready_exit_0(monkeypatch, capsys):
 
 def test_launch_wait_timeout_exit_5(monkeypatch, capsys):
     _ready_router(monkeypatch)
-    monkeypatch.setattr(app.headless, "launch_router",
+    monkeypatch.setattr(app.headless, "launch",
                         lambda p, base, binary: LaunchResult(True, "llama-r", "0.0.0.0", 8080, [], None))
     monkeypatch.setattr(app.headless, "wait_ready", lambda host, port, timeout=60.0: False)
     assert app.main(["--launch", "--profile", "r", "--wait=30"]) == 5
@@ -141,7 +169,7 @@ def test_launch_wait_timeout_exit_5(monkeypatch, capsys):
 
 def test_launch_warnings_go_to_stderr(monkeypatch, capsys):
     _ready_router(monkeypatch)
-    monkeypatch.setattr(app.headless, "launch_router",
+    monkeypatch.setattr(app.headless, "launch",
                         lambda p, base, binary: LaunchResult(True, "llama-r", "0.0.0.0", 8080, ["dropped m2"], None))
     app.main(["--launch", "--profile", "r"])
     assert "dropped m2" in capsys.readouterr().err

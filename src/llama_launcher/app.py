@@ -25,9 +25,6 @@ def _resolve_and_gate(action, profile_name, base_dir):
     if profile_name not in profiles:
         return None, 2, f"Profile '{profile_name}' not found. Available: {', '.join(sorted(profiles))}"
     p = profiles[profile_name]
-    if p.mode != "router":
-        return None, 2, (f"Profile '{p.name}' is not a router (mode={p.mode}). "
-                         "The headless CLI supports router profiles only.")
     # A launch will create the key if absent, so the exposure guard is satisfied
     # for launch; for stop/health, reflect whether a key actually exists today.
     api_key_present = (action == "launch") or bool(api_key_store.read_api_key(base_dir, p.name))
@@ -84,27 +81,27 @@ def dry_run(profile_name: str | None = None, base_dir=None) -> int:
 
 
 def _do_launch(p, base_dir, wait):
-    res = headless.launch_router(p, base_dir, p.runtime.binary)
+    res = headless.launch(p, base_dir, p.runtime.binary)
     for w in res.warnings:
         print(w, file=sys.stderr)
     if not res.ok:
-        print(f"router '{p.name}' failed to start: {res.error}", file=sys.stderr)
+        print(f"'{p.name}' failed to start: {res.error}", file=sys.stderr)
         return 1
     if wait is None:
-        print(f"router '{p.name}' started ({res.name}) on {res.host}:{res.port}")
+        print(f"'{p.name}' started ({res.name}) on {res.host}:{res.port}")
         return 0
     if headless.wait_ready(dial_host(res.host), res.port, timeout=wait):
-        print(f"router '{p.name}' ready on {res.host}:{res.port}")
+        print(f"'{p.name}' ready on {res.host}:{res.port}")
         return 0
-    print(f"router '{p.name}' started but not ready after {int(wait)}s", file=sys.stderr)
+    print(f"'{p.name}' started but not ready after {int(wait)}s", file=sys.stderr)
     return 5
 
 
 def _do_stop(p, base_dir):
     if headless.stop_router(p, p.runtime.binary):
-        print(f"router '{p.name}' stopped")
+        print(f"'{p.name}' stopped")
         return 0
-    print(f"router '{p.name}' failed to stop", file=sys.stderr)
+    print(f"'{p.name}' failed to stop", file=sys.stderr)
     return 1
 
 

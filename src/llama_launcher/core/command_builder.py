@@ -39,14 +39,18 @@ def needs_server_entrypoint(image: str) -> bool:
     return image_tag(image).split("-", 1)[0] in _TOOLS_VARIANTS
 
 
-def _run_level_args(profile: Profile, router_host_dir: str = "") -> list[str]:
+def _run_level_args(profile: Profile, router_host_dir: str = "",
+                    detach: bool = False) -> list[str]:
     rt = profile.runtime
     is_router = profile.mode == "router"
 
     argv = [rt.binary, "run"]
     # A router is a persistent headless host: run it detached, and keep the
     # container after exit so a crash leaves a readable exit code and logs.
-    argv += ["-d"] if is_router else ["--rm"]
+    # The headless CLI passes detach=True to give a single-model server the
+    # same persistence (so --stop/--health can find it by name); the GUI leaves
+    # detach False, so a GUI server keeps its foreground --rm behavior.
+    argv += ["-d"] if (is_router or detach) else ["--rm"]
     argv += ["--name", f"llama-{slugify(profile.name)}"]
 
     # Labels let the launcher find and reattach to its own containers on restart.
@@ -166,7 +170,7 @@ def _router_server_args(profile: Profile) -> list[str]:
 
 
 def build_command(profile: Profile, catalog: dict = CATALOG,
-                  router_host_dir: str = "") -> list[str]:
+                  router_host_dir: str = "", detach: bool = False) -> list[str]:
     if profile.mode == "router":
         return _run_level_args(profile, router_host_dir) + _router_server_args(profile)
-    return _run_level_args(profile) + _server_args(profile, catalog)
+    return _run_level_args(profile, detach=detach) + _server_args(profile, catalog)

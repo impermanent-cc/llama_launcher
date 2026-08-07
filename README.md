@@ -34,19 +34,23 @@ The launcher offers two GPU modes (Configure tab → **Runtime**):
   Interface spec.
 - **Legacy — `--gpus all`** — the older runtime hook; doesn't read the CDI spec.
 
-## Headless router control
+## Headless control
 
-Drive a **router** profile without the GUI (for test harnesses). Runs on the
-host with podman + the GPU; the harness connects in over the network.
+Drive a profile without the GUI (for test harnesses). Runs on the host with
+podman + the GPU; the harness connects in over the network.
 
-    llama-launcher --launch --profile ROUTER [--wait[=SECONDS]]
-    llama-launcher --stop   --profile ROUTER
-    llama-launcher --health --profile ROUTER
+    llama-launcher --launch --profile PROFILE [--wait[=SECONDS]]
+    llama-launcher --stop   --profile PROFILE
+    llama-launcher --health --profile PROFILE
 
 `--profile` falls back to the last-used profile. `--launch --wait` blocks until
-the router answers `/health` (default 60s; models still load on demand).
-Router profiles only; a non-router profile or a validation error is refused
-(exit 2) before anything starts.
+the server answers `/health` (default 60s; models still load on demand).
+
+Works for **router** and single-model **server** profiles. A validation error —
+including a bind past loopback with no API key — is refused (exit 2) before
+anything starts. A headless server launch runs **detached and persistent**
+(`-d`, no `--rm`), unlike the GUI's foreground `--rm` server, so `--stop` and
+`--health` can address it by container name.
 
 Exit codes:
 

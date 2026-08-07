@@ -60,6 +60,36 @@ def launch_router(profile, base_dir, binary) -> LaunchResult:
     return LaunchResult(True, name, host, port, result.warnings, None)
 
 
+def launch_server(profile, base_dir, binary) -> LaunchResult:
+    """`podman run -d` a single-model server. No router preset/key-file prep:
+    a server's key is the `api-key` command setting, not a file. `base_dir` is
+    accepted for signature parity with launch_router and is unused."""
+    name = _container_name(profile)
+    host = profile.runtime.bind_host
+    port = profile.settings.get("port", 8080)
+
+    # Force detached/persistent so --stop/--health can address it by name
+    # (the GUI's server launch is foreground --rm and cannot be driven headless).
+    argv = build_command(profile, detach=True)
+
+    # Detached persistence means a leftover stopped container collides with
+    # "name already in use"; remove it first (synchronously).
+    if container_state(name, binary) == "stopped":
+        _run(rm_argv(name, binary))
+
+    proc = _run(argv)
+    if proc.returncode != 0:
+        return LaunchResult(False, name, host, port, [], proc.stderr.strip())
+    return LaunchResult(True, name, host, port, [], None)
+
+
+def launch(profile, base_dir, binary) -> LaunchResult:
+    """Dispatch to the router or server launcher by profile.mode."""
+    if profile.mode == "router":
+        return launch_router(profile, base_dir, binary)
+    return launch_server(profile, base_dir, binary)
+
+
 def stop_router(profile, binary, timeout: int = 10) -> bool:
     """Stop the router container. True on success or if it's already absent."""
     name = _container_name(profile)

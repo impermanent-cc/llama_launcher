@@ -72,3 +72,25 @@ def test_docker_binary_and_extra_run_args():
     argv = build_command(p)
     assert argv[0] == "docker"
     assert "--cpus" in argv and "4" in argv
+
+
+def test_server_detach_true_uses_detached_run():
+    argv = build_command(_base_profile(), detach=True)
+    assert "-d" in argv
+    assert "--rm" not in argv
+
+
+def test_server_default_uses_rm_run():
+    argv = build_command(_base_profile())          # detach defaults False
+    assert "--rm" in argv
+    assert "-d" not in argv
+
+
+def test_router_run_mode_ignores_detach():
+    from llama_launcher.core.spec import RouterMember
+    p = _base_profile()
+    p.mode = "router"
+    p.members = [RouterMember(profile="m1")]
+    for argv in (build_command(p), build_command(p, detach=True)):
+        assert "-d" in argv
+        assert "--rm" not in argv
