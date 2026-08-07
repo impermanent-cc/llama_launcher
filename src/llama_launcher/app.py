@@ -8,7 +8,9 @@ from llama_launcher.services import headless
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services.runtime import binary_available
 from llama_launcher.services.terminal import DEFAULT_TEMPLATE, build_terminal_argv
-from llama_launcher.store.profiles import default_base_dir, list_profiles, load_config
+from llama_launcher.store.profiles import (
+    default_base_dir, list_profiles, load_config, resolve_member_pairs,
+)
 
 
 def _resolve_and_gate(action, profile_name, base_dir):
@@ -29,7 +31,9 @@ def _resolve_and_gate(action, profile_name, base_dir):
     # A launch will create the key if absent, so the exposure guard is satisfied
     # for launch; for stop/health, reflect whether a key actually exists today.
     api_key_present = (action == "launch") or bool(api_key_store.read_api_key(base_dir, p.name))
+    members = resolve_member_pairs(p.members, base_dir)
     errs = [i for i in validate(p, binary_found=binary_available(p.runtime.binary),
+                                members=members,
                                 api_key_present=api_key_present) if i.level == "error"]
     if errs:
         return None, 2, "; ".join(i.message for i in errs)
