@@ -108,44 +108,35 @@ def test_failed_props_fetch_retries_next_poll(qtbot, monkeypatch):
 
 
 def test_router_model_switch_refetches(qtbot, monkeypatch):
-    # NOTE: adapted from the brief's two mechanisms, both to de-brittle this
-    # test against MainWindow's background _status_timer (2000ms), which
-    # isn't guaranteed stopped when an earlier test's window is torn down --
-    # a stray timeout can invoke update_status() an extra, unpredictable
-    # number of times (on this OR another still-alive window) while this
-    # test runs:
-    #  1. A mutable "current id" dict replaces the brief's strict
-    #     `iter([...])`, since a one-shot iterator raises StopIteration on
-    #     any unplanned extra call, from any window sharing this class-level
-    #     patch.
-    #  2. Assertions inspect `w`'s own `_props`/`_props_model` cache fields
-    #     directly instead of a shared global call counter, since a stray
-    #     call landing on a *different* leftover window would independently
-    #     populate that window's own cache and inflate a shared counter
-    #     without this test's own `w` being involved at all.
-    # The cache-key behavior under test -- re-fetch on router model-id
-    # change, cache-hit while unchanged -- is unaffected by either change.
+    # Strict form (restored after the _status_timer teardown fix, 2026-08-07):
+    # a one-shot iterator over the model-id sequence raises StopIteration on any
+    # unplanned extra update_status() call, and a shared counter catches stray
+    # fetch_props() calls. Both are safe now that a torn-down window's timer is
+    # stopped and can't fire update_status() into this test.
     _ready(monkeypatch)
     monkeypatch.setattr(mw.MainWindow, "current_profile",
                         lambda self: _router_profile())
     monkeypatch.setattr(mw.MainWindow, "_router_host", lambda self, p: "127.0.0.1")
-    current = {"id": "model-a"}
+    ids = iter(["model-a", "model-a", "model-b"])
     monkeypatch.setattr(mw.MainWindow, "_router_pollable_model",
-                        lambda self: current["id"])
-    monkeypatch.setattr(mw.metrics, "fetch_props",
-                        lambda *a, **k: PropsInfo("b", 1, "a", 1, {}))
+                        lambda self: next(ids))
+    calls = {"n": 0}
+
+    def _fetch(*a, **k):
+        calls["n"] += 1
+        return PropsInfo("b", 1, "a", 1, {})
+
+    monkeypatch.setattr(mw.metrics, "fetch_props", _fetch)
     w = mw.MainWindow()
     qtbot.addWidget(w)
     w.update_status()   # model-a -> fetch
     assert w._props_model == "model-a"
-    first = w._props
-    assert first is not None
-    w.update_status()   # model-a -> cached (unchanged instance)
-    assert w._props is first
-    current["id"] = "model-b"
+    assert calls["n"] == 1
+    w.update_status()   # model-a -> cached, no new fetch
+    assert calls["n"] == 1
     w.update_status()   # model-b -> re-fetch
     assert w._props_model == "model-b"
-    assert w._props is not first
+    assert calls["n"] == 2
 
 
 def _router_profile():
