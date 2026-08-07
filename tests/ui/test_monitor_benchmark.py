@@ -8,6 +8,7 @@ def test_run_click_emits_config(qtbot):
     p.benchmark_run_requested.connect(seen.append)
     p.bench_sizes.setText("128, 512")
     p.bench_npredict.setValue(64)
+    p.set_benchmark_available(True)
     p.bench_run_btn.click()
     assert seen and seen[0]["sizes"] == [128, 512] and seen[0]["n_predict"] == 64
 

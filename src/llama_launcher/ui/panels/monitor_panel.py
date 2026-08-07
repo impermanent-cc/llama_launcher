@@ -45,6 +45,7 @@ class MonitorPanel(QWidget):
         self.bench_repeats.setValue(3)
         bench_config.addWidget(self.bench_repeats)
         self.bench_run_btn = QPushButton("Run")
+        self.bench_run_btn.setEnabled(False)
         self.bench_run_btn.clicked.connect(self._on_bench_run_clicked)
         bench_config.addWidget(self.bench_run_btn)
         layout.addLayout(bench_config)

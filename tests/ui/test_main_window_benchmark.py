@@ -152,6 +152,7 @@ def _ready_status_stubs(monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
     monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
+    monkeypatch.setattr(mw.metrics, "fetch_props", lambda *a, **k: None)
     monkeypatch.setattr(MainWindow, "collect_monitor_data", lambda self: {})
     monkeypatch.setattr(MainWindow, "_log_follower_active", lambda self: True)
     monkeypatch.setattr(MainWindow, "_update_spec_stats", lambda self, p: None)
