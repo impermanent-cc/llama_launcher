@@ -80,16 +80,37 @@ def dry_run(profile_name: str | None = None, base_dir=None) -> int:
 
 
 def _do_launch(p, base_dir, wait):
-    return 0
+    res = headless.launch_router(p, base_dir, p.runtime.binary)
+    for w in res.warnings:
+        print(w, file=sys.stderr)
+    if not res.ok:
+        print(f"router '{p.name}' failed to start: {res.error}", file=sys.stderr)
+        return 1
+    if wait is None:
+        print(f"router '{p.name}' started ({res.name}) on {res.host}:{res.port}")
+        return 0
+    if headless.wait_ready(dial_host(res.host), res.port, timeout=wait):
+        print(f"router '{p.name}' ready on {res.host}:{res.port}")
+        return 0
+    print(f"router '{p.name}' started but not ready after {int(wait)}s", file=sys.stderr)
+    return 5
 
 
 def _do_stop(p, base_dir):
-    return 0
+    if headless.stop_router(p, p.runtime.binary):
+        print(f"router '{p.name}' stopped")
+        return 0
+    print(f"router '{p.name}' failed to stop", file=sys.stderr)
+    return 1
+
+
+_HEALTH_EXIT = {"running": 0, "loading": 3}
 
 
 def _do_health(p, base_dir):
-    headless.router_status(p, p.runtime.binary)
-    return 0
+    status = headless.router_status(p, p.runtime.binary)
+    print(f"health: {'ready' if status == 'running' else status}")
+    return _HEALTH_EXIT.get(status, 4)
 
 
 def main(argv=None) -> int:
