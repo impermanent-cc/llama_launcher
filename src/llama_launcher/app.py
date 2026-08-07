@@ -1,4 +1,5 @@
 import argparse
+import json
 import shlex
 import sys
 
@@ -80,7 +81,24 @@ def dry_run(profile_name: str | None = None, base_dir=None) -> int:
     return 1 if any(i.level == "error" for i in issues) else 0
 
 
-def _do_launch(p, base_dir, wait):
+def _emit(as_json, action, exit_code, *, status=None, name=None, host=None,
+          port=None, warnings=(), error=None, text_out=None, text_err=None):
+    if as_json:
+        obj = {"action": action, "ok": exit_code == 0, "status": status,
+               "name": name, "host": host, "port": port,
+               "warnings": list(warnings), "error": error}
+        print(json.dumps(obj))
+    else:
+        for w in warnings:
+            print(w, file=sys.stderr)
+        if text_err:
+            print(text_err, file=sys.stderr)
+        if text_out:
+            print(text_out)
+    return exit_code
+
+
+def _do_launch(p, base_dir, wait, as_json=False):
     res = headless.launch(p, base_dir, p.runtime.binary)
     for w in res.warnings:
         print(w, file=sys.stderr)
@@ -97,7 +115,7 @@ def _do_launch(p, base_dir, wait):
     return 5
 
 
-def _do_stop(p, base_dir):
+def _do_stop(p, base_dir, as_json=False):
     if headless.stop_router(p, p.runtime.binary):
         print(f"'{p.name}' stopped")
         return 0
@@ -108,7 +126,7 @@ def _do_stop(p, base_dir):
 _HEALTH_EXIT = {"running": 0, "loading": 3}
 
 
-def _do_health(p, base_dir):
+def _do_health(p, base_dir, as_json=False):
     status = headless.router_status(p, p.runtime.binary)
     print(f"health: {'ready' if status == 'running' else status}")
     return _HEALTH_EXIT.get(status, 4)
@@ -124,6 +142,7 @@ def main(argv=None) -> int:
     group.add_argument("--stop", action="store_true")
     group.add_argument("--health", action="store_true")
     parser.add_argument("--wait", nargs="?", const=60.0, type=float, default=None)
+    parser.add_argument("--json", action="store_true")
 
     args, unknown = parser.parse_known_args(argv if argv is not None else sys.argv[1:])
 
@@ -135,13 +154,13 @@ def main(argv=None) -> int:
         action = "launch" if args.launch else "stop" if args.stop else "health"
         p, code, msg = _resolve_and_gate(action, args.profile, base)
         if code is not None:
-            print(msg, file=sys.stderr)
-            return code
+            return _emit(args.json, action, code, name=args.profile,
+                         error=msg, text_err=msg)
         if args.launch:
-            return _do_launch(p, base, args.wait)
+            return _do_launch(p, base, args.wait, args.json)
         if args.stop:
-            return _do_stop(p, base)
-        return _do_health(p, base)
+            return _do_stop(p, base, args.json)
+        return _do_health(p, base, args.json)
 
     # GUI path — only import Qt here so that importing app.py never constructs QApplication.
     from PySide6.QtWidgets import QApplication

@@ -1,3 +1,5 @@
+import json
+
 import llama_launcher.app as app
 import llama_launcher.store.profiles as store_profiles
 from llama_launcher.core.spec import Mount, Profile, Runtime, RouterMember
@@ -207,3 +209,34 @@ def test_health_stopped_exit_4(monkeypatch, capsys):
     monkeypatch.setattr(app.headless, "router_status", lambda p, binary: "stopped")
     assert app.main(["--health", "--profile", "r"]) == 4
     assert "health: stopped" in capsys.readouterr().out
+
+
+def test_json_gate_unknown_profile_one_object_exit_2(monkeypatch, capsys):
+    _profiles(monkeypatch, [_router("a")])
+    assert app.main(["--health", "--profile", "nope", "--json"]) == 2
+    cap = capsys.readouterr()
+    obj = json.loads(cap.out)               # exactly one JSON object on stdout
+    assert obj["action"] == "health"
+    assert obj["ok"] is False
+    assert obj["status"] is None
+    assert "not found" in obj["error"]
+    assert obj["name"] == "nope"
+    assert obj["warnings"] == []
+    assert cap.err == ""                     # nothing on stderr in JSON mode
+
+
+def test_json_gate_no_profiles_exit_2(monkeypatch, capsys):
+    _profiles(monkeypatch, [])
+    assert app.main(["--launch", "--profile", "r", "--json"]) == 2
+    cap = capsys.readouterr()
+    obj = json.loads(cap.out)
+    assert obj["action"] == "launch" and obj["ok"] is False and obj["error"]
+    assert cap.err == ""
+
+
+def test_text_gate_refusal_unchanged(monkeypatch, capsys):
+    _profiles(monkeypatch, [_router("a")])
+    assert app.main(["--health", "--profile", "nope"]) == 2
+    cap = capsys.readouterr()
+    assert "not found" in cap.err            # text mode: message still on stderr
+    assert cap.out == ""                      # text mode: nothing on stdout
