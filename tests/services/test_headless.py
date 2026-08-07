@@ -119,3 +119,69 @@ def test_wait_ready_times_out(monkeypatch):
     monkeypatch.setattr(headless.time, "monotonic", lambda: next(ticks))
     monkeypatch.setattr(headless.time, "sleep", lambda s: None)
     assert headless.wait_ready("127.0.0.1", 8080, timeout=1.0, interval=0.5) is False
+
+
+def _server(name="s", bind="127.0.0.1", port=8080):
+    p = Profile(name=name, image="img", runtime=Runtime(bind_host=bind), mode="server",
+                model="/models/m.gguf")
+    p.settings["port"] = port
+    return p
+
+
+def test_launch_server_success_absent_container(monkeypatch):
+    # Server launch must NOT touch the router preset/api-key machinery.
+    def boom(*a, **k):
+        raise AssertionError("router prep called for a server")
+    monkeypatch.setattr(headless.api_key_store, "ensure_api_key", boom)
+    monkeypatch.setattr(headless.api_key_store, "write_preset", boom)
+    monkeypatch.setattr(headless, "render_preset", boom)
+
+    seen = {}
+    def fake_build(p, detach=False):
+        seen["detach"] = detach
+        return ["podman", "run", "-d", "--name", f"llama-{p.name}"]
+    monkeypatch.setattr(headless, "build_command", fake_build)
+    monkeypatch.setattr(headless, "container_state", lambda name, binary: "absent")
+    ran = {}
+    def fake_run(argv):
+        ran["argv"] = argv
+        return subprocess.CompletedProcess(argv, 0, "", "")
+    monkeypatch.setattr(headless, "_run", fake_run)
+
+    res = headless.launch_server(_server(), "/base", "podman")
+    assert res.ok and res.name == "llama-s" and res.host == "127.0.0.1" and res.port == 8080
+    assert res.warnings == [] and res.error is None
+    assert seen["detach"] is True                       # detached argv requested
+    assert ran["argv"] == ["podman", "run", "-d", "--name", "llama-s"]
+
+
+def test_launch_server_removes_stopped_container_first(monkeypatch):
+    monkeypatch.setattr(headless, "build_command", lambda p, detach=False: ["podman", "run"])
+    monkeypatch.setattr(headless, "container_state", lambda name, binary: "stopped")
+    order = []
+    monkeypatch.setattr(headless, "_run",
+                        lambda argv: order.append(argv[1])
+                        or subprocess.CompletedProcess(argv, 0, "", ""))
+    res = headless.launch_server(_server(), "/base", "podman")
+    assert res.ok
+    assert order == ["rm", "run"]                       # stopped container removed before run
+
+
+def test_launch_server_run_failure_reports_stderr(monkeypatch):
+    monkeypatch.setattr(headless, "build_command", lambda p, detach=False: ["podman", "run"])
+    monkeypatch.setattr(headless, "container_state", lambda name, binary: "absent")
+    monkeypatch.setattr(headless, "_run",
+                        lambda argv: subprocess.CompletedProcess(argv, 125, "", "boom\n"))
+    res = headless.launch_server(_server(), "/base", "podman")
+    assert res.ok is False and res.error == "boom" and res.warnings == []
+
+
+def test_launch_dispatches_by_mode(monkeypatch):
+    calls = []
+    monkeypatch.setattr(headless, "launch_router",
+                        lambda p, base, binary: calls.append("router") or "R")
+    monkeypatch.setattr(headless, "launch_server",
+                        lambda p, base, binary: calls.append("server") or "S")
+    assert headless.launch(_router(), "/base", "podman") == "R"
+    assert headless.launch(_server(), "/base", "podman") == "S"
+    assert calls == ["router", "server"]
