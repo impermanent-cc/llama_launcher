@@ -300,6 +300,21 @@ def _router_server_args(profile: Profile) -> list[str]:
     return argv
 
 
+def raw_arg_warnings(profile: Profile, catalog: dict = CATALOG) -> list[str]:
+    """Collisions between profile.raw_args and the flags the launcher emits.
+
+    Same merge as build_command, returning only the warnings (empty when the
+    raw_args don't collide with any launcher-owned, non-repeatable flag).
+    """
+    raw_pairs = _parse_raw_pairs(profile.raw_args)
+    if profile.mode == "router":
+        owned, protected = _owned_router_pairs(profile), _ROUTER_PROTECTED
+    else:
+        owned, protected = _owned_server_pairs(profile, catalog), _SERVER_PROTECTED
+    _argv, warnings = _merge_raw_args(owned, raw_pairs, protected, _REPEATABLE)
+    return warnings
+
+
 def build_command(profile: Profile, catalog: dict = CATALOG,
                   router_host_dir: str = "", detach: bool = False) -> list[str]:
     if profile.mode == "router":

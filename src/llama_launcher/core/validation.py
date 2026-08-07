@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from .command_builder import raw_arg_warnings
 from .router_preset import convert_raw_args
 from .spec import Profile, member_model_id
 from .settings_catalog import CATALOG
@@ -138,6 +139,9 @@ def validate(profile: Profile, running_ports: tuple = (),
             issues.append(Issue("warning",
                                 "Sampling parameters are ignored in embedding mode "
                                 f"(changed: {', '.join(changed)})."))
+
+    for w in raw_arg_warnings(profile):
+        issues.append(Issue("warning", w))
 
     return issues
 
