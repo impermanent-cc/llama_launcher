@@ -1,10 +1,11 @@
+import dataclasses
 import os
 import subprocess
 from pathlib import Path
 
 import datetime
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QObject, QThread, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
     QCheckBox, QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
@@ -26,6 +27,7 @@ from llama_launcher.store.profiles import (
     load_config, save_config, profile_to_dict, resolve_member_pairs,
 )
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
+from llama_launcher.services import benchmark, benchmark_store
 from llama_launcher.core import vram
 from llama_launcher.core.mtp_stats import spec_counters, spec_delta
 from llama_launcher.core import report as report_mod
@@ -79,6 +81,49 @@ class _UpdateWorker(QThread):
                 self.found.emit(tag)
         except Exception:
             pass
+
+
+class BenchmarkWorker(QObject):
+    """Runs benchmark.run_benchmark() off the UI thread.
+
+    Built with an already-constructed client/snapshot/timestamp (endpoint
+    derivation and profile reads happen on the UI thread, before this worker
+    is started) so run() touches no GUI/profile state -- it only calls
+    run_benchmark() and emits a result signal. Qt delivers finished/failed to
+    the UI-thread slot via a queued connection since this object lives on a
+    different thread than MainWindow.
+    """
+    finished = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, client, sizes, n_predict, warmup, repeats, snapshot,
+                 timestamp, parent=None):
+        super().__init__(parent)
+        self._client = client
+        self._sizes = sizes
+        self._n_predict = n_predict
+        self._warmup = warmup
+        self._repeats = repeats
+        self._snapshot = snapshot
+        self._timestamp = timestamp
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    def _should_cancel(self) -> bool:
+        return self._cancelled
+
+    def run(self) -> None:
+        try:
+            run = benchmark.run_benchmark(
+                self._client, self._sizes, self._n_predict, self._warmup,
+                self._repeats, self._snapshot, self._timestamp,
+                should_cancel=self._should_cancel)
+        except benchmark.BenchmarkError as e:
+            self.failed.emit(str(e))
+            return
+        self.finished.emit(run)
 
 
 def base_dir():
@@ -234,6 +279,9 @@ class MainWindow(QMainWindow):
         self._spec_prev = None      # previous /metrics spec-decode counter read
         self._props = None          # cached /props for the current model load
         self._props_model = None    # router-polled model id the cache is keyed on
+        self._benchmark_thread = None
+        self._benchmark_worker = None
+        self._benchmark_profile_name = None
         self.configure_tab = configure_tab
 
         # Tabs
@@ -241,6 +289,8 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(configure_tab, "Configure")
         self.monitor_panel = MonitorPanel()
         self.monitor_panel.enable_metrics_requested.connect(self._on_enable_metrics)
+        self.monitor_panel.benchmark_run_requested.connect(self._on_benchmark_run)
+        self.monitor_panel.benchmark_cancel_requested.connect(self._on_benchmark_cancel)
         self.tabs.addTab(self.monitor_panel, "Monitor")
         self.router_panel = RouterPanel()
         self.router_panel.load_requested.connect(self._on_router_load)
@@ -732,11 +782,16 @@ class MainWindow(QMainWindow):
                                                source="counters")
         self._spec_prev = cur
 
-    def _refresh_props(self, p: Profile) -> None:
+    def _refresh_props(self, p: Profile) -> str | None:
         """Fetch /props once per model load and cache it (static per load).
 
         Keyed on the router-polled model id so a router swap re-fetches; in
         single-model mode the key is constant, so it fetches exactly once.
+
+        Returns the router model key it resolved (None in server mode, or
+        when router mode has nothing loaded), so callers that already need
+        that value -- e.g. the benchmark-availability gate -- can reuse it
+        instead of polling `_router_pollable_model()` again.
         """
         port = p.settings.get("port", 8080)
         if p.mode == "router":
@@ -745,15 +800,16 @@ class MainWindow(QMainWindow):
             model_key = self._router_pollable_model()
         else:
             host = dial_host(p.runtime.bind_host)
-            key, model_key = None, ""
+            key, model_key = None, None
         if self._props is not None and self._props_model == model_key:
-            return
+            return model_key
         info = metrics.fetch_props(port, api_key=key, host=host)
         if info is None:
-            return                     # leave cache empty; retry next ready poll
+            return model_key           # leave cache empty; retry next ready poll
         self._props = info
         self._props_model = model_key
         self.monitor_panel.set_props(info)
+        return model_key
 
     def _report_launch_error(self, text: str) -> None:
         """Show why a detached router failed to start. Non-modal: this fires
@@ -885,6 +941,8 @@ class MainWindow(QMainWindow):
             # both at once: _spawn_async is asynchronous, so an unchained run
             # would race the removal and lose with "name already in use".
             self.monitor_panel.reset()
+            self.monitor_panel.set_benchmark_history(
+                benchmark_store.load(default_base_dir(), p.name))
             self._spec_prev = None
             self._props = None
             self._props_model = None
@@ -904,6 +962,8 @@ class MainWindow(QMainWindow):
             QMessageBox.warning(self, "VRAM check", warn)
         argv = build_command(p)
         self.monitor_panel.reset()
+        self.monitor_panel.set_benchmark_history(
+            benchmark_store.load(default_base_dir(), p.name))
         self.monitor_panel.set_endpoints(
             p.settings.get("port", 8080),
             bool(p.settings.get("embeddings")),
@@ -961,6 +1021,135 @@ class MainWindow(QMainWindow):
     def _on_enable_metrics(self):
         self._widgets["metrics"].set_value(True)
         self.on_restart()
+
+    def _resolve_benchmark_member(self, p: Profile, model_scope: str | None):
+        """The child Profile for a router's loaded model, for build_snapshot().
+
+        build_snapshot() requires a Profile (it reads .settings/.model), never
+        a RouterMember -- a RouterMember has neither and raises AttributeError.
+        Falling back to None (profile.settings, i.e. the router's own -- empty
+        -- settings) is a lesser-quality snapshot but never crashes.
+        """
+        if p.mode != "router" or model_scope is None:
+            return None
+        for member, member_profile in self.member_pairs():
+            if member_model_id(member) == model_scope:
+                return member_profile
+        return None
+
+    def _prepare_benchmark(self, p: Profile):
+        """Endpoint + snapshot + client for a benchmark run.
+
+        Mirrors collect_monitor_data's host/port/key/model_scope derivation
+        (main_window.py, same class) exactly. Returns (client, snapshot), or
+        None when there's nothing to benchmark -- a router with no model
+        currently loaded, the same "not ready" condition collect_monitor_data
+        treats as poll=False.
+        """
+        port = p.settings.get("port", 8080)
+        host, key, model_scope, poll = dial_host(p.runtime.bind_host), None, None, True
+        if p.mode == "router":
+            host = self._router_host(p)
+            key = api_key_store.read_api_key(self.router_base_dir(), p.name)
+            model_scope = self._router_pollable_model()
+            poll = model_scope is not None
+        if not poll:
+            return None
+        member = self._resolve_benchmark_member(p, model_scope)
+        snapshot = benchmark.build_snapshot(p, member=member)
+        client = benchmark.requests_client(host, port, key, model_scope)
+        return client, snapshot
+
+    def _run_benchmark_sync(self, cfg: dict, run_benchmark=None) -> None:
+        """Endpoint-build -> run_benchmark -> save/show, all on the calling thread.
+
+        The testable seam: tests call this directly with a stubbed
+        run_benchmark, so no QThread and no network round-trip is needed.
+        `run_benchmark` resolves benchmark.run_benchmark dynamically when
+        omitted (rather than as a plain default-argument value), so
+        monkeypatching the module attribute after this method is defined
+        still takes effect.
+        """
+        if run_benchmark is None:
+            run_benchmark = benchmark.run_benchmark
+        p = self.current_profile()
+        prepared = self._prepare_benchmark(p)
+        if prepared is None:
+            self.monitor_panel.set_benchmark_progress("No model loaded to benchmark.")
+            return
+        client, snapshot = prepared
+        self._benchmark_profile_name = p.name
+        self.monitor_panel.set_benchmark_running(True)
+        timestamp = datetime.datetime.now().isoformat(timespec="seconds")
+        try:
+            run = run_benchmark(client, cfg["sizes"], cfg["n_predict"], cfg["warmup"],
+                                cfg["repeats"], snapshot, timestamp)
+        except benchmark.BenchmarkError as e:
+            self._on_benchmark_failed(str(e))
+            return
+        self._on_benchmark_finished(run)
+
+    def _on_benchmark_run(self, cfg: dict) -> None:
+        """Production path: build the endpoint/client on the UI thread, then run
+        benchmark.run_benchmark() on a QThread so a slow benchmark never blocks
+        the GUI."""
+        if self._benchmark_thread is not None:
+            return          # a run is already active; the panel showed Cancel
+        p = self.current_profile()
+        prepared = self._prepare_benchmark(p)
+        if prepared is None:
+            self.monitor_panel.set_benchmark_progress("No model loaded to benchmark.")
+            return
+        client, snapshot = prepared
+        self._benchmark_profile_name = p.name
+        timestamp = datetime.datetime.now().isoformat(timespec="seconds")
+
+        thread = QThread(self)
+        worker = BenchmarkWorker(client, cfg["sizes"], cfg["n_predict"], cfg["warmup"],
+                                 cfg["repeats"], snapshot, timestamp)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        # Queued across threads by Qt automatically -- worker lives on `thread`,
+        # these slots run on the UI thread where GUI/store access is safe.
+        worker.finished.connect(self._on_benchmark_finished)
+        worker.failed.connect(self._on_benchmark_failed)
+        worker.finished.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(self._on_benchmark_thread_done)
+        self._benchmark_thread = thread
+        self._benchmark_worker = worker
+        self.monitor_panel.set_benchmark_running(True)
+        thread.start()
+
+    def _on_benchmark_thread_done(self) -> None:
+        """Release the finished thread/worker so a later run can start."""
+        worker, thread = self._benchmark_worker, self._benchmark_thread
+        self._benchmark_worker = None
+        self._benchmark_thread = None
+        if worker is not None:
+            worker.deleteLater()
+        if thread is not None:
+            thread.deleteLater()
+
+    def _on_benchmark_cancel(self) -> None:
+        if self._benchmark_worker is not None:
+            self._benchmark_worker.cancel()
+
+    def _on_benchmark_finished(self, run) -> None:
+        name = self._benchmark_profile_name or self.current_profile().name
+        base = default_base_dir()
+        previous_runs = benchmark_store.load(base, name)
+        previous = previous_runs[-1] if previous_runs else None
+        benchmark_store.append(base, name, run)
+        run_dict = dataclasses.asdict(run)
+        delta = benchmark_store.delta(run_dict, previous) if previous is not None else None
+        self.monitor_panel.show_benchmark_run(run_dict, delta)
+        self.monitor_panel.set_benchmark_history(benchmark_store.load(base, name))
+        self.monitor_panel.set_benchmark_running(False)
+
+    def _on_benchmark_failed(self, msg: str) -> None:
+        self.monitor_panel.set_benchmark_progress(f"Benchmark failed: {msg}")
+        self.monitor_panel.set_benchmark_running(False)
 
     def on_fetch_latest(self):
         repo, tag = split_image(self.image_edit.text())
@@ -1030,6 +1219,7 @@ class MainWindow(QMainWindow):
         if not runtime.binary_available(p.runtime.binary):
             self.status_label.setText("● stopped")
             self.web_ui_btn.setEnabled(False)
+            self.monitor_panel.set_benchmark_available(False)
             return
         name = self._container_name()
         state = runtime.container_state(name, p.runtime.binary)
@@ -1038,15 +1228,23 @@ class MainWindow(QMainWindow):
             if state == "running" else "down"
         self.status_label.setText("● " + health.derive_status(state, hstatus))
         self.web_ui_btn.setEnabled(state == "running")
+        router_model_key = None
         if state == "running":
             if not self._log_follower_active():
                 self._start_log_follower()
             if hstatus == "ready":
-                self._refresh_props(p)
+                router_model_key = self._refresh_props(p)
             self.monitor_panel.update_stats(self.collect_monitor_data())
             self._update_spec_stats(p)
         if p.mode == "router" and state == "running":
             self.refresh_router_models()
+        # router_model_key was resolved from _refresh_props above (when ready)
+        # rather than polled again here, so this reuses that single call to
+        # _router_pollable_model() instead of doubling it.
+        ready = state == "running" and hstatus == "ready"
+        if ready and p.mode == "router":
+            ready = router_model_key is not None
+        self.monitor_panel.set_benchmark_available(ready)
 
     def collect_monitor_data(self) -> dict:
         from llama_launcher.services.metrics import kv_usage_ratio
@@ -1111,11 +1309,44 @@ class MainWindow(QMainWindow):
     def _stop_timers(self) -> None:
         """Stop background timers so a torn-down window stops firing update_status
         (and any pending update check). Idempotent — QTimer.stop() on a stopped
-        timer is a no-op. _update_timer exists only when update_check is enabled."""
+        timer is a no-op. _update_timer exists only when update_check is enabled.
+
+        Also tears down a running benchmark thread: cancels the worker (so a
+        loop mid-repeat unwinds instead of running to completion against a
+        closed window) and waits for the QThread to actually stop, since a
+        Python interpreter shutdown with a live QThread can abort/crash.
+
+        worker.finished/failed are already wired to thread.quit() (see
+        _on_benchmark_run), but that's a queued cross-thread connection: it
+        only takes effect once THIS (UI) thread's event loop runs and
+        delivers it. A bare wait() never pumps events, so it would deadlock
+        waiting for a quit() that never arrives; pump events between short
+        waits instead. terminate() is a last-resort backstop so a stuck
+        worker can never block window/app teardown indefinitely.
+        """
         self._status_timer.stop()
         update_timer = getattr(self, "_update_timer", None)
         if update_timer is not None:
             update_timer.stop()
+        thread = getattr(self, "_benchmark_thread", None)
+        if thread is None:
+            return
+        worker = getattr(self, "_benchmark_worker", None)
+        if worker is not None:
+            worker.cancel()
+        from PySide6.QtCore import QCoreApplication
+        for _ in range(100):        # ~2s ceiling
+            if thread.wait(20):
+                # One more pump so the already-queued finished/failed ->
+                # _on_benchmark_thread_done delivery (which clears
+                # _benchmark_thread/_benchmark_worker) actually runs before
+                # we return, instead of leaving it dangling until whatever
+                # next processes the event queue.
+                QCoreApplication.processEvents()
+                return
+            QCoreApplication.processEvents()
+        thread.terminate()
+        thread.wait(100)
 
     def _on_export_sh(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export shell script", "run.sh",
