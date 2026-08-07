@@ -1108,6 +1108,15 @@ class MainWindow(QMainWindow):
             self._log_proc.kill()
             self._log_proc = None
 
+    def _stop_timers(self) -> None:
+        """Stop background timers so a torn-down window stops firing update_status
+        (and any pending update check). Idempotent — QTimer.stop() on a stopped
+        timer is a no-op. _update_timer exists only when update_check is enabled."""
+        self._status_timer.stop()
+        update_timer = getattr(self, "_update_timer", None)
+        if update_timer is not None:
+            update_timer.stop()
+
     def _on_export_sh(self):
         path, _ = QFileDialog.getSaveFileName(self, "Export shell script", "run.sh",
                                               "Shell scripts (*.sh);;All files (*)")
@@ -1219,6 +1228,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event):
         if getattr(self, "_really_quit", False) or not self._minimize_to_tray:
             self._stop_log_follower()
+            self._stop_timers()
             event.accept()
             from PySide6.QtWidgets import QApplication
             QApplication.instance().quit()
@@ -1229,6 +1239,7 @@ class MainWindow(QMainWindow):
     def quit_app(self):
         self._really_quit = True
         self._stop_log_follower()
+        self._stop_timers()
         from PySide6.QtWidgets import QApplication
         QApplication.instance().quit()
 

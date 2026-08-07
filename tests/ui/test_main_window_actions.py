@@ -137,3 +137,20 @@ def test_fetch_latest_updates_image(qtbot, monkeypatch):
     w.image_edit.setText("ghcr.io/ggml-org/llama.cpp:server-cuda12-b1")
     w.on_fetch_latest()
     assert w.image_edit.text() == "ghcr.io/ggml-org/llama.cpp:server-cuda12-b9999"
+
+
+def test_quit_app_stops_status_timer(qtbot):
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    assert w._status_timer.isActive()          # running after construction
+    w.quit_app()
+    assert not w._status_timer.isActive()       # stopped on real teardown
+
+
+def test_close_no_tray_stops_status_timer(qtbot):
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._minimize_to_tray = False                 # default; close() takes the real-quit branch
+    assert w._status_timer.isActive()
+    w.close()
+    assert not w._status_timer.isActive()
