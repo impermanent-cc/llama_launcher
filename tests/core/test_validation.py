@@ -1,3 +1,4 @@
+from llama_launcher.core.command_builder import raw_arg_warnings
 from llama_launcher.core.spec import Profile, Mount, Runtime
 from llama_launcher.core.validation import validate, Issue
 
@@ -291,3 +292,32 @@ def test_server_mode_loopback_bind_is_silent():
                 mounts=[Mount(host="/h", container="/models")],
                 settings={"port": 8080})
     assert not any("without an API key" in m for m in _errors(validate(p)))
+
+
+def _srv(raw="", **settings):
+    return Profile(
+        name="s", image="img", runtime=Runtime(bind_host="127.0.0.1"), mode="server",
+        mounts=[Mount(host="/h", container="/models", role="model")],
+        model="/models/m.gguf", raw_args=raw, settings={"port": 8080, **settings},
+    )
+
+
+def test_raw_arg_warnings_reports_override_and_protected():
+    warns = raw_arg_warnings(_srv(raw="-ngl 50 --port 9000", **{"n-gpu-layers": "99"}))
+    assert any("overrides '--n-gpu-layers'" in w for w in warns)
+    assert any("--port" in w and "ignored" in w for w in warns)
+
+
+def test_raw_arg_warnings_empty_when_no_collision():
+    assert raw_arg_warnings(_srv(raw="--numa distribute")) == []
+
+
+def test_validate_emits_warning_issue_for_raw_collision():
+    issues = validate(_srv(raw="-ngl 50", **{"n-gpu-layers": "99"}))
+    assert any(i.level == "warning" and "overrides '--n-gpu-layers'" in i.message
+               for i in issues)
+
+
+def test_validate_no_raw_warning_when_clean():
+    issues = validate(_srv(raw="--numa distribute"))
+    assert not any("overrides" in i.message for i in issues)

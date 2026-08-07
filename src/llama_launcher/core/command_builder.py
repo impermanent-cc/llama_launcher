@@ -1,3 +1,4 @@
+import re
 import shlex
 
 from .settings_catalog import CATALOG, ROUTER_ONLY_KEYS, router_catalog
@@ -23,6 +24,115 @@ _SERVER_ENTRYPOINT = "/app/llama-server"
 CONTAINER_ROUTER_DIR = "/router"
 CONTAINER_PRESET_PATH = f"{CONTAINER_ROUTER_DIR}/models.ini"
 CONTAINER_KEY_PATH = f"{CONTAINER_ROUTER_DIR}/api-key"
+
+
+# Structural launcher flags that are not catalog settings but that raw_args
+# might collide with. Maps each spelling to its canonical (long) form.
+_STRUCTURAL_ALIASES = {
+    "-m": "--model",
+    "--model": "--model",
+    "--mmproj": "--mmproj",
+    "--spec-draft-model": "--spec-draft-model",
+    "--host": "--host",
+    "--port": "--port",
+    "--models-preset": "--models-preset",
+    "--api-key-file": "--api-key-file",
+}
+
+
+def _build_alias_fold(catalog: dict) -> dict:
+    """alias/spelling -> canonical long flag, from catalog + structural flags."""
+    fold: dict = dict(_STRUCTURAL_ALIASES)
+    for setting in catalog.values():
+        fold[setting.flag] = setting.flag          # long form is its own canonical
+        for alias in setting.aliases:
+            fold[alias] = setting.flag
+    return fold
+
+
+_ALIAS_FOLD = _build_alias_fold(CATALOG)
+
+
+def _canonical_flag(flag: str) -> str:
+    return _ALIAS_FOLD.get(flag, flag)
+
+
+# Same flag rule as router_preset._FLAG_RE: one/two dashes then a letter, so
+# llama.cpp negative sentinels (-ngl -1, --top-n-sigma -1.5, --seed -1) are read
+# as values, not flags.
+_FLAG_RE = re.compile(r"^--?[A-Za-z]")
+
+
+def _parse_raw_pairs(raw: str) -> list:
+    """['--ctx-size', '8192', '--mlock'] -> [('--ctx-size','8192'), ('--mlock',None)].
+
+    Order- and repeat-preserving (unlike router_preset.convert_raw_args, which
+    collapses to a unique-key INI dict).
+    """
+    pairs: list = []
+    if not raw.strip():
+        return pairs
+    tokens = shlex.split(raw)
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if not _FLAG_RE.match(tok):
+            i += 1                      # stray positional; nothing to pair it with
+            continue
+        if "=" in tok:
+            flag, _, value = tok.partition("=")
+            pairs.append((flag, value))
+            i += 1
+            continue
+        nxt = tokens[i + 1] if i + 1 < len(tokens) else None
+        if nxt is not None and not _FLAG_RE.match(nxt):
+            pairs.append((tok, nxt))
+            i += 2
+        else:
+            pairs.append((tok, None))
+            i += 1
+    return pairs
+
+
+def _flatten_pairs(pairs) -> list:
+    argv: list = []
+    for flag, value in pairs:
+        argv.append(flag)
+        if value is not None:
+            argv.append(value)
+    return argv
+
+
+def _merge_raw_args(owned, raw_pairs, protected_canon, repeatable_canon):
+    """Fold raw_args pairs onto the launcher's owned pairs.
+
+    raw wins for owned single-valued flags (replaced in place); protected
+    canon flags keep the launcher value; repeatable/unknown flags append.
+    Returns (argv, warnings).
+    """
+    owned = [list(pair) for pair in owned]          # mutable copy for in-place override
+    owned_index: dict = {}
+    for pos, (flag, _value) in enumerate(owned):
+        owned_index.setdefault(_canonical_flag(flag), pos)   # first owner wins the slot
+    warnings: list = []
+    extras: list = []
+    for flag, value in raw_pairs:
+        canon = _canonical_flag(flag)
+        if canon in protected_canon:
+            warnings.append(f"raw arg '{flag}' ignored; the launcher controls '{canon}'")
+            continue
+        if canon in owned_index and canon not in repeatable_canon:
+            pos = owned_index[canon]
+            old = owned[pos][1]
+            owned[pos][1] = value
+            if old is None:
+                warnings.append(f"raw arg '{flag}' duplicates '{canon}'")
+            else:
+                shown = f"{flag} {value}" if value is not None else flag
+                warnings.append(f"raw arg '{shown}' overrides '{canon}' (was {old})")
+            continue
+        extras.append((flag, value))
+    return _flatten_pairs(owned) + _flatten_pairs(extras), warnings
 
 
 def image_tag(image: str) -> str:
@@ -114,20 +224,20 @@ def _render_setting(setting, value) -> list[str]:
     return [setting.flag, str(value)]
 
 
-def _server_args(profile: Profile, catalog: dict) -> list[str]:
-    argv: list[str] = []
+def _owned_server_pairs(profile: Profile, catalog: dict) -> list:
+    pairs: list = []
     if profile.model:
-        argv += ["-m", profile.model]
+        pairs.append(("-m", profile.model))
     if profile.mmproj:
-        argv += ["--mmproj", profile.mmproj]
+        pairs.append(("--mmproj", profile.mmproj))
     for lora in profile.loras:
         if lora.scale is None or lora.scale == 1.0:
-            argv += ["--lora", lora.path]
+            pairs.append(("--lora", lora.path))
         else:
-            argv += ["--lora-scaled", f"{lora.path}:{lora.scale}"]
+            pairs.append(("--lora-scaled", f"{lora.path}:{lora.scale}"))
 
     if profile.draft_model:
-        argv += ["--spec-draft-model", profile.draft_model]
+        pairs.append(("--spec-draft-model", profile.draft_model))
 
     port = profile.settings.get("port", 8080)
     # Emit changed settings in catalog order, skipping port (handled below).
@@ -140,33 +250,69 @@ def _server_args(profile: Profile, catalog: dict) -> list[str]:
         if key in ROUTER_ONLY_KEYS:
             continue
         if key in profile.settings:
-            argv += _render_setting(setting, profile.settings[key])
+            rendered = _render_setting(setting, profile.settings[key])
+            if not rendered:                      # bool that is False -> emits nothing
+                continue
+            pairs.append((rendered[0], rendered[1] if len(rendered) > 1 else None))
 
-    argv += ["--host", "0.0.0.0", "--port", str(port)]
+    pairs.append(("--host", "0.0.0.0"))
+    pairs.append(("--port", str(port)))
+    return pairs
 
-    if profile.raw_args.strip():
-        argv += shlex.split(profile.raw_args)
+
+_SERVER_PROTECTED = {"--host", "--port"}
+_REPEATABLE = {"--lora", "--lora-scaled"}
+
+
+def _server_args(profile: Profile, catalog: dict) -> list[str]:
+    owned = _owned_server_pairs(profile, catalog)
+    argv, _warnings = _merge_raw_args(
+        owned, _parse_raw_pairs(profile.raw_args), _SERVER_PROTECTED, _REPEATABLE)
     return argv
+
+
+def _owned_router_pairs(profile: Profile) -> list:
+    pairs: list = []
+    port = profile.settings.get("port", 8080)
+    for key, setting in router_catalog().items():
+        if key == "port" or key == "api-key":
+            continue
+        if key in profile.settings:
+            rendered = _render_setting(setting, profile.settings[key])
+            if not rendered:
+                continue
+            pairs.append((rendered[0], rendered[1] if len(rendered) > 1 else None))
+    pairs.append(("--models-preset", CONTAINER_PRESET_PATH))
+    pairs.append(("--api-key-file", CONTAINER_KEY_PATH))
+    pairs.append(("--host", "0.0.0.0"))
+    pairs.append(("--port", str(port)))
+    return pairs
+
+
+_ROUTER_PROTECTED = {"--host", "--port", "--models-preset", "--api-key-file"}
 
 
 def _router_server_args(profile: Profile) -> list[str]:
     """Server args for a router: no model, host-level settings only."""
-    argv: list[str] = []
-    port = profile.settings.get("port", 8080)
-
-    for key, setting in router_catalog().items():
-        if key == "port" or key == "api-key":
-            continue          # port is emitted below; the key comes from a file
-        if key in profile.settings:
-            argv += _render_setting(setting, profile.settings[key])
-
-    argv += ["--models-preset", CONTAINER_PRESET_PATH]
-    argv += ["--api-key-file", CONTAINER_KEY_PATH]
-    argv += ["--host", "0.0.0.0", "--port", str(port)]
-
-    if profile.raw_args.strip():
-        argv += shlex.split(profile.raw_args)
+    owned = _owned_router_pairs(profile)
+    argv, _warnings = _merge_raw_args(
+        owned, _parse_raw_pairs(profile.raw_args), _ROUTER_PROTECTED, _REPEATABLE)
     return argv
+
+
+def raw_arg_warnings(profile: Profile, catalog: dict = CATALOG) -> list[str]:
+    """Collisions between profile.raw_args and the flags the launcher emits.
+
+    Same merge as build_command, returning only the warnings (empty when the
+    raw_args don't collide with any launcher-owned, non-repeatable flag).
+    """
+    raw_pairs = _parse_raw_pairs(profile.raw_args)
+    if profile.mode == "router":
+        owned, protected = _owned_router_pairs(profile), _ROUTER_PROTECTED
+    else:
+        owned, protected = _owned_server_pairs(profile, catalog), _SERVER_PROTECTED
+    _argv, warnings = _merge_raw_args(owned, raw_pairs, protected, _REPEATABLE)
+    return warnings
 
 
 def build_command(profile: Profile, catalog: dict = CATALOG,
