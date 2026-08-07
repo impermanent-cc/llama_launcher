@@ -32,6 +32,7 @@ def _hermetic_ui_boundaries(monkeypatch):
     monkeypatch.setattr(_metrics, "fetch_slots", lambda port, timeout=1.0, **kw: [])
     monkeypatch.setattr(_metrics, "fetch_metrics_text",
                         lambda port, timeout=1.0, **kw: "")
+    monkeypatch.setattr(_metrics, "fetch_props", lambda port, timeout=1.0, **kw: None)
     # Router control plane: without these, update_status -> refresh_router_models
     # would make a real HTTP call from the test suite.
     monkeypatch.setattr(_router_api, "list_models", lambda host, port, key, **kw: [])

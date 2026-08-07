@@ -232,6 +232,8 @@ class MainWindow(QMainWindow):
         self._last_caps = None
         self._router_statuses: dict = {}
         self._spec_prev = None      # previous /metrics spec-decode counter read
+        self._props = None          # cached /props for the current model load
+        self._props_model = None    # router-polled model id the cache is keyed on
         self.configure_tab = configure_tab
 
         # Tabs
@@ -568,6 +570,8 @@ class MainWindow(QMainWindow):
         self.bind_host_combo.setCurrentText(p.runtime.bind_host)
         self._router_statuses = {}
         self._spec_prev = None
+        self._props = None
+        self._props_model = None
         self.members_list.setRowCount(0)
         for member in p.members:
             self._add_member_item(member)
@@ -729,6 +733,29 @@ class MainWindow(QMainWindow):
                                                source="counters")
         self._spec_prev = cur
 
+    def _refresh_props(self, p: Profile) -> None:
+        """Fetch /props once per model load and cache it (static per load).
+
+        Keyed on the router-polled model id so a router swap re-fetches; in
+        single-model mode the key is constant, so it fetches exactly once.
+        """
+        port = p.settings.get("port", 8080)
+        if p.mode == "router":
+            host = self._router_host(p)
+            key = api_key_store.read_api_key(self.router_base_dir(), p.name)
+            model_key = self._router_pollable_model()
+        else:
+            host = dial_host(p.runtime.bind_host)
+            key, model_key = None, ""
+        if self._props is not None and self._props_model == model_key:
+            return
+        info = metrics.fetch_props(port, api_key=key, host=host)
+        if info is None:
+            return                     # leave cache empty; retry next ready poll
+        self._props = info
+        self._props_model = model_key
+        self.monitor_panel.set_props(info)
+
     def _report_launch_error(self, text: str) -> None:
         """Show why a detached router failed to start. Non-modal: this fires
         from a QProcess signal, which tests drive."""
@@ -860,6 +887,8 @@ class MainWindow(QMainWindow):
             # would race the removal and lose with "name already in use".
             self.monitor_panel.reset()
             self._spec_prev = None
+            self._props = None
+            self._props_model = None
             self._spawn_async(
                 runtime.rm_argv(self._container_name(), p.runtime.binary),
                 on_done=lambda: self._spawn_async(
@@ -1013,6 +1042,8 @@ class MainWindow(QMainWindow):
         if state == "running":
             if not self._log_follower_active():
                 self._start_log_follower()
+            if hstatus == "ready":
+                self._refresh_props(p)
             self.monitor_panel.update_stats(self.collect_monitor_data())
             self._update_spec_stats(p)
         if p.mode == "router" and state == "running":
