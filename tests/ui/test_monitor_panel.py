@@ -1,3 +1,4 @@
+from llama_launcher.core.props import PropsInfo
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
 from llama_launcher.services.gpu import GpuStat
 
@@ -160,3 +161,40 @@ def test_reset_clears_endpoints(qtbot):
     p.set_endpoints(8080, embeddings=True, reranking=False)
     p.reset()
     assert p.endpoints_label.isHidden()
+
+
+def test_set_props_renders_all_fields(qtbot):
+    panel = MonitorPanel()
+    qtbot.addWidget(panel)
+    panel.set_props(PropsInfo(build="b9755-0ef6f06d5", n_ctx=8192,
+                              model_alias="qwen35moe", total_slots=2,
+                              modalities={"vision": True, "audio": False}))
+    assert not panel.info_label.isHidden()
+    t = panel.info_label.text()
+    assert "b9755-0ef6f06d5" in t and "8192" in t and "qwen35moe" in t
+    assert "vision" in t and "2 slots" in t
+
+
+def test_set_props_none_hides_label(qtbot):
+    panel = MonitorPanel()
+    qtbot.addWidget(panel)
+    panel.set_props(PropsInfo("b", 1, "a", 1, {}))
+    panel.set_props(None)
+    assert panel.info_label.isHidden()
+
+
+def test_set_props_omits_absent_fields(qtbot):
+    panel = MonitorPanel()
+    qtbot.addWidget(panel)
+    panel.set_props(PropsInfo(build=None, n_ctx=4096, model_alias=None,
+                              total_slots=None, modalities={}))
+    t = panel.info_label.text()
+    assert "4096" in t and "build" not in t and "slots" not in t
+
+
+def test_reset_hides_info_label(qtbot):
+    panel = MonitorPanel()
+    qtbot.addWidget(panel)
+    panel.set_props(PropsInfo("b", 1, "a", 1, {}))
+    panel.reset()
+    assert panel.info_label.isHidden()

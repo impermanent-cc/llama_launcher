@@ -38,6 +38,10 @@ class MonitorPanel(QWidget):
         self.endpoints_label.setWordWrap(True)
         self.endpoints_label.setVisible(False)
         layout.insertWidget(1, self.endpoints_label)
+        self.info_label = QLabel("")
+        self.info_label.setWordWrap(True)
+        self.info_label.setVisible(False)
+        layout.insertWidget(1, self.info_label)
 
     def _summary_text(self) -> str:
         return self._last
@@ -55,6 +59,30 @@ class MonitorPanel(QWidget):
         else:
             self.endpoints_label.setText("")
             self.endpoints_label.setVisible(False)
+
+    def set_props(self, info) -> None:
+        """Render read-only /props info; hide if info is None or empty."""
+        if info is None:
+            self.info_label.setVisible(False)
+            return
+        parts = []
+        if info.build:
+            parts.append(f"build {info.build}")
+        if info.n_ctx is not None:
+            parts.append(f"ctx {info.n_ctx}")
+        if info.modalities:
+            mods = " ".join(f"{k}{'✓' if v else '✗'}"
+                            for k, v in info.modalities.items())
+            parts.append(mods)
+        if info.model_alias:
+            parts.append(f"alias {info.model_alias}")
+        if info.total_slots is not None:
+            parts.append(f"{info.total_slots} slots")
+        if not parts:
+            self.info_label.setVisible(False)
+            return
+        self.info_label.setText("Info —  " + " · ".join(parts))
+        self.info_label.setVisible(True)
 
     def update_stats(self, data: dict):
         metrics_on = bool(data.get("metrics_on"))
@@ -128,3 +156,5 @@ class MonitorPanel(QWidget):
         self.throughput_label.setVisible(False)
         self.endpoints_label.setText("")
         self.endpoints_label.setVisible(False)
+        self.info_label.setText("")
+        self.info_label.setVisible(False)
