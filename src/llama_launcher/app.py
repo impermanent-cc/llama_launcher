@@ -119,11 +119,16 @@ def _do_launch(p, base_dir, wait, as_json=False):
 
 
 def _do_stop(p, base_dir, as_json=False):
+    name = headless._container_name(p)
+    host = p.runtime.bind_host
+    port = p.settings.get("port", 8080)
     if headless.stop_router(p, p.runtime.binary):
-        print(f"'{p.name}' stopped")
-        return 0
-    print(f"'{p.name}' failed to stop", file=sys.stderr)
-    return 1
+        return _emit(as_json, "stop", 0, status="stopped", name=name,
+                     host=host, port=port,
+                     text_out=f"'{p.name}' stopped")
+    return _emit(as_json, "stop", 1, name=name, host=host, port=port,
+                 error="failed to stop",
+                 text_err=f"'{p.name}' failed to stop")
 
 
 _HEALTH_EXIT = {"running": 0, "loading": 3}
@@ -131,8 +136,11 @@ _HEALTH_EXIT = {"running": 0, "loading": 3}
 
 def _do_health(p, base_dir, as_json=False):
     status = headless.router_status(p, p.runtime.binary)
-    print(f"health: {'ready' if status == 'running' else status}")
-    return _HEALTH_EXIT.get(status, 4)
+    display = "ready" if status == "running" else status
+    return _emit(as_json, "health", _HEALTH_EXIT.get(status, 4),
+                 status=display, name=headless._container_name(p),
+                 host=p.runtime.bind_host, port=p.settings.get("port", 8080),
+                 text_out=f"health: {display}")
 
 
 def main(argv=None) -> int:

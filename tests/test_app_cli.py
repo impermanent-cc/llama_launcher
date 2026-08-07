@@ -294,3 +294,45 @@ def test_json_launch_wait_ready(monkeypatch, capsys):
     assert app.main(["--launch", "--profile", "r", "--wait", "--json"]) == 0
     obj = json.loads(capsys.readouterr().out)
     assert obj["status"] == "ready" and obj["ok"] is True
+
+
+def test_json_stop_success(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    monkeypatch.setattr(app.headless, "stop_router", lambda p, binary: True)
+    assert app.main(["--stop", "--profile", "r", "--json"]) == 0
+    cap = capsys.readouterr()
+    obj = json.loads(cap.out)
+    assert obj["action"] == "stop" and obj["ok"] is True and obj["status"] == "stopped"
+    assert cap.err == ""
+
+
+def test_json_stop_failure(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    monkeypatch.setattr(app.headless, "stop_router", lambda p, binary: False)
+    assert app.main(["--stop", "--profile", "r", "--json"]) == 1
+    obj = json.loads(capsys.readouterr().out)
+    assert obj["ok"] is False and obj["status"] is None
+
+
+def test_json_health_ready(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    monkeypatch.setattr(app.headless, "router_status", lambda p, binary: "running")
+    assert app.main(["--health", "--profile", "r", "--json"]) == 0
+    obj = json.loads(capsys.readouterr().out)
+    assert obj["ok"] is True and obj["status"] == "ready"
+
+
+def test_json_health_loading(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    monkeypatch.setattr(app.headless, "router_status", lambda p, binary: "loading")
+    assert app.main(["--health", "--profile", "r", "--json"]) == 3
+    obj = json.loads(capsys.readouterr().out)
+    assert obj["ok"] is False and obj["status"] == "loading"
+
+
+def test_json_health_down(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    monkeypatch.setattr(app.headless, "router_status", lambda p, binary: "stopped")
+    assert app.main(["--health", "--profile", "r", "--json"]) == 4
+    obj = json.loads(capsys.readouterr().out)
+    assert obj["ok"] is False and obj["status"] == "stopped"
