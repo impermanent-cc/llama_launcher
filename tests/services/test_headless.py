@@ -65,3 +65,57 @@ def test_launch_router_run_failure_reports_stderr(monkeypatch):
                         lambda argv: subprocess.CompletedProcess(argv, 125, "", "boom\n"))
     res = headless.launch_router(_router(), "/base", "podman")
     assert res.ok is False and res.error == "boom"
+
+
+def test_stop_router_absent_is_idempotent(monkeypatch):
+    monkeypatch.setattr(headless, "container_state", lambda name, binary: "absent")
+    called = []
+    monkeypatch.setattr(headless, "_run", lambda argv: called.append(argv))
+    assert headless.stop_router(_router(), "podman") is True
+    assert called == []                      # nothing to stop
+
+
+def test_stop_router_running_success(monkeypatch):
+    monkeypatch.setattr(headless, "container_state", lambda name, binary: "running")
+    monkeypatch.setattr(headless, "_run",
+                        lambda argv: subprocess.CompletedProcess(argv, 0, "", ""))
+    assert headless.stop_router(_router(), "podman") is True
+
+
+def test_stop_router_failure(monkeypatch):
+    monkeypatch.setattr(headless, "container_state", lambda name, binary: "running")
+    monkeypatch.setattr(headless, "_run",
+                        lambda argv: subprocess.CompletedProcess(argv, 1, "", "nope"))
+    assert headless.stop_router(_router(), "podman") is False
+
+
+def test_router_status_ready_dials_loopback(monkeypatch):
+    seen = {}
+    monkeypatch.setattr(headless, "container_state", lambda name, binary: "running")
+    def fake_probe(port, host="127.0.0.1", **kw):
+        seen["host"] = host
+        return "ready"
+    monkeypatch.setattr(headless, "probe_health", fake_probe)
+    assert headless.router_status(_router(bind="0.0.0.0"), "podman") == "running"
+    assert seen["host"] == "127.0.0.1"       # 0.0.0.0 dialed as loopback
+
+
+def test_router_status_not_running_is_stopped(monkeypatch):
+    monkeypatch.setattr(headless, "container_state", lambda name, binary: "absent")
+    # probe must not even be called when the container isn't running
+    monkeypatch.setattr(headless, "probe_health",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("probed")))
+    assert headless.router_status(_router(), "podman") == "stopped"
+
+
+def test_wait_ready_returns_true_when_ready(monkeypatch):
+    monkeypatch.setattr(headless, "probe_health", lambda port, host="127.0.0.1", **k: "ready")
+    assert headless.wait_ready("127.0.0.1", 8080, timeout=5) is True
+
+
+def test_wait_ready_times_out(monkeypatch):
+    monkeypatch.setattr(headless, "probe_health", lambda port, host="127.0.0.1", **k: "loading")
+    ticks = iter([0.0, 0.5, 1.0, 1.5])        # monotonic advances past the deadline
+    monkeypatch.setattr(headless.time, "monotonic", lambda: next(ticks))
+    monkeypatch.setattr(headless.time, "sleep", lambda s: None)
+    assert headless.wait_ready("127.0.0.1", 8080, timeout=1.0, interval=0.5) is False

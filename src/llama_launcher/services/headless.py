@@ -58,3 +58,33 @@ def launch_router(profile, base_dir, binary) -> LaunchResult:
     if proc.returncode != 0:
         return LaunchResult(False, name, host, port, result.warnings, proc.stderr.strip())
     return LaunchResult(True, name, host, port, result.warnings, None)
+
+
+def stop_router(profile, binary, timeout: int = 10) -> bool:
+    """Stop the router container. True on success or if it's already absent."""
+    name = _container_name(profile)
+    if container_state(name, binary) == "absent":
+        return True
+    return _run(stop_argv(name, binary, timeout)).returncode == 0
+
+
+def router_status(profile, binary) -> str:
+    """Container state + /health → a display status (see health.derive_status)."""
+    name = _container_name(profile)
+    cstate = container_state(name, binary)
+    if cstate != "running":
+        return derive_status(cstate, "down")
+    health = probe_health(profile.settings.get("port", 8080),
+                          host=dial_host(profile.runtime.bind_host))
+    return derive_status(cstate, health)
+
+
+def wait_ready(host, port, timeout: float = 60.0, interval: float = 1.0) -> bool:
+    """Poll /health until ready or timeout. True iff it became ready in time."""
+    deadline = time.monotonic() + timeout
+    while True:
+        if probe_health(port, host=host) == "ready":
+            return True
+        if time.monotonic() >= deadline:
+            return False
+        time.sleep(interval)
