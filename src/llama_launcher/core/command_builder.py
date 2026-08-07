@@ -224,20 +224,20 @@ def _render_setting(setting, value) -> list[str]:
     return [setting.flag, str(value)]
 
 
-def _server_args(profile: Profile, catalog: dict) -> list[str]:
-    argv: list[str] = []
+def _owned_server_pairs(profile: Profile, catalog: dict) -> list:
+    pairs: list = []
     if profile.model:
-        argv += ["-m", profile.model]
+        pairs.append(("-m", profile.model))
     if profile.mmproj:
-        argv += ["--mmproj", profile.mmproj]
+        pairs.append(("--mmproj", profile.mmproj))
     for lora in profile.loras:
         if lora.scale is None or lora.scale == 1.0:
-            argv += ["--lora", lora.path]
+            pairs.append(("--lora", lora.path))
         else:
-            argv += ["--lora-scaled", f"{lora.path}:{lora.scale}"]
+            pairs.append(("--lora-scaled", f"{lora.path}:{lora.scale}"))
 
     if profile.draft_model:
-        argv += ["--spec-draft-model", profile.draft_model]
+        pairs.append(("--spec-draft-model", profile.draft_model))
 
     port = profile.settings.get("port", 8080)
     # Emit changed settings in catalog order, skipping port (handled below).
@@ -250,12 +250,24 @@ def _server_args(profile: Profile, catalog: dict) -> list[str]:
         if key in ROUTER_ONLY_KEYS:
             continue
         if key in profile.settings:
-            argv += _render_setting(setting, profile.settings[key])
+            rendered = _render_setting(setting, profile.settings[key])
+            if not rendered:                      # bool that is False -> emits nothing
+                continue
+            pairs.append((rendered[0], rendered[1] if len(rendered) > 1 else None))
 
-    argv += ["--host", "0.0.0.0", "--port", str(port)]
+    pairs.append(("--host", "0.0.0.0"))
+    pairs.append(("--port", str(port)))
+    return pairs
 
-    if profile.raw_args.strip():
-        argv += shlex.split(profile.raw_args)
+
+_SERVER_PROTECTED = {"--host", "--port"}
+_REPEATABLE = {"--lora", "--lora-scaled"}
+
+
+def _server_args(profile: Profile, catalog: dict) -> list[str]:
+    owned = _owned_server_pairs(profile, catalog)
+    argv, _warnings = _merge_raw_args(
+        owned, _parse_raw_pairs(profile.raw_args), _SERVER_PROTECTED, _REPEATABLE)
     return argv
 
 

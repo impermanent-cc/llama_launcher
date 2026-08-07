@@ -188,3 +188,39 @@ def test_reranking_flags_render():
 def test_pooling_absent_emits_no_flag():
     argv = build_command(_embed_profile(embeddings=True))
     assert "--pooling" not in argv
+
+
+def _srv(raw="", **settings):
+    return Profile(
+        name="s", image="img", runtime=Runtime(bind_host="127.0.0.1"), mode="server",
+        mounts=[Mount(host="/h", container="/models", role="model")],
+        model="/models/m.gguf", raw_args=raw,
+        settings={"port": 8080, **settings},
+    )
+
+
+def test_server_raw_ngl_overrides_setting_no_duplicate():
+    argv = build_command(_srv(raw="-ngl 50", **{"n-gpu-layers": "99"}))
+    assert argv.count("--n-gpu-layers") == 1
+    i = argv.index("--n-gpu-layers")
+    assert argv[i + 1] == "50"
+    assert "-ngl" not in argv           # raw short form folded onto the owned long form
+
+
+def test_server_raw_port_cannot_override():
+    argv = build_command(_srv(raw="--port 9000"))
+    assert argv.count("--port") == 1
+    assert "9000" not in argv           # launcher keeps 8080
+
+
+def test_server_noncolliding_raw_still_appended():
+    argv = build_command(_srv(raw="--numa distribute"))
+    assert argv[-2:] == ["--numa", "distribute"]
+
+
+def test_server_multiple_loras_preserved_with_raw_lora():
+    p = _srv(raw="--lora /r.gguf")
+    from llama_launcher.core.spec import LoraRef
+    p.loras.append(LoraRef(path="/models/base.gguf"))
+    argv = build_command(p)
+    assert argv.count("--lora") == 2    # owned lora + raw lora both present
