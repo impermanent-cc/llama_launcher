@@ -1072,6 +1072,7 @@ class MainWindow(QMainWindow):
             "tok_s": m.get("llamacpp:predicted_tokens_seconds"),
             "prompt_tok_s": m.get("llamacpp:prompt_tokens_seconds"),
             "kv_pct": kv_usage_ratio(slots),
+            "speculating": any(s.get("speculative") for s in slots),
             "gpus": gpu.query_gpus(),
             "cpu": st.get("cpu_perc", ""),
             "mem": st.get("mem_usage", ""),

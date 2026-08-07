@@ -98,6 +98,8 @@ class MonitorPanel(QWidget):
         kv = data.get("kv_pct")
         kv_s = f"KV {kv * 100:.0f}%" if kv is not None else "KV –"
         parts = [speed, kv_s]
+        if data.get("speculating"):
+            parts.append("spec ●")
         for g in data.get("gpus", []):
             parts.append(f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, GPU {g.util_pct}%, {g.temp_c}°C")
         if data.get("cpu") or data.get("mem"):

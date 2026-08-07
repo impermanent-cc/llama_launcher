@@ -198,3 +198,17 @@ def test_reset_hides_info_label(qtbot):
     panel.set_props(PropsInfo("b", 1, "a", 1, {}))
     panel.reset()
     assert panel.info_label.isHidden()
+
+
+def test_update_stats_shows_speculating_indicator(qtbot):
+    panel = MonitorPanel()
+    qtbot.addWidget(panel)
+    panel.update_stats({"metrics_on": False, "speculating": True})
+    assert "spec ●" in panel.summary.text()
+
+
+def test_update_stats_omits_indicator_when_not_speculating(qtbot):
+    panel = MonitorPanel()
+    qtbot.addWidget(panel)
+    panel.update_stats({"metrics_on": False, "speculating": False})
+    assert "spec ●" not in panel.summary.text()

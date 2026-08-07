@@ -50,6 +50,19 @@ def test_collect_monitor_data(qtbot, monkeypatch):
     assert d["cpu"] == "9%"
 
 
+def test_collect_monitor_data_reports_speculating(qtbot, monkeypatch):
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    monkeypatch.setattr(mw.metrics, "fetch_slots",
+                        lambda *a, **k: [{"speculative": True, "n_ctx": 4096}])
+    monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda *a, **k: {})
+    monkeypatch.setattr(mw.runtime, "stats", lambda name, binary: {})
+    monkeypatch.setattr(mw.runtime, "started_at", lambda name, binary: None)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    assert w.collect_monitor_data()["speculating"] is True
+
+
 def _ready(monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
