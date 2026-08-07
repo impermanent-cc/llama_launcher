@@ -86,3 +86,42 @@ def test_fetch_metrics_uses_supplied_host(monkeypatch):
     monkeypatch.setattr(metrics.requests, "get", fake_get)
     metrics.fetch_metrics(8080, host="192.168.1.9")
     assert seen["url"].startswith("http://192.168.1.9:8080")
+
+
+import requests
+from llama_launcher.core.props import PropsInfo
+
+
+class _RespProps:
+    def __init__(self, status_code, payload=None):
+        self.status_code = status_code
+        self._payload = payload
+    def json(self):
+        if self._payload is None:
+            raise ValueError("no json")
+        return self._payload
+
+
+def test_fetch_props_returns_parsed_on_200(monkeypatch):
+    monkeypatch.setattr(metrics.requests, "get",
+                        lambda *a, **k: _RespProps(200, {"build_info": "b9755", "total_slots": 1}))
+    info = metrics.fetch_props(8080)
+    assert isinstance(info, PropsInfo)
+    assert info.build == "b9755" and info.total_slots == 1
+
+
+def test_fetch_props_none_on_503(monkeypatch):
+    monkeypatch.setattr(metrics.requests, "get", lambda *a, **k: _RespProps(503))
+    assert metrics.fetch_props(8080) is None
+
+
+def test_fetch_props_none_on_bad_json(monkeypatch):
+    monkeypatch.setattr(metrics.requests, "get", lambda *a, **k: _RespProps(200, None))
+    assert metrics.fetch_props(8080) is None
+
+
+def test_fetch_props_none_on_connection_error(monkeypatch):
+    def boom(*a, **k):
+        raise requests.RequestException("refused")
+    monkeypatch.setattr(metrics.requests, "get", boom)
+    assert metrics.fetch_props(8080) is None

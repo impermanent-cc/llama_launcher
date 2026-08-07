@@ -1,6 +1,7 @@
 import requests
 
 from llama_launcher.core.prometheus import parse_metrics
+from llama_launcher.core.props import PropsInfo, parse_props
 
 
 _NO_AUTOLOAD = {"autoload": "false"}
@@ -50,6 +51,23 @@ def fetch_slots(port, timeout: float = 1.0, model: str | None = None,
         return data if isinstance(data, list) else []
     except (requests.RequestException, ValueError):
         return []
+
+
+def fetch_props(port, timeout: float = 1.0, api_key: str | None = None,
+                host: str = "127.0.0.1") -> PropsInfo | None:
+    """Parsed /props, or None on any failure.
+
+    /props is server-wide (not model-scoped) and is exempt from auth and the
+    idle timer; the key is passed for symmetry and does no harm.
+    """
+    try:
+        r = requests.get(f"http://{host}:{port}/props", timeout=timeout,
+                         headers=_headers(api_key))
+        if r.status_code != 200:
+            return None
+        return parse_props(r.json())
+    except (requests.RequestException, ValueError):
+        return None
 
 
 def kv_usage_ratio(slots: list) -> float | None:
