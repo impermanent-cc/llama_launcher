@@ -23,7 +23,7 @@ from llama_launcher.core.validation import (
 )
 from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
-    load_config, save_config, profile_to_dict,
+    load_config, save_config, profile_to_dict, resolve_member_pairs,
 )
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
 from llama_launcher.core import vram
@@ -492,8 +492,7 @@ class MainWindow(QMainWindow):
 
     def member_pairs(self) -> list:
         """(RouterMember, member Profile) pairs for members whose profile exists."""
-        by_name = {p.name: p for p in list_profiles(base_dir())}
-        return [(m, by_name[m.profile]) for m in self.members() if m.profile in by_name]
+        return resolve_member_pairs(self.members(), base_dir())
 
     def missing_member_profiles(self) -> list:
         """Member profile names that no longer exist on disk.

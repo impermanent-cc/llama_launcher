@@ -55,6 +55,16 @@ def list_profiles(base_dir: Path) -> list[Profile]:
     return [load_profile(p) for p in sorted(d.glob("*.json"))]
 
 
+def resolve_member_pairs(members, base_dir):
+    """(RouterMember, member Profile) pairs for members whose profile exists.
+
+    Preserves member order; silently drops members whose referenced profile is
+    gone (the router preset simply omits them).
+    """
+    by_name = {p.name: p for p in list_profiles(base_dir)}
+    return [(m, by_name[m.profile]) for m in members if m.profile in by_name]
+
+
 def delete_profile(name: str, base_dir: Path) -> None:
     path = _profiles_dir(base_dir) / f"{slugify(name)}.json"
     if path.exists():

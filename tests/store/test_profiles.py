@@ -73,3 +73,23 @@ def test_legacy_profile_json_without_new_fields_still_loads():
     assert back.mode == "server"
     assert back.members == []
     assert back.runtime.bind_host == "127.0.0.1"
+
+
+def _member(profile_name):
+    return RouterMember(profile=profile_name)
+
+
+def test_resolve_member_pairs_pairs_present_and_drops_missing(tmp_path, monkeypatch):
+    from llama_launcher.store import profiles as store
+    a = Profile(name="a", image="img", runtime=Runtime())
+    b = Profile(name="b", image="img", runtime=Runtime())
+    monkeypatch.setattr(store, "list_profiles", lambda base: [a, b])
+    members = [_member("a"), _member("gone"), _member("b")]
+    pairs = store.resolve_member_pairs(members, tmp_path)
+    assert [(m.profile, p.name) for m, p in pairs] == [("a", "a"), ("b", "b")]
+
+
+def test_resolve_member_pairs_empty(tmp_path, monkeypatch):
+    from llama_launcher.store import profiles as store
+    monkeypatch.setattr(store, "list_profiles", lambda base: [])
+    assert store.resolve_member_pairs([_member("x")], tmp_path) == []
