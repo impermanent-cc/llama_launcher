@@ -95,7 +95,7 @@ def test_resolve_member_pairs_empty(tmp_path, monkeypatch):
     assert store.resolve_member_pairs([_member("x")], tmp_path) == []
 
 
-def test_detached_round_trips(tmp_path: Path):
+def test_detached_round_trips():
     from llama_launcher.core.spec import Profile, Runtime
     from llama_launcher.store.profiles import profile_to_dict, profile_from_dict
     p = Profile(name="Solo", runtime=Runtime(detached=True))

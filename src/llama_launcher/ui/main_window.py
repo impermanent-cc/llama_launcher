@@ -330,6 +330,7 @@ class MainWindow(QMainWindow):
         self.detached_check.setToolTip(
             "Launch without a terminal window; watch output on the Monitor "
             "tab and use Stop to shut it down.")
+        self.detached_check.toggled.connect(self.refresh_preview)
         buttons.addWidget(self.detached_check)
         root.addLayout(buttons)
 
@@ -820,11 +821,17 @@ class MainWindow(QMainWindow):
         return model_key
 
     def _report_launch_error(self, text: str) -> None:
-        """Show why a detached router failed to start. Non-modal: this fires
-        from a QProcess signal, which tests drive."""
+        """Show why a detached launch -- router or server -- failed to start.
+        Routed to the router panel (non-modal: this fires from a QProcess
+        signal, which tests drive); a detached SERVER launch also pops a
+        QMessageBox, since a Monitor-tab-only user may never see the router
+        panel and would otherwise miss the failure entirely."""
         self.status_label.setText("● failed to start")
-        self.router_panel.set_error(f"launch failed: {text.splitlines()[-1][:200]}"
-                                    if text else "launch failed")
+        reason = (f"launch failed: {text.splitlines()[-1][:200]}"
+                  if text else "launch failed")
+        self.router_panel.set_error(reason)
+        if self.current_profile().mode != "router":
+            QMessageBox.critical(self, "Launch failed", reason)
 
     def adopt_running_containers(self) -> list:
         """Containers this launcher owns, so a detached router survives a GUI restart."""
