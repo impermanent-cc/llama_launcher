@@ -453,6 +453,8 @@ class MainWindow(QMainWindow):
 
         self._log_proc = None
         self._stop_proc = None
+        self._fetch_worker = None
+        self._update_worker = None
         self._active_instance = None      # Instance being monitored, or None -> current profile
         self._instances = []              # last-built Instance list (for selection lookup)
 
@@ -1329,6 +1331,7 @@ class MainWindow(QMainWindow):
         self._fetch_got_result = False
         self.fetch_btn.setEnabled(False)
         self.fetch_btn.setText("Fetching…")
+        self.update_badge.setEnabled(False)
         worker = _UpdateWorker(repo, prefix, parent=self)
         worker.found.connect(self._on_fetch_found)
         worker.failed.connect(self._on_fetch_failed)
@@ -1353,6 +1356,7 @@ class MainWindow(QMainWindow):
     def _on_fetch_finished(self) -> None:
         self.fetch_btn.setEnabled(True)
         self.fetch_btn.setText("Fetch latest")
+        self.update_badge.setEnabled(True)
         if not self._fetch_got_result:
             QMessageBox.information(
                 self, "Latest build", "No newer build found for this image.")
@@ -1575,6 +1579,24 @@ class MainWindow(QMainWindow):
         update_timer = getattr(self, "_update_timer", None)
         if update_timer is not None:
             update_timer.stop()
+
+        # Drain any in-flight registry-fetch / update-check QThread so closing
+        # the window mid-fetch can't destroy a running QThread (abort/crash).
+        # _UpdateWorker.run() is a blocking network call with no cancel flag, so
+        # wait with a ceiling and terminate() as a last-resort backstop.
+        from PySide6.QtCore import QCoreApplication
+        for _attr in ("_fetch_worker", "_update_worker"):
+            w = getattr(self, _attr, None)
+            if w is None or not w.isRunning():
+                continue
+            for _ in range(100):            # ~2s ceiling
+                if w.wait(20):
+                    break
+                QCoreApplication.processEvents()
+            else:
+                w.terminate()
+                w.wait(100)
+
         thread = getattr(self, "_benchmark_thread", None)
         if thread is None:
             return
