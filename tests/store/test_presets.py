@@ -29,3 +29,19 @@ def test_save_list_delete(tmp_path: Path):
 
 def test_list_empty_when_no_dir(tmp_path: Path):
     assert list_presets(tmp_path) == []
+
+
+def test_list_skips_malformed_json_file(tmp_path: Path):
+    p = Preset(key="good", label="Good", settings={"temp": 0.6}, source="user")
+    save_preset(p, tmp_path)
+    (tmp_path / "presets" / "broken.json").write_text("{ not valid json")
+    got = list_presets(tmp_path)
+    assert [x.key for x in got] == ["good"]
+
+
+def test_list_skips_valid_json_missing_required_key(tmp_path: Path):
+    p = Preset(key="good", label="Good", settings={"temp": 0.6}, source="user")
+    save_preset(p, tmp_path)
+    (tmp_path / "presets" / "nokey.json").write_text('{"label": "no key here"}')
+    got = list_presets(tmp_path)
+    assert [x.key for x in got] == ["good"]

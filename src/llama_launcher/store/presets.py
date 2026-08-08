@@ -33,7 +33,13 @@ def save_preset(p: Preset, base_dir: Path) -> Path:
 
 def list_presets(base_dir: Path) -> list[Preset]:
     d = _presets_dir(base_dir)
-    return [preset_from_dict(json.loads(p.read_text())) for p in sorted(d.glob("*.json"))]
+    presets = []
+    for p in sorted(d.glob("*.json")):
+        try:
+            presets.append(preset_from_dict(json.loads(p.read_text())))
+        except (OSError, ValueError, KeyError, TypeError):
+            continue  # skip unreadable/malformed/incomplete preset file
+    return presets
 
 
 def delete_preset(key: str, base_dir: Path) -> None:
