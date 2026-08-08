@@ -41,6 +41,12 @@ class MonitorPanel(QWidget):
         self.enable_metrics_btn.clicked.connect(self.enable_metrics_requested)
         layout.addWidget(self.enable_metrics_btn)
 
+        layout.addWidget(QLabel("Logs:"))
+        self.log_view = QPlainTextEdit()
+        self.log_view.setReadOnly(True)
+        self.log_view.setMaximumBlockCount(5000)
+        layout.addWidget(self.log_view, 1)
+
         layout.addWidget(QLabel("Benchmark"))
         bench_config = QHBoxLayout()
         self.bench_sizes = QLineEdit("128, 512, 2048")
@@ -71,12 +77,6 @@ class MonitorPanel(QWidget):
         self.bench_history = QListWidget()
         self.bench_history.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.bench_history)
-
-        layout.addWidget(QLabel("Logs:"))
-        self.log_view = QPlainTextEdit()
-        self.log_view.setReadOnly(True)
-        self.log_view.setMaximumBlockCount(5000)
-        layout.addWidget(self.log_view, 1)
         self._last = ""
         self._draft = None
         self._log_buf = ""

@@ -249,3 +249,17 @@ def test_instance_stop_button_emits(qtbot):
     btn = panel.instances_table.cellWidget(0, 4)   # column 4 is the Stop button
     btn.click()
     assert got == ["llama-a"]
+
+
+def test_benchmark_section_is_below_logs(qtbot):
+    from PySide6.QtWidgets import QLabel
+    from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+    panel = MonitorPanel(); qtbot.addWidget(panel)
+    lay = panel.layout()
+    idx = {}
+    for i in range(lay.count()):
+        w = lay.itemAt(i).widget()
+        if isinstance(w, QLabel) and w.text() in ("Benchmark", "Logs:"):
+            idx[w.text()] = i
+    assert "Benchmark" in idx and "Logs:" in idx
+    assert idx["Benchmark"] > idx["Logs:"], "Benchmark should render below the Logs section"
