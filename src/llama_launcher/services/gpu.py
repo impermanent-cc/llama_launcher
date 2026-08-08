@@ -2,7 +2,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
-_QUERY = "memory.used,memory.total,memory.free,utilization.gpu,temperature.gpu,name"
+_QUERY = ("memory.used,memory.total,memory.free,utilization.gpu,"
+          "temperature.gpu,power.draw,power.limit,name")
 
 
 @dataclass
@@ -13,6 +14,8 @@ class GpuStat:
     mem_free_mib: int
     util_pct: int
     temp_c: int
+    power_draw_w: float | None = None
+    power_limit_w: float | None = None
 
 
 def _int(token: str) -> int:
@@ -23,6 +26,13 @@ def _int(token: str) -> int:
         return 0
 
 
+def _float(token: str) -> float | None:
+    try:
+        return float(token.strip())
+    except (ValueError, AttributeError):
+        return None
+
+
 def parse_nvidia_smi(text: str) -> list[GpuStat]:
     out = []
     for line in text.splitlines():
@@ -30,12 +40,13 @@ def parse_nvidia_smi(text: str) -> list[GpuStat]:
         if not line:
             continue
         parts = [p.strip() for p in line.split(",")]
-        if len(parts) < 6:
+        if len(parts) < 8:
             continue
         out.append(GpuStat(
             mem_used_mib=_int(parts[0]), mem_total_mib=_int(parts[1]),
             mem_free_mib=_int(parts[2]), util_pct=_int(parts[3]),
-            temp_c=_int(parts[4]), name=",".join(parts[5:]).strip(),
+            temp_c=_int(parts[4]), power_draw_w=_float(parts[5]),
+            power_limit_w=_float(parts[6]), name=",".join(parts[7:]).strip(),
         ))
     return out
 
