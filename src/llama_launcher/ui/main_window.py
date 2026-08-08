@@ -820,17 +820,24 @@ class MainWindow(QMainWindow):
         self.monitor_panel.set_props(info)
         return model_key
 
-    def _report_launch_error(self, text: str) -> None:
+    def _report_launch_error(self, text: str = None, *, show_dialog: bool = False) -> None:
         """Show why a detached launch -- router or server -- failed to start.
         Routed to the router panel (non-modal: this fires from a QProcess
         signal, which tests drive); a detached SERVER launch also pops a
         QMessageBox, since a Monitor-tab-only user may never see the router
-        panel and would otherwise miss the failure entirely."""
+        panel and would otherwise miss the failure entirely.
+
+        `show_dialog` is decided by the CALLER at launch time (when the
+        profile's mode is known synchronously), not re-derived here from
+        live UI state: this fires from an async QProcess callback, possibly
+        seconds later, by which point the user may have switched profiles
+        or flipped the mode combo -- current_profile() at that moment would
+        no longer describe the launch that actually failed."""
         self.status_label.setText("● failed to start")
         reason = (f"launch failed: {text.splitlines()[-1][:200]}"
                   if text else "launch failed")
         self.router_panel.set_error(reason)
-        if self.current_profile().mode != "router":
+        if show_dialog:
             QMessageBox.critical(self, "Launch failed", reason)
 
     def adopt_running_containers(self) -> list:
@@ -988,12 +995,15 @@ class MainWindow(QMainWindow):
             # Detached drops --rm, so a stale stopped container of this name
             # would block the run with "name already in use". Remove it first,
             # then chain the run (mirrors the router branch above). on_error
-            # surfaces bad image / CDI / flag failures the terminal used to show.
+            # surfaces bad image / CDI / flag failures the terminal used to
+            # show -- show_dialog is fixed here, at launch time, so a later
+            # profile/mode switch before the error fires can't change it.
             self._spawn_async(
                 runtime.rm_argv(self._container_name(), p.runtime.binary),
                 on_done=lambda: self._spawn_async(
                     argv, on_done=self.update_status,
-                    on_error=self._report_launch_error))
+                    on_error=lambda e=None: self._report_launch_error(
+                        e, show_dialog=True)))
         else:
             argv = build_command(p)
             terminal.launch(argv)

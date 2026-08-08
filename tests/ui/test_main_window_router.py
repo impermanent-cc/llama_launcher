@@ -116,6 +116,10 @@ def test_detached_server_launch_uses_spawn_chain_not_terminal(win, monkeypatch):
     term_called = {}
     monkeypatch.setattr("llama_launcher.ui.main_window.terminal.launch",
                         lambda argv: term_called.setdefault("argv", argv))
+    # A detached server's on_error pops a real QMessageBox (fix #2); stub it
+    # so invoking the callback below can't block the offscreen test run.
+    monkeypatch.setattr("llama_launcher.ui.main_window.QMessageBox.critical",
+                        lambda *a, **k: None)
 
     spawned, pending, errbacks = [], [], []
 
@@ -140,8 +144,15 @@ def test_detached_server_launch_uses_spawn_chain_not_terminal(win, monkeypatch):
     assert "-d" in run_argv
     assert "--rm" not in run_argv
     assert ":/router:ro" not in " ".join(run_argv)   # a server, not a router
-    # A detached launch surfaces failures the terminal used to show.
-    assert win._report_launch_error in errbacks
+    # A detached launch surfaces failures the terminal used to show. The
+    # run leg's on_error wraps _report_launch_error(show_dialog=True) --
+    # decided here, at launch time -- rather than passing the bare method,
+    # so it's checked by behavior (does it report a failure?) rather than
+    # identity; test_detached_server_launch_error_pops_a_dialog covers the
+    # dialog specifically.
+    assert errbacks, "the run must register an on_error callback"
+    errbacks[0]("boom")
+    assert "failed" in win.status_label.text().lower()
 
 
 def test_attached_server_launch_still_uses_terminal(win, monkeypatch):
@@ -254,6 +265,85 @@ def test_router_launch_error_does_not_pop_a_dialog(win, monkeypatch):
     errbacks[0]("boom: bad image reference")
 
     assert dialogs == [], "router failures must stay on the router panel, no dialog"
+
+
+def test_detached_server_error_dialog_survives_a_later_mode_switch(win, monkeypatch):
+    # _report_launch_error fires from an async QProcess callback, possibly
+    # seconds after on_launch(). If show_dialog were re-derived from
+    # current_profile().mode at that point (instead of decided once, at the
+    # launch call site), switching the mode combo to router while the
+    # detached-server launch was still in flight would wrongly suppress its
+    # dialog. Prove that doesn't happen: flip the mode AFTER on_launch() but
+    # BEFORE invoking the captured on_error.
+    win.load_profile(Profile(name="Solo", image="img", model="/models/a.gguf",
+                             runtime=Runtime(detached=True),
+                             mounts=[Mount(host="/h", container="/models")],
+                             settings={"port": 8080}))
+    monkeypatch.setattr(win, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(win, "vram_check", lambda: None)
+    errbacks = []
+
+    def fake_spawn(argv, on_done=None, on_error=None):
+        if on_error is not None:
+            errbacks.append(on_error)
+        if on_done is not None:
+            on_done()
+
+    monkeypatch.setattr(win, "_spawn_async", fake_spawn)
+    dialogs = []
+    monkeypatch.setattr("llama_launcher.ui.main_window.QMessageBox.critical",
+                        lambda *a, **k: dialogs.append(a))
+    win.on_launch()
+    assert errbacks, "the run must register an on_error callback"
+
+    # The launch is still in flight; the user now switches to a router
+    # profile before the (slow) run's error actually arrives.
+    win.load_profile(Profile(name="Host", mode="router", image="img",
+                             members=[RouterMember(profile="Qwen")]))
+    assert win.current_profile().mode == "router"
+
+    errbacks[0]("boom: bad image reference")
+
+    assert dialogs, ("the dialog must still pop -- it was decided at launch "
+                     "time for the server launch, not re-derived from the "
+                     "now-router UI state")
+
+
+def test_router_error_dialog_stays_off_after_a_later_mode_switch(win, monkeypatch):
+    # Mirror of the above: a router launch's on_error firing after the user
+    # has since switched to a server profile must still NOT pop a dialog.
+    base = store.default_base_dir()
+    _member_profile(base)
+    win.load_profile(Profile(name="Host", mode="router", image="img",
+                             mounts=[Mount(host="/mnt/models", container="/models")],
+                             members=[RouterMember(profile="Qwen")],
+                             settings={"port": 8080}))
+    monkeypatch.setattr(win, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(win, "vram_check", lambda: None)
+    errbacks = []
+
+    def fake_spawn(argv, on_done=None, on_error=None):
+        if on_error is not None:
+            errbacks.append(on_error)
+        if on_done is not None:
+            on_done()
+
+    monkeypatch.setattr(win, "_spawn_async", fake_spawn)
+    dialogs = []
+    monkeypatch.setattr("llama_launcher.ui.main_window.QMessageBox.critical",
+                        lambda *a, **k: dialogs.append(a))
+    win.on_launch()
+    assert errbacks, "the run must register an on_error callback"
+
+    win.load_profile(Profile(name="Solo", image="img", model="/models/a.gguf",
+                             mounts=[Mount(host="/h", container="/models")],
+                             settings={"port": 8080}))
+    assert win.current_profile().mode == "server"
+
+    errbacks[0]("boom: bad image reference")
+
+    assert dialogs == [], ("the router launch's on_error must stay dialog-free "
+                           "even though the UI now shows a server profile")
 
 
 def test_adopt_running_containers_reads_the_label_list(win, monkeypatch):
@@ -426,13 +516,11 @@ def test_connected_state_distinguishes_down_from_empty(win, monkeypatch):
     assert "disconnected" not in win.router_panel.status_label.text().lower()
 
 
-def test_failed_router_launch_is_reported(win, monkeypatch):
+def test_failed_router_launch_is_reported(win):
     # Detached means no terminal: without this the only signal was a status
-    # label stuck on "stopped". win's default profile is server-mode (not
-    # router), so this now also pops a QMessageBox (see fix #2); stub it so
-    # the modal exec() doesn't block the offscreen test run.
-    monkeypatch.setattr("llama_launcher.ui.main_window.QMessageBox.critical",
-                        lambda *a, **k: None)
+    # label stuck on "stopped". Called bare (as the router on_error callback
+    # does), show_dialog defaults to False, so this can't pop a real modal
+    # QMessageBox and hang the offscreen test run.
     win._report_launch_error("Error: short-name resolution enforced but cannot prompt")
     assert "failed" in win.status_label.text().lower()
     assert "resolution" in win.router_panel.status_label.text()
