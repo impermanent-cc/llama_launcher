@@ -23,6 +23,18 @@ class MountsPanel(QWidget):
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(
             ["Host", "Container", "Role", "Mode", "SELinux", "Workdir"])
+        for _col, _tip in enumerate((
+            "Folder on the host, e.g. /mnt/storage/AI/Models.",
+            "Where it appears inside the container, e.g. /models. Reference model "
+            "paths by this container path.",
+            "Marks this mount's purpose (e.g. models) for the launcher's path mapping.",
+            "Mount mode: ro (read-only) or rw (read-write).",
+            "SELinux relabel flag (z/Z) for hosts that enforce SELinux.",
+            "Set this mount as the container working directory.",
+        )):
+            item = self.table.horizontalHeaderItem(_col)
+            if item is not None:
+                item.setToolTip(_tip)
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.Stretch)            # Host
         hdr.setSectionResizeMode(1, QHeaderView.Stretch)            # Container

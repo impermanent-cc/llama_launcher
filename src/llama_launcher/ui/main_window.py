@@ -201,6 +201,16 @@ class MainWindow(QMainWindow):
         self.members_list = QTableWidget(0, 4)
         self.members_list.setHorizontalHeaderLabels(
             ["Profile", "Model id (harness)", "Load at start", "Stop timeout (s)"])
+        for _col, _tip in enumerate((
+            "A saved model profile to serve. Configure its GPU layers / MoE / "
+            "context in that profile (single-server mode), then add it here.",
+            "Name the harness calls this model. Empty = derived from the profile name.",
+            "Load this member as soon as the router starts (otherwise on first request).",
+            "Seconds to wait after unload before force-killing this member's container.",
+        )):
+            item = self.members_list.horizontalHeaderItem(_col)
+            if item is not None:
+                item.setToolTip(_tip)
         self.members_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
         self.members_list.verticalHeader().setVisible(False)
         self.members_list.setMaximumHeight(140)
@@ -248,6 +258,37 @@ class MainWindow(QMainWindow):
         self.selinux_check = QCheckBox("Disable SELinux labels (--security-opt=label=disable)")
         self.selinux_check.toggled.connect(self.refresh_preview)
         left_form.addRow(self.selinux_check)
+
+        # Set tooltips on Environment field widgets
+        self.mode_combo.setToolTip(
+            "Single server runs one model. Router (headless host) serves several "
+            "member models on one port with an API key, loading them on demand.")
+        self.bind_host_combo.setToolTip(
+            "Address the server binds to. 127.0.0.1 = this machine only; "
+            "0.0.0.0 = reachable from the network (an API key is then required).")
+        self.image_edit.setToolTip(
+            "Container image for llama-server, e.g. "
+            "ghcr.io/ggml-org/llama.cpp:server-cuda. Use Detect to list local images.")
+        self.model_edit.setToolTip(
+            "Path to the .gguf model as seen INSIDE the container, e.g. "
+            "/models/Qwen3-A3B-Q4.gguf (add a Folder that maps the host dir).")
+        self.binary_combo.setToolTip("Container runtime used to launch the server.")
+        self.gpu_combo.setToolTip(
+            "GPU passthrough. CDI (nvidia.com/gpu=all) is recommended on modern "
+            "NVIDIA + podman; Legacy uses --gpus all; None runs CPU-only.")
+        self.mmproj_edit.setToolTip(
+            "Optional multimodal projector .gguf (container path) for vision models.")
+        self.draft_model_edit.setToolTip(
+            "Optional small draft model .gguf (container path) for speculative decoding.")
+        self.raw_edit.setToolTip(
+            "Extra llama-server flags appended verbatim, e.g. --temp 0.6 --top-k 20. "
+            "Duplicates of structured settings are de-duplicated.")
+        self.extra_args_edit.setToolTip(
+            "Extra flags for the container runtime (podman/docker) itself, e.g. "
+            "--shm-size=1g. Not passed to llama-server.")
+        self.selinux_check.setToolTip(
+            "Add --security-opt=label=disable. Needed on some SELinux hosts when a "
+            "mounted model dir is otherwise unreadable in the container.")
         self.fetch_btn = QPushButton("Fetch latest build")
         self.fetch_btn.clicked.connect(self.on_fetch_latest)
         left_form.addRow(self.fetch_btn)
