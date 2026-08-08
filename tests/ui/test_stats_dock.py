@@ -1,5 +1,4 @@
 import llama_launcher.ui.main_window as mw
-from llama_launcher.store import profiles as store
 
 
 def test_stats_dock_exists_hidden_by_default(qtbot):
@@ -27,3 +26,23 @@ def test_open_state_persists(qtbot, tmp_path, monkeypatch):
     # a fresh window restores the open state
     w2 = mw.MainWindow(); qtbot.addWidget(w2)
     assert w2.stats_dock.isVisibleTo(w2) is True
+
+
+def test_stats_worker_emits_then_stops(qtbot):
+    from llama_launcher.ui.main_window import StatsWorker
+    from llama_launcher.services.stats import StatsSnapshot
+    snap = StatsSnapshot(gpus=[], cpu=None, mem=None, container=None, gpu_available=False)
+    w = StatsWorker(lambda: snap, interval_ms=50)
+    with qtbot.waitSignal(w.sampled, timeout=2000) as blocker:
+        w.start()
+    assert blocker.args[0] is snap
+    w.stop()
+    assert w.wait(2000) is True
+
+
+def test_opening_dock_starts_worker_and_teardown_drains_it(qtbot):
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    w.stats_toggle_btn.setChecked(True)          # visible -> worker starts
+    assert w._stats_worker is not None and w._stats_worker.isRunning()
+    w._stop_timers()                             # teardown must join it
+    assert not w._stats_worker.isRunning()

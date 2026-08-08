@@ -89,6 +89,37 @@ class _UpdateWorker(QThread):
             self.failed.emit(str(e))
 
 
+class StatsWorker(QThread):
+    """Polls a snapshot builder off the UI thread and emits each result.
+
+    The builder is injected (so it's testable without Qt); the worker owns only
+    the loop + stop flag. Sleeps in small slices so stop() is responsive.
+    """
+    sampled = Signal(object)      # StatsSnapshot
+
+    def __init__(self, builder, interval_ms: int = 1000, parent=None):
+        super().__init__(parent)
+        self._builder = builder
+        self._interval_ms = interval_ms
+        self._stop = False
+
+    def stop(self) -> None:
+        self._stop = True
+
+    def run(self) -> None:
+        while not self._stop:
+            try:
+                snap = self._builder()
+            except Exception:
+                snap = None
+            if snap is not None and not self._stop:
+                self.sampled.emit(snap)
+            slept = 0
+            while slept < self._interval_ms and not self._stop:
+                self.msleep(50)
+                slept += 50
+
+
 class BenchmarkWorker(QObject):
     """Runs benchmark.run_benchmark() off the UI thread.
 
@@ -398,6 +429,14 @@ class MainWindow(QMainWindow):
         self.stats_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
         self.addDockWidget(Qt.RightDockWidgetArea, self.stats_dock)
         self.stats_dock.hide()
+        # Initialised here (ahead of the other worker handles, set further
+        # below near _fetch_worker/_update_worker) because the visibility/
+        # toggle signals wired immediately below -- and the stats_open
+        # restore later in __init__, which programmatically checks the
+        # toggle button -- can synchronously reach _start_stats_worker()
+        # before __init__ reaches that later block.
+        self._stats_worker = None
+        self._cpu_sampler = None
         self.stats_dock.visibilityChanged.connect(self._on_stats_visibility)
 
         # BOTTOM: suggest-family + command preview are config-only; wrap them in
@@ -481,6 +520,15 @@ class MainWindow(QMainWindow):
         self.delete_btn.clicked.connect(self.delete_current_profile)
         self.report_btn.clicked.connect(self.on_generate_report)
         self.stats_toggle_btn.toggled.connect(self.stats_dock.setVisible)
+        # Also drive worker start/stop straight off the toggle: QDockWidget's
+        # visibilityChanged only fires once the top-level window has actually
+        # been shown (isVisible() requires the whole ancestor chain mapped),
+        # which never happens for an unshown/offscreen MainWindow -- e.g. in
+        # tests, or if stats are toggled before the first show(). toggled()
+        # fires synchronously regardless. _on_stats_visibility's start/stop
+        # calls are idempotent, so double-firing (this + visibilityChanged,
+        # once the window is shown) is harmless.
+        self.stats_toggle_btn.toggled.connect(self._on_stats_visibility)
         from PySide6.QtGui import QShortcut, QKeySequence
         QShortcut(QKeySequence("Ctrl+Shift+S"), self,
                   activated=lambda: self.stats_toggle_btn.toggle())
@@ -637,10 +685,49 @@ class MainWindow(QMainWindow):
 
     def _on_stats_visibility(self, visible: bool) -> None:
         # Keep the toolbar button in sync when the dock is closed via its own X,
-        # and persist the state. (Worker start/stop is added in the next task.)
+        # and persist the state.
         if self.stats_toggle_btn.isChecked() != visible:
             self.stats_toggle_btn.setChecked(visible)
+        if visible:
+            self._start_stats_worker()
+        else:
+            self._stop_stats_worker()
         self._save_stats_config()
+
+    def _start_stats_worker(self) -> None:
+        if self._stats_worker is not None and self._stats_worker.isRunning():
+            return
+        from llama_launcher.services import stats as stats_svc
+        from llama_launcher.services.sysstat import CpuSampler
+        self._cpu_sampler = CpuSampler()
+
+        def _build():
+            return stats_svc.build_snapshot(
+                self._monitored_container_name(),
+                self.current_profile().runtime.binary,
+                self._cpu_sampler)
+
+        self._stats_worker = StatsWorker(_build, interval_ms=1000, parent=self)
+        self._stats_worker.sampled.connect(self.stats_panel.update_stats)
+        self._stats_worker.start()
+
+    def _stop_stats_worker(self) -> None:
+        w = self._stats_worker
+        if w is None:
+            return
+        w.stop()
+        from PySide6.QtCore import QCoreApplication
+        for _ in range(100):            # ~2s ceiling, pump events between waits
+            if w.wait(20):
+                break
+            QCoreApplication.processEvents()
+        else:
+            w.terminate()
+            w.wait(100)
+        # Deliberately not reset to None here (matches the _fetch_worker /
+        # _update_worker drain pattern in _stop_timers below): the handle is
+        # left in place, stopped-but-not-running; _start_stats_worker's
+        # isRunning() guard is what decides whether to spin up a fresh one.
 
     def _save_stats_config(self) -> None:
         cfg = load_config(base_dir())
@@ -1701,6 +1788,7 @@ class MainWindow(QMainWindow):
         update_timer = getattr(self, "_update_timer", None)
         if update_timer is not None:
             update_timer.stop()
+        self._stop_stats_worker()
 
         # Drain any in-flight registry-fetch / update-check QThread so closing
         # the window mid-fetch can't destroy a running QThread (abort/crash).
