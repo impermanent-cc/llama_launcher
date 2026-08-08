@@ -219,15 +219,28 @@ class MainWindow(QMainWindow):
         self.add_member_btn.clicked.connect(self._on_add_member)
         self.remove_member_btn = QPushButton("Remove member")
         self.remove_member_btn.clicked.connect(self._on_remove_member)
+        self.edit_member_btn = QPushButton("Edit member…")
+        self.edit_member_btn.setToolTip(
+            "Load the selected member's profile into the form to set its GPU "
+            "layers, MoE offload, context, etc. (double-clicking a row does the same).")
+        self.edit_member_btn.clicked.connect(self._on_edit_member)
         members_row = QHBoxLayout()
         members_row.setContentsMargins(0, 0, 0, 0)
         members_row.addWidget(self.add_member_btn)
+        members_row.addWidget(self.edit_member_btn)
         members_row.addWidget(self.remove_member_btn)
         members_widget = QWidget()
         members_box = QVBoxLayout(members_widget)
         members_box.setContentsMargins(0, 0, 0, 0)
         members_box.addWidget(self.members_list)
         members_box.addLayout(members_row)
+        self.members_guidance = QLabel(
+            "Each member is a saved model profile — set its GPU layers, MoE offload, "
+            "and context in that profile (single-server mode), then add it here.")
+        self.members_guidance.setWordWrap(True)
+        self.members_guidance.setStyleSheet("QLabel { color: palette(mid); }")
+        members_box.addWidget(self.members_guidance)
+        self.members_list.cellDoubleClicked.connect(lambda _r, _c: self._on_edit_member())
 
         left_form.addRow("Mode", self.mode_combo)
         left_form.addRow("Bind address", self.bind_host_combo)
@@ -523,7 +536,8 @@ class MainWindow(QMainWindow):
 
     def _on_mode_changed(self, _index=0) -> None:
         is_router = self.mode_combo.currentData() == "router"
-        for w in (self.members_list, self.add_member_btn, self.remove_member_btn):
+        for w in (self.members_list, self.add_member_btn, self.remove_member_btn,
+                  self.edit_member_btn, self.members_guidance):
             w.setVisible(is_router)
         self._apply_mode_to_settings_form()
         # A router has no model of its own; its members carry those fields.
@@ -597,6 +611,42 @@ class MainWindow(QMainWindow):
                           reverse=True):
             self.members_list.removeRow(row)
         self.refresh_preview()
+
+    def _has_unsaved_changes(self) -> bool:
+        # Stateless dirty check: the form is clean iff current_profile() round-trips
+        # equal to the stored profile of the same name (verified: dataclass equality,
+        # dict-order-independent). A never-saved profile counts as changed.
+        cur = self.current_profile()
+        saved = {p.name: p for p in list_profiles(base_dir())}.get(cur.name)
+        return saved is None or cur != saved
+
+    def _on_edit_member(self) -> None:
+        row = self.members_list.currentRow()
+        if row < 0:
+            return
+        item = self.members_list.item(row, 0)   # column 0 = member profile name
+        if item is None:
+            return
+        name = item.text()
+        target = {p.name: p for p in list_profiles(base_dir())}.get(name)
+        if target is None:
+            QMessageBox.warning(
+                self, "Profile missing",
+                f"Profile '{name}' no longer exists — remove it from the router "
+                f"or recreate it.")
+            return
+        if self._has_unsaved_changes():
+            choice = QMessageBox.question(
+                self, "Unsaved changes",
+                f"You have unsaved changes to '{self.current_profile().name}'. "
+                f"Editing member '{name}' will load its profile and lose those changes.",
+                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
+                QMessageBox.Cancel)
+            if choice == QMessageBox.Cancel:
+                return
+            if choice == QMessageBox.Save:
+                self.save_current_profile()
+        self.load_profile(target)
 
     def members(self) -> list:
         out = []
