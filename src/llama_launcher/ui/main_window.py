@@ -1715,10 +1715,23 @@ class MainWindow(QMainWindow):
         inst = self._active_instance
         if inst is None:
             return self.current_profile()
-        for prof in list_profiles(base_dir()):
-            if prof.name == inst.profile:
-                return prof
-        return self.current_profile()      # profile deleted under us -> fall back
+        stored = next((p for p in list_profiles(base_dir())
+                       if p.name == inst.profile), None)
+        # Trust the running container's real mode (from its label) over the
+        # stored profile: a profile saved as a single server but launched as a
+        # router (or one never saved) would otherwise be polled in server mode,
+        # sending no router key -> "Invalid API Key". When stored is gone or its
+        # mode disagrees with what's actually running, synthesize identity from
+        # the instance so polls use the right mode/key/host/port.
+        if stored is not None and stored.mode == inst.mode:
+            return stored
+        return Profile(
+            name=inst.profile, mode=inst.mode,
+            runtime=Runtime(bind_host=inst.host),
+            settings={"port": inst.port or 8080,
+                      "embeddings": inst.embeddings, "reranking": inst.reranking,
+                      "metrics": bool(stored.settings.get("metrics")) if stored else False},
+        )
 
     def _monitored_container_name(self) -> str:
         return self._active_instance.name if self._active_instance else self._container_name()

@@ -51,3 +51,27 @@ def test_collect_monitor_data_sends_server_api_key(qtbot, monkeypatch):
     w.load_profile(_server(**{"api-key": "sk-secret", "metrics": True}))
     w.collect_monitor_data()
     assert seen.get("api_key") == "sk-secret"
+
+
+def test_monitored_router_instance_resolves_router_key(qtbot, tmp_path, monkeypatch):
+    # Monitoring a running ROUTER via the instances row when the stored profile
+    # is missing or was saved as a *server* (mode drift) must resolve the router
+    # file key from the instance's identity, not fall back to the form (which
+    # would send no key -> 401 Invalid API Key).
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    from llama_launcher.core.instances import Instance
+    from llama_launcher.services import api_key as ak
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    ak.ensure_api_key(w.router_base_dir(), "Gemma")          # key file as at launch
+    # stored profile is SERVER mode; the running container is a ROUTER
+    from llama_launcher.store import profiles as store
+    store.save_profile(Profile(name="Gemma", image="img", mode="server",
+                               settings={"port": 8080, "api-key": "sk-wrong"}),
+                       w.router_base_dir())
+    w._active_instance = Instance(name="llama-gemma", profile="Gemma", mode="router",
+                                  running=True, port=8080, host="127.0.0.1",
+                                  embeddings=False, reranking=False)
+    mp = w._monitored_profile()
+    assert mp.mode == "router" and mp.name == "Gemma"
+    assert w._poll_api_key(mp) == ak.read_api_key(w.router_base_dir(), "Gemma")
+    assert w._poll_api_key(mp) != "sk-wrong"                 # not the stored server key
