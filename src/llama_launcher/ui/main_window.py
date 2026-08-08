@@ -326,6 +326,11 @@ class MainWindow(QMainWindow):
         self.web_ui_btn.clicked.connect(self.open_web_ui)
         for b in (self.launch_btn, self.stop_btn, self.restart_btn, self.web_ui_btn):
             buttons.addWidget(b)
+        self.detached_check = QCheckBox("Run detached (no terminal window)")
+        self.detached_check.setToolTip(
+            "Launch without a terminal window; watch output on the Monitor "
+            "tab and use Stop to shut it down.")
+        buttons.addWidget(self.detached_check)
         root.addLayout(buttons)
 
         # profile bar (added to the top of root via insertLayout)
@@ -460,6 +465,7 @@ class MainWindow(QMainWindow):
         for w in (self.model_edit, self.mmproj_edit, self.draft_model_edit):
             w.setEnabled(not is_router)
         self.lora_panel.setEnabled(not is_router)
+        self.detached_check.setVisible(not is_router)
         self.refresh_preview()
 
     def _add_member_item(self, member: RouterMember) -> None:
@@ -610,6 +616,7 @@ class MainWindow(QMainWindow):
         self.raw_edit.setText(p.raw_args)
         self.extra_args_edit.setText(p.runtime.extra_run_args)
         self.selinux_check.setChecked(p.runtime.selinux_label_disable)
+        self.detached_check.setChecked(p.runtime.detached)
         for key, w in self._widgets.items():
             w.set_value(w.setting.default)
             if key in p.settings:
@@ -650,7 +657,8 @@ class MainWindow(QMainWindow):
                             selinux_label_disable=self.selinux_check.isChecked(),
                             extra_run_args=self.extra_args_edit.text(),
                             bind_host=self.bind_host_combo.currentText().strip()
-                                      or "127.0.0.1"),
+                                      or "127.0.0.1",
+                            detached=self.detached_check.isChecked()),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,

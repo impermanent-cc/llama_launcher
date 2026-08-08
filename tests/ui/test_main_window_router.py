@@ -343,3 +343,27 @@ def test_spec_counters_feed_the_monitor_in_router_mode(win, monkeypatch):
     assert "80%" in text            # 800 accepted of 1000 drafted since last poll
     assert "counters" in text       # and it says where the number came from
     assert seen["model"] == "qwen"  # attributed to the model, not the router
+
+
+def test_detached_checkbox_loads_from_profile(win):
+    win.load_profile(Profile(name="Solo", image="img", model="/models/a.gguf",
+                             runtime=Runtime(detached=True),
+                             settings={"port": 8080}))
+    assert win.detached_check.isChecked() is True
+
+
+def test_detached_checkbox_saves_into_profile(win):
+    win.load_profile(Profile(name="Solo", image="img", model="/models/a.gguf",
+                             settings={"port": 8080}))
+    assert win.current_profile().runtime.detached is False
+    win.detached_check.setChecked(True)
+    assert win.current_profile().runtime.detached is True
+
+
+def test_detached_checkbox_hidden_in_router_mode(win):
+    win.load_profile(Profile(name="Solo", image="img", model="/models/a.gguf",
+                             settings={"port": 8080}))
+    assert win.detached_check.isVisibleTo(win.centralWidget()) is True
+    win.load_profile(Profile(name="Host", mode="router", image="img",
+                             members=[RouterMember(profile="Qwen")]))
+    assert win.detached_check.isVisibleTo(win.centralWidget()) is False
