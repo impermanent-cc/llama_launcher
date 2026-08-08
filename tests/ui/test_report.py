@@ -49,11 +49,11 @@ def test_gather_report_data_includes_metrics(qtbot, monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
     monkeypatch.setattr(mw.runtime, "is_rootless", lambda b: False)
-    monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda port, timeout=1.0: {
+    monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda port, timeout=1.0, **kw: {
         "llamacpp:predicted_tokens_seconds": 42.0,
         "llamacpp:prompt_tokens_seconds": 800.0,
     })
-    monkeypatch.setattr(mw.metrics, "fetch_slots", lambda port, timeout=1.0: [
+    monkeypatch.setattr(mw.metrics, "fetch_slots", lambda port, timeout=1.0, **kw: [
         {"n_ctx": 100, "n_prompt_tokens_processed": 25},
     ])
     w = mw.MainWindow(); qtbot.addWidget(w)

@@ -95,3 +95,27 @@ def test_instance_summary_sends_router_api_key(qtbot, tmp_path, monkeypatch):
                     port=8080, host="127.0.0.1", embeddings=False, reranking=False)
     w.instance_summary(inst)
     assert seen.get("api_key") == ak.read_api_key(w.router_base_dir(), "e2b")
+
+
+def test_metrics_report_sends_key_and_model_scope_for_router(qtbot, tmp_path, monkeypatch):
+    # Regression: the diagnostic report fetched /metrics with no key/host/scope,
+    # so a router with --metrics on always printed "no metrics returned".
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    from llama_launcher.services import api_key as ak
+    seen = {}
+    monkeypatch.setattr(mw.metrics, "fetch_metrics",
+        lambda port, timeout=1.0, model=None, api_key=None, host="127.0.0.1", **kw:
+        (seen.update(port=port, model=model, api_key=api_key, host=host)
+         or {"llamacpp:predicted_tokens_seconds": 5.0}))
+    monkeypatch.setattr(mw.metrics, "fetch_slots",
+                        lambda port, timeout=1.0, model=None, api_key=None, host="127.0.0.1", **kw: [])
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    ak.ensure_api_key(w.router_base_dir(), "R")
+    w.load_profile(Profile(name="R", image="img", mode="router",
+                           settings={"port": 11434, "metrics": True}))
+    w._router_statuses = {"m1": "loaded"}          # a loaded model to scope to
+    txt = w._metrics_report_text(w.current_profile())
+    assert seen["api_key"] == ak.read_api_key(w.router_base_dir(), "R")
+    assert seen["model"] == "m1"
+    assert seen["port"] == 11434
+    assert "generation" in txt

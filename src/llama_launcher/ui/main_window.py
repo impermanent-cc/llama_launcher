@@ -1953,10 +1953,22 @@ class MainWindow(QMainWindow):
         if not p.settings.get("metrics"):
             return ("(--metrics not enabled in this profile — turn it on and relaunch "
                     "to capture tok/s and KV-cache usage here)")
-        m = metrics.fetch_metrics(port)
-        slots = metrics.fetch_slots(port)
+        # Mirror collect_monitor_data's host/key/scope derivation: /metrics needs
+        # the API key, and on a router it is per-model (?model=id) reached via the
+        # router host. Without these the report's fetch 401'd (or returned nothing)
+        # and always printed the "no metrics returned" note for routers.
+        host = dial_host(p.runtime.bind_host)
+        key = self._poll_api_key(p)
+        model_scope = None
+        if p.mode == "router":
+            host = self._router_host(p)
+            model_scope = self._router_pollable_model()
+        m = metrics.fetch_metrics(port, model=model_scope, api_key=key, host=host)
+        slots = metrics.fetch_slots(port, model=model_scope, api_key=key, host=host)
         if not m and not slots:
-            return (f"(no metrics returned from http://127.0.0.1:{port}/metrics — "
+            scope = " (no model currently loaded on the router)" if (
+                p.mode == "router" and model_scope is None) else ""
+            return (f"(no metrics returned from http://{host}:{port}/metrics{scope} — "
                     "generate the report while the server is running with --metrics)")
         lines = []
         gen = m.get("llamacpp:predicted_tokens_seconds")
