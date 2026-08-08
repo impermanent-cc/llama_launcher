@@ -165,3 +165,16 @@ def test_models_autoload_uses_the_negative_flag():
     s = CATALOG["models-autoload"]
     assert s.flag == "--no-models-autoload"
     assert s.default is False
+
+
+def test_load_mode_setting():
+    from llama_launcher.core.settings_catalog import CATALOG
+    s = CATALOG["load-mode"]
+    assert s.flag == "--load-mode"
+    assert s.type == "enum"
+    assert s.default == "mmap"
+    assert s.enum == ("mmap", "none", "mlock", "mmap+mlock", "dio")
+    assert "-lm" in s.aliases
+    # legacy bools retained for older images
+    assert CATALOG["no-mmap"].type == "bool"
+    assert CATALOG["mlock"].type == "bool"

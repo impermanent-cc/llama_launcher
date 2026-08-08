@@ -250,9 +250,17 @@ def _owned_server_pairs(profile: Profile, catalog: dict) -> list:
         pairs.append(("--spec-draft-model", profile.draft_model))
 
     port = profile.settings.get("port", 8080)
+    # --load-mode supersedes the legacy --no-mmap/--mlock flags upstream; mixing
+    # them makes llama.cpp warn and only honour the last. When load-mode is set
+    # (it's only stored when non-default), drop the legacy flags so argv carries
+    # one or the other, never both. Enforced here, not just in the UI, so the
+    # CLI/headless path (which skips the form) stays consistent too.
+    suppress = {"no-mmap", "mlock"} if "load-mode" in profile.settings else set()
     # Emit changed settings in catalog order, skipping port (handled below).
     for key, setting in catalog.items():
         if key == "port":
+            continue
+        if key in suppress:
             continue
         # Router-only flags are rejected by a single-model llama-server. The UI
         # filters them out by mode, but profile JSON written before that

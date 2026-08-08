@@ -261,3 +261,24 @@ def test_server_numeric_zero_setting_preserved():
     argv = build_command(_srv(**{"min-p": 0.0, "sleep-idle-seconds": -1}))
     assert argv[argv.index("--min-p") + 1] == "0.0"
     assert argv[argv.index("--sleep-idle-seconds") + 1] == "-1"
+
+
+def test_load_mode_emitted():
+    argv = build_command(_srv(**{"load-mode": "mmap+mlock"}))
+    assert argv[argv.index("--load-mode") + 1] == "mmap+mlock"
+
+
+def test_load_mode_suppresses_legacy_mmap_mlock():
+    # When load-mode is set, the deprecated --no-mmap/--mlock must not also emit
+    # (llama.cpp warns and honours only the last of the two).
+    argv = build_command(_srv(**{"load-mode": "none", "no-mmap": True, "mlock": True}))
+    assert "--load-mode" in argv
+    assert "--no-mmap" not in argv
+    assert "--mlock" not in argv
+
+
+def test_legacy_mmap_mlock_still_emit_without_load_mode():
+    argv = build_command(_srv(**{"no-mmap": True, "mlock": True}))
+    assert "--no-mmap" in argv
+    assert "--mlock" in argv
+    assert "--load-mode" not in argv

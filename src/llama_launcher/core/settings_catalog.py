@@ -68,13 +68,23 @@ _ALL = [
             enum=KV_CACHE_TYPES,
             tooltip="Quantization of the V KV-cache. Lower precision (e.g. q8_0, q4_0) saves "
                     "a lot of VRAM at a small quality cost; f16 (the default) is half precision, f32 is full."),
+    Setting("load-mode", "--load-mode", "enum", "mmap", "GPU & Memory", ("-lm",),
+            enum=("mmap", "none", "mlock", "mmap+mlock", "dio"),
+            tooltip="How the model file is loaded (newer llama.cpp; supersedes "
+                    "--no-mmap/--mlock). mmap (default) memory-maps it; none loads fully "
+                    "into RAM (slower, more RAM); mlock/mmap+mlock also lock it in RAM so "
+                    "it's never swapped; dio uses DirectIO if available. Set to anything "
+                    "other than mmap and the legacy no-mmap/mlock flags below are ignored. "
+                    "Needs an image new enough to know --load-mode."),
     Setting("no-mmap", "--no-mmap", "bool", False, "GPU & Memory", (),
-            tooltip="Disable memory-mapping of the model file, loading it fully into RAM "
-                    "instead. Slower startup and more RAM, but can help with -mlock or odd "
-                    "filesystems."),
+            tooltip="Legacy (deprecated upstream in favor of --load-mode, but works on "
+                    "all image versions). Disable memory-mapping of the model file, loading "
+                    "it fully into RAM instead. Ignored when load-mode is set."),
     Setting("mlock", "--mlock", "bool", False, "GPU & Memory", (),
-            tooltip="Lock the model in RAM so the OS never swaps it out, keeping latency "
-                    "steady. Needs enough RAM and the privilege to lock memory."),
+            tooltip="Legacy (deprecated upstream in favor of --load-mode, but works on all "
+                    "image versions). Lock the model in RAM so the OS never swaps it out. "
+                    "Needs enough RAM and the privilege to lock memory. Ignored when "
+                    "load-mode is set."),
     Setting("split-mode", "--split-mode", "enum", "layer", "GPU & Memory", ("-sm",),
             enum=("none", "layer", "row", "tensor"),
             tooltip="How to split the model across multiple GPUs. 'layer' (default) splits "

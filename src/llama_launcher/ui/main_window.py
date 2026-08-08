@@ -339,6 +339,11 @@ class MainWindow(QMainWindow):
             self._widgets[key] = w
             groups[setting.group].addRow(setting.flag, w)
             self._setting_rows[key] = (groups[setting.group], w)
+        # When load-mode is active it supersedes --no-mmap/--mlock (see
+        # command_builder), so gray those legacy checkboxes out to signal they're
+        # ignored. Kept in sync on edit, mode change and profile load.
+        if "load-mode" in self._widgets:
+            self._widgets["load-mode"].changed.connect(self._sync_load_mode_legacy)
         right_scroll.setWidget(right_inner)
         body.addWidget(right_scroll, 2)
         self.setStyleSheet((self.styleSheet() or "") + TIER_QSS)
@@ -568,9 +573,21 @@ class MainWindow(QMainWindow):
             w.setEnabled(not is_router)
         self.lora_panel.setEnabled(not is_router)
         self.detached_check.setVisible(not is_router)
+        self._sync_load_mode_legacy()
         self.refresh_preview()
         if is_router:
             self.refresh_router_panel_header()
+
+    def _sync_load_mode_legacy(self) -> None:
+        """Gray out --no-mmap/--mlock when load-mode is set (it wins in argv)."""
+        lm = self._widgets.get("load-mode")
+        if lm is None:
+            return
+        load_mode_active = lm.value() != CATALOG["load-mode"].default
+        for key in ("no-mmap", "mlock"):
+            w = self._widgets.get(key)
+            if w is not None:
+                w.setEnabled(not load_mode_active)
 
     def _on_tab_changed(self, _index: int) -> None:
         # Entering the Router tab must show a live key even for an edited-but-

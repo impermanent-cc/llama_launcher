@@ -645,3 +645,14 @@ def test_fresh_window_hides_router_widgets_in_default_server_mode(win):
     assert win.add_member_btn.isVisibleTo(win.centralWidget()) is False
     assert win.members_list.isVisibleTo(win.centralWidget()) is False
     assert win.model_edit.isEnabled() is True
+
+
+def test_load_mode_disables_legacy_mmap_widgets(win):
+    # load-mode at default (mmap) leaves the legacy checkboxes usable...
+    assert win._widgets["no-mmap"].isEnabled() is True
+    assert win._widgets["mlock"].isEnabled() is True
+    # ...but setting it to anything else grays them out (load-mode wins in argv).
+    win._widgets["load-mode"].set_value("none")
+    win._widgets["load-mode"].changed.emit()
+    assert win._widgets["no-mmap"].isEnabled() is False
+    assert win._widgets["mlock"].isEnabled() is False
