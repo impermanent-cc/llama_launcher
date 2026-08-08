@@ -1108,8 +1108,7 @@ class MainWindow(QMainWindow):
             return
         text = metrics.fetch_metrics_text(
             p.settings.get("port", 8080), model=model_scope,
-            api_key=api_key_store.read_api_key(self.router_base_dir(), p.name)
-            if p.mode == "router" else None,
+            api_key=self._poll_api_key(p),
             host=dial_host(p.runtime.bind_host))
         cur = spec_counters(text) if text else None
         if cur is None:
@@ -1118,6 +1117,18 @@ class MainWindow(QMainWindow):
             self.monitor_panel.set_draft_stats(spec_delta(self._spec_prev, cur),
                                                source="counters")
         self._spec_prev = cur
+
+    def _poll_api_key(self, p: Profile) -> str | None:
+        """API key for authenticating Monitor polls -- the key the running server
+        actually uses. A router reads it from --api-key-file (our key store); a
+        single server uses its own --api-key setting. Returns None when there's
+        no key (so no Authorization header is sent). Without this, a single
+        server started with --api-key rejected /props, /metrics and /slots polls
+        with "Invalid API Key" (only /health, which needs no key, still worked).
+        """
+        if p.mode == "router":
+            return api_key_store.read_api_key(self.router_base_dir(), p.name)
+        return p.settings.get("api-key") or None
 
     def _refresh_props(self, p: Profile) -> str | None:
         """Fetch /props once per model load and cache it (static per load).
@@ -1131,13 +1142,13 @@ class MainWindow(QMainWindow):
         instead of polling `_router_pollable_model()` again.
         """
         port = p.settings.get("port", 8080)
+        key = self._poll_api_key(p)
         if p.mode == "router":
             host = self._router_host(p)
-            key = api_key_store.read_api_key(self.router_base_dir(), p.name)
             model_key = self._router_pollable_model()
         else:
             host = dial_host(p.runtime.bind_host)
-            key, model_key = None, None
+            model_key = None
         if self._props is not None and self._props_model == model_key:
             return model_key
         info = metrics.fetch_props(port, api_key=key, host=host)
@@ -1428,10 +1439,10 @@ class MainWindow(QMainWindow):
         treats as poll=False.
         """
         port = p.settings.get("port", 8080)
-        host, key, model_scope, poll = dial_host(p.runtime.bind_host), None, None, True
+        host, key, model_scope, poll = (dial_host(p.runtime.bind_host),
+                                        self._poll_api_key(p), None, True)
         if p.mode == "router":
             host = self._router_host(p)
-            key = api_key_store.read_api_key(self.router_base_dir(), p.name)
             model_scope = self._router_pollable_model()
             poll = model_scope is not None
         if not poll:
@@ -1729,10 +1740,10 @@ class MainWindow(QMainWindow):
         p = self._monitored_profile()
         port = p.settings.get("port", 8080)
         metrics_on = bool(p.settings.get("metrics"))
-        host, key, model_scope, poll = dial_host(p.runtime.bind_host), None, None, True
+        host, key, model_scope, poll = (dial_host(p.runtime.bind_host),
+                                        self._poll_api_key(p), None, True)
         if p.mode == "router":
             host = self._router_host(p)
-            key = api_key_store.read_api_key(self.router_base_dir(), p.name)
             model_scope = self._router_pollable_model()
             poll = model_scope is not None
         m = (metrics.fetch_metrics(port, model=model_scope, api_key=key, host=host)
