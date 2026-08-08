@@ -293,7 +293,10 @@ class MainWindow(QMainWindow):
         self.fetch_btn.clicked.connect(self.on_fetch_latest)
         left_form.addRow(self.fetch_btn)
 
-        body.addWidget(left, 3)
+        left_scroll = QScrollArea()
+        left_scroll.setWidgetResizable(True)
+        left_scroll.setWidget(left)
+        body.addWidget(left_scroll, 3)
 
         # RIGHT: settings grouped, scrollable
         self._widgets: dict[str, object] = {}
@@ -369,6 +372,7 @@ class MainWindow(QMainWindow):
         self.mounts_panel.changed.connect(self.apply_model_caps)
         preview_row = QHBoxLayout()
         self.preview = QPlainTextEdit(); self.preview.setReadOnly(True)
+        self.preview.setMaximumHeight(120)
         preview_row.addWidget(self.preview, 1)
         self.export_sh_btn = QPushButton("Export .sh")
         self.export_sh_btn.clicked.connect(self._on_export_sh)
