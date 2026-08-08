@@ -75,3 +75,14 @@ def test_members_guidance_label_present(win):
     win.load_profile(P(name="r", mode="router", image="img", settings={"port": 9000}))
     assert win.members_guidance.text().strip()
     assert win.members_guidance.isVisibleTo(win.members_guidance.parentWidget())
+
+
+def test_double_click_editable_cell_does_not_swap_form(win):
+    _saved_router_with_member(win)
+    # Double-clicking an inline-editable cell (col 1 = Model id) must NOT swap
+    # the form to the member profile — it belongs to inline editing.
+    win.members_list.cellDoubleClicked.emit(0, 1)
+    assert win.current_profile().name == "myrouter"
+    # Double-clicking the identity column (col 0 = Profile) DOES open the member.
+    win.members_list.cellDoubleClicked.emit(0, 0)
+    assert win.current_profile().name == "gen"

@@ -240,7 +240,8 @@ class MainWindow(QMainWindow):
         self.members_guidance.setWordWrap(True)
         self.members_guidance.setStyleSheet("QLabel { color: palette(mid); }")
         members_box.addWidget(self.members_guidance)
-        self.members_list.cellDoubleClicked.connect(lambda _r, _c: self._on_edit_member())
+        self.members_list.cellDoubleClicked.connect(
+            lambda _r, _c: self._on_edit_member() if _c == 0 else None)
 
         left_form.addRow("Mode", self.mode_combo)
         left_form.addRow("Bind address", self.bind_host_combo)
