@@ -93,3 +93,18 @@ def test_resolve_member_pairs_empty(tmp_path, monkeypatch):
     from llama_launcher.store import profiles as store
     monkeypatch.setattr(store, "list_profiles", lambda base: [])
     assert store.resolve_member_pairs([_member("x")], tmp_path) == []
+
+
+def test_detached_round_trips():
+    from llama_launcher.core.spec import Profile, Runtime
+    from llama_launcher.store.profiles import profile_to_dict, profile_from_dict
+    p = Profile(name="Solo", runtime=Runtime(detached=True))
+    back = profile_from_dict(profile_to_dict(p))
+    assert back.runtime.detached is True
+
+
+def test_profile_without_detached_key_defaults_false():
+    from llama_launcher.store.profiles import profile_from_dict
+    # A profile JSON written before this field existed has no runtime.detached.
+    p = profile_from_dict({"name": "Legacy", "runtime": {"binary": "podman"}})
+    assert p.runtime.detached is False

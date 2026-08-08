@@ -42,6 +42,7 @@ class Runtime:
     selinux_label_disable: bool = False
     extra_run_args: str = ""
     bind_host: str = "127.0.0.1"  # publish address; non-loopback exposes the port
+    detached: bool = False        # GUI server launch: no terminal, Monitor-driven
 
 
 @dataclass

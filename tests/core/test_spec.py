@@ -57,3 +57,8 @@ def test_router_member_defaults():
     m = RouterMember(profile="p")
     assert m.load_on_startup is False
     assert m.stop_timeout == 10
+
+
+def test_runtime_defaults_to_attached():
+    from llama_launcher.core.spec import Runtime
+    assert Runtime().detached is False

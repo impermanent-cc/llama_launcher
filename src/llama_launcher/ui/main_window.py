@@ -326,6 +326,12 @@ class MainWindow(QMainWindow):
         self.web_ui_btn.clicked.connect(self.open_web_ui)
         for b in (self.launch_btn, self.stop_btn, self.restart_btn, self.web_ui_btn):
             buttons.addWidget(b)
+        self.detached_check = QCheckBox("Run detached (no terminal window)")
+        self.detached_check.setToolTip(
+            "Launch without a terminal window; watch output on the Monitor "
+            "tab and use Stop to shut it down.")
+        self.detached_check.toggled.connect(self.refresh_preview)
+        buttons.addWidget(self.detached_check)
         root.addLayout(buttons)
 
         # profile bar (added to the top of root via insertLayout)
@@ -460,6 +466,7 @@ class MainWindow(QMainWindow):
         for w in (self.model_edit, self.mmproj_edit, self.draft_model_edit):
             w.setEnabled(not is_router)
         self.lora_panel.setEnabled(not is_router)
+        self.detached_check.setVisible(not is_router)
         self.refresh_preview()
 
     def _add_member_item(self, member: RouterMember) -> None:
@@ -610,6 +617,7 @@ class MainWindow(QMainWindow):
         self.raw_edit.setText(p.raw_args)
         self.extra_args_edit.setText(p.runtime.extra_run_args)
         self.selinux_check.setChecked(p.runtime.selinux_label_disable)
+        self.detached_check.setChecked(p.runtime.detached)
         for key, w in self._widgets.items():
             w.set_value(w.setting.default)
             if key in p.settings:
@@ -650,7 +658,8 @@ class MainWindow(QMainWindow):
                             selinux_label_disable=self.selinux_check.isChecked(),
                             extra_run_args=self.extra_args_edit.text(),
                             bind_host=self.bind_host_combo.currentText().strip()
-                                      or "127.0.0.1"),
+                                      or "127.0.0.1",
+                            detached=self.detached_check.isChecked()),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
@@ -673,7 +682,7 @@ class MainWindow(QMainWindow):
         """
         p = p or self.current_profile()
         if p.mode != "router":
-            return build_command(p)
+            return build_command(p, detach=p.runtime.detached)
         return build_command(
             p, router_host_dir=str(api_key_store.router_dir(self.router_base_dir(), p.name)))
 
@@ -811,12 +820,25 @@ class MainWindow(QMainWindow):
         self.monitor_panel.set_props(info)
         return model_key
 
-    def _report_launch_error(self, text: str) -> None:
-        """Show why a detached router failed to start. Non-modal: this fires
-        from a QProcess signal, which tests drive."""
+    def _report_launch_error(self, text: str = None, *, show_dialog: bool = False) -> None:
+        """Show why a detached launch -- router or server -- failed to start.
+        Routed to the router panel (non-modal: this fires from a QProcess
+        signal, which tests drive); a detached SERVER launch also pops a
+        QMessageBox, since a Monitor-tab-only user may never see the router
+        panel and would otherwise miss the failure entirely.
+
+        `show_dialog` is decided by the CALLER at launch time (when the
+        profile's mode is known synchronously), not re-derived here from
+        live UI state: this fires from an async QProcess callback, possibly
+        seconds later, by which point the user may have switched profiles
+        or flipped the mode combo -- current_profile() at that moment would
+        no longer describe the launch that actually failed."""
         self.status_label.setText("● failed to start")
-        self.router_panel.set_error(f"launch failed: {text.splitlines()[-1][:200]}"
-                                    if text else "launch failed")
+        reason = (f"launch failed: {text.splitlines()[-1][:200]}"
+                  if text else "launch failed")
+        self.router_panel.set_error(reason)
+        if show_dialog:
+            QMessageBox.critical(self, "Launch failed", reason)
 
     def adopt_running_containers(self) -> list:
         """Containers this launcher owns, so a detached router survives a GUI restart."""
@@ -960,7 +982,6 @@ class MainWindow(QMainWindow):
         warn = self.vram_check()
         if warn:
             QMessageBox.warning(self, "VRAM check", warn)
-        argv = build_command(p)
         self.monitor_panel.reset()
         self.monitor_panel.set_benchmark_history(
             benchmark_store.load(default_base_dir(), p.name))
@@ -969,11 +990,27 @@ class MainWindow(QMainWindow):
             bool(p.settings.get("embeddings")),
             bool(p.settings.get("reranking")),
         )
-        terminal.launch(argv)
-        # Don't attach the log follower here: the terminal creates the container
-        # asynchronously, so it doesn't exist yet. update_status() starts the
-        # follower once the container is actually running (podman logs replays
-        # from the start, so no early output is missed).
+        if p.runtime.detached:
+            argv = build_command(p, detach=True)
+            # Detached drops --rm, so a stale stopped container of this name
+            # would block the run with "name already in use". Remove it first,
+            # then chain the run (mirrors the router branch above). on_error
+            # surfaces bad image / CDI / flag failures the terminal used to
+            # show -- show_dialog is fixed here, at launch time, so a later
+            # profile/mode switch before the error fires can't change it.
+            self._spawn_async(
+                runtime.rm_argv(self._container_name(), p.runtime.binary),
+                on_done=lambda: self._spawn_async(
+                    argv, on_done=self.update_status,
+                    on_error=lambda e=None: self._report_launch_error(
+                        e, show_dialog=True)))
+        else:
+            argv = build_command(p)
+            terminal.launch(argv)
+        # Don't attach the log follower here: the container is created
+        # asynchronously and doesn't exist yet. update_status() starts the
+        # follower once it is actually running (podman logs replays from the
+        # start, so no early output is missed).
 
     def _spawn_async(self, argv: list[str], on_done=None, on_error=None):
         """Run argv in the background via QProcess so the UI thread never blocks.
