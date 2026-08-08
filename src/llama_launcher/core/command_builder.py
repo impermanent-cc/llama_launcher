@@ -221,6 +221,16 @@ def _run_level_args(profile: Profile, router_host_dir: str = "",
 def _render_setting(setting, value) -> list[str]:
     if setting.type == "bool":
         return [setting.flag] if value else []
+    # An empty/blank value is meaningless as a flag argument -- emit nothing,
+    # mirroring the False-bool case. This bites cleared string fields whose
+    # default is non-empty (cors-origins defaults to "*", so clearing stores ""
+    # -- distinct from the default -- and must not reach argv as `--cors-origins `
+    # blank). It also guards the CLI/headless path, which skips the UI's
+    # default-gating: a profile JSON carrying tools="" or an empty enum would
+    # otherwise emit a dangling flag. No non-bool flag ever wants an empty arg;
+    # numeric 0 / -1 stringify non-empty and are preserved.
+    if not str(value).strip():
+        return []
     return [setting.flag, str(value)]
 
 

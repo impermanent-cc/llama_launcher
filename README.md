@@ -27,6 +27,18 @@ python -m venv .venv
 .venv/bin/pytest -q                                        # test suite (offscreen Qt)
 ```
 
+Or with [uv](https://docs.astral.sh/uv/):
+
+```bash
+uv venv                                # create .venv (Python ≥ 3.13)
+uv pip install -e ".[dev]"
+
+uv run llama-launcher                  # GUI  (NOT `llama_launcher.app` -- that's a module, not a command)
+uv run python -m llama_launcher.app    # module form of the same GUI
+uv run python -m llama_launcher.app --dry-run --profile "NAME"
+uv run pytest -q                       # test suite
+```
+
 ## GPU passthrough
 
 The launcher offers two GPU modes (Configure tab → **Runtime**):

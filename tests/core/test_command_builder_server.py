@@ -224,3 +224,40 @@ def test_server_multiple_loras_preserved_with_raw_lora():
     p.loras.append(LoraRef(path="/models/base.gguf"))
     argv = build_command(p)
     assert argv.count("--lora") == 2    # owned lora + raw lora both present
+
+
+def test_server_empty_string_setting_emits_nothing():
+    # Clearing a string field whose default is non-empty (e.g. cors-origins,
+    # default "*") stores "" -- distinct from the default -- but an empty value
+    # is meaningless as a flag argument and must not reach argv.
+    argv = build_command(_srv(**{"cors-origins": ""}))
+    assert "--cors-origins" not in argv
+
+
+def test_server_whitespace_only_string_setting_emits_nothing():
+    argv = build_command(_srv(**{"cors-origins": "   "}))
+    assert "--cors-origins" not in argv
+
+
+def test_server_nonempty_string_setting_still_emitted():
+    argv = build_command(_srv(**{"cors-origins": "http://localhost:3000"}))
+    assert argv[argv.index("--cors-origins") + 1] == "http://localhost:3000"
+
+
+def test_server_empty_multiselect_from_json_emits_nothing():
+    # The CLI/headless path bypasses the UI's default-gating, so a profile JSON
+    # carrying an empty multiselect (tools="") reaches build_command directly.
+    argv = build_command(_srv(**{"tools": ""}))
+    assert "--tools" not in argv
+
+
+def test_server_empty_enum_from_json_emits_nothing():
+    argv = build_command(_srv(**{"flash-attn": ""}))
+    assert "--flash-attn" not in argv
+
+
+def test_server_numeric_zero_setting_preserved():
+    # Guard must not swallow legitimate 0 / -1 values -- only blank strings.
+    argv = build_command(_srv(**{"min-p": 0.0, "sleep-idle-seconds": -1}))
+    assert argv[argv.index("--min-p") + 1] == "0.0"
+    assert argv[argv.index("--sleep-idle-seconds") + 1] == "-1"
