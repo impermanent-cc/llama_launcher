@@ -130,8 +130,15 @@ def test_on_launch_blocks_on_validation_error(qtbot, monkeypatch):
 
 
 def test_fetch_latest_updates_image(qtbot, monkeypatch):
+    # on_fetch_latest runs the lookup on a worker thread (see
+    # tests/ui/test_fetch_latest_ui.py); stub _UpdateWorker.start to emit `found`
+    # synchronously here rather than spinning a real QThread, and stub the
+    # resulting info dialog to avoid a modal exec() in headless tests.
     monkeypatch.setattr(mw.registry, "fetch_latest",
                         lambda repo, prefix, timeout=10.0: "server-cuda12-b9999")
+    monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(mw._UpdateWorker, "start",
+                        lambda self: self.found.emit("server-cuda12-b9999"))
     w = mw.MainWindow()
     qtbot.addWidget(w)
     w.image_edit.setText("ghcr.io/ggml-org/llama.cpp:server-cuda12-b1")

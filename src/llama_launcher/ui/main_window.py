@@ -71,6 +71,7 @@ def _fmt_uptime(started_at: str | None) -> str:
 
 class _UpdateWorker(QThread):
     found = Signal(str)
+    failed = Signal(str)
 
     def __init__(self, repo: str, prefix: str, parent=None):
         super().__init__(parent)
@@ -82,8 +83,8 @@ class _UpdateWorker(QThread):
             tag = registry.fetch_latest(self._repo, self._prefix)
             if tag:
                 self.found.emit(tag)
-        except Exception:
-            pass
+        except Exception as e:            # noqa: BLE001 - surfaced to the user
+            self.failed.emit(str(e))
 
 
 class BenchmarkWorker(QObject):
@@ -1318,11 +1319,43 @@ class MainWindow(QMainWindow):
     def on_fetch_latest(self):
         repo, tag = split_image(self.image_edit.text())
         if not repo:
+            QMessageBox.information(
+                self, "No image",
+                "Set or Detect an image first — Fetch latest looks up the newest "
+                "build for the image's repository.")
             return
         prefix = variant_prefix(tag) if tag else "server-cuda12"
-        latest = registry.fetch_latest(repo, prefix)
-        if latest:
-            self.image_edit.setText(f"{repo}:{latest}")
+        self._fetch_repo = repo
+        self._fetch_got_result = False
+        self.fetch_btn.setEnabled(False)
+        self.fetch_btn.setText("Fetching…")
+        worker = _UpdateWorker(repo, prefix, parent=self)
+        worker.found.connect(self._on_fetch_found)
+        worker.failed.connect(self._on_fetch_failed)
+        worker.finished.connect(self._on_fetch_finished)   # QThread built-in
+        self._fetch_worker = worker
+        worker.start()
+
+    def _on_fetch_found(self, tag: str) -> None:
+        self._fetch_got_result = True
+        image = f"{self._fetch_repo}:{tag}"
+        self.image_edit.setText(image)
+        QMessageBox.information(
+            self, "Latest build",
+            f"Image set to {image}.\n\nThis only updates the tag — the build is NOT "
+            f"downloaded. Pull it with:\n  podman pull {image}\n(or docker pull).")
+
+    def _on_fetch_failed(self, msg: str) -> None:
+        self._fetch_got_result = True
+        QMessageBox.warning(
+            self, "Fetch failed", f"Couldn't fetch the latest build:\n{msg}")
+
+    def _on_fetch_finished(self) -> None:
+        self.fetch_btn.setEnabled(True)
+        self.fetch_btn.setText("Fetch latest")
+        if not self._fetch_got_result:
+            QMessageBox.information(
+                self, "Latest build", "No newer build found for this image.")
 
     def detect_image(self):
         binary = self.binary_combo.currentText()

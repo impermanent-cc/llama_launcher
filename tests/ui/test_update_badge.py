@@ -28,9 +28,18 @@ def test_update_badge_is_flat_button(qtbot):
 
 def test_update_badge_shown_and_clickable_after_newer_build(qtbot, monkeypatch):
     """When run_update_check finds a newer build, the badge shows the tag and clicking
-    it triggers on_fetch_latest (verified by capturing registry.fetch_latest)."""
+    it triggers on_fetch_latest (verified by capturing registry.fetch_latest).
+
+    on_fetch_latest now runs the lookup on a worker thread (see
+    tests/ui/test_fetch_latest_ui.py), so _UpdateWorker.start is stubbed to emit
+    `found` synchronously here rather than spinning a real QThread, and the
+    resulting info dialog is stubbed to avoid a modal exec() in headless tests.
+    """
     monkeypatch.setattr(mw.registry, "fetch_latest",
                         lambda repo, prefix, timeout=10.0: "server-cuda12-b9999")
+    monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(mw._UpdateWorker, "start",
+                        lambda self: self.found.emit("server-cuda12-b9999"))
     w = mw.MainWindow(); qtbot.addWidget(w)
     w.load_profile(Profile(name="u", image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
                            runtime=Runtime(binary="podman"), settings={"port": 8080}))
