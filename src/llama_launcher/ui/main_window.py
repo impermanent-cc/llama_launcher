@@ -46,6 +46,7 @@ from llama_launcher.ui.panels.lora_panel import LoraPanel
 from llama_launcher.ui.widgets.collapsible import CollapsibleSection
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
 from llama_launcher.ui.panels.router_panel import RouterPanel
+from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import router_api
 
@@ -363,13 +364,12 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(configure_tab, "Configure")
         self.monitor_panel = MonitorPanel()
         self.monitor_panel.enable_metrics_requested.connect(self._on_enable_metrics)
-        self.monitor_panel.benchmark_run_requested.connect(self._on_benchmark_run)
-        self.monitor_panel.benchmark_cancel_requested.connect(self._on_benchmark_cancel)
         self.monitor_panel.instance_selected.connect(self._on_instance_selected)
         self.monitor_panel.instance_stop_requested.connect(self._on_instance_stop)
+        self.monitor_panel.instance_remove_requested.connect(self._on_instance_remove)
         # Scroll the Monitor tab (like Configure): a short window otherwise
-        # squeezes the log to a few lines. Content keeps its natural height and
-        # the benchmark section scrolls into view below the fold.
+        # squeezes the log to a few lines. The log now owns the tab (benchmark
+        # moved to its own tab), so it fills the height.
         monitor_scroll = QScrollArea()
         monitor_scroll.setWidgetResizable(True)
         monitor_scroll.setWidget(self.monitor_panel)
@@ -379,13 +379,23 @@ class MainWindow(QMainWindow):
         self.router_panel.unload_requested.connect(self._on_router_unload)
         self.router_panel.regenerate_requested.connect(self._on_regenerate_key)
         self.tabs.addTab(self.router_panel, "Router")
+        self.benchmark_panel = BenchmarkPanel()
+        self.benchmark_panel.benchmark_run_requested.connect(self._on_benchmark_run)
+        self.benchmark_panel.benchmark_cancel_requested.connect(self._on_benchmark_cancel)
+        self.tabs.addTab(self.benchmark_panel, "Benchmark")
+        self._configure_tab = configure_tab
         self.tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self.tabs)
 
-        # BOTTOM: preview + buttons (shared, below both tabs)
-        self.model_meta_label = QLabel("")
-        root.addWidget(self.model_meta_label)
+        # BOTTOM: suggest-family + command preview are config-only; wrap them in
+        # one container so they can be hidden on the Monitor/Router/Benchmark
+        # tabs (see _on_tab_changed). Launch/Stop/etc stay shared below.
         from PySide6.QtWidgets import QHBoxLayout as _HBox
+        self._config_bottom = QWidget()
+        config_bottom_box = QVBoxLayout(self._config_bottom)
+        config_bottom_box.setContentsMargins(0, 0, 0, 0)
+        self.model_meta_label = QLabel("")
+        config_bottom_box.addWidget(self.model_meta_label)
         self.suggestions_strip = QWidget()
         self._suggestions_layout = _HBox(self.suggestions_strip)
         self._suggestions_layout.setContentsMargins(0, 0, 0, 0)
@@ -397,9 +407,9 @@ class MainWindow(QMainWindow):
         self.save_preset_btn = QPushButton("Save as preset…")
         self.save_preset_btn.clicked.connect(self.on_save_preset)
         family_row.addWidget(self.save_preset_btn)
-        root.addLayout(family_row)
+        config_bottom_box.addLayout(family_row)
         self._reload_family_combo()
-        root.addWidget(self.suggestions_strip)
+        config_bottom_box.addWidget(self.suggestions_strip)
         self.model_edit.textChanged.connect(lambda _: self.apply_model_caps())
         self.mounts_panel.changed.connect(self.apply_model_caps)
         preview_row = QHBoxLayout()
@@ -408,9 +418,9 @@ class MainWindow(QMainWindow):
         preview_row.addWidget(self.preview, 1)
         self.export_sh_btn = QPushButton("Export .sh")
         self.export_sh_btn.clicked.connect(self._on_export_sh)
-        preview_row.addWidget(self.export_sh_btn)
-        root.addWidget(QLabel("Command preview:"))
-        root.addLayout(preview_row)
+        config_bottom_box.addWidget(QLabel("Command preview:"))
+        config_bottom_box.addLayout(preview_row)
+        root.addWidget(self._config_bottom)
         buttons = QHBoxLayout()
         self.launch_btn = QPushButton("▶ Launch")
         self.stop_btn = QPushButton("■ Stop")
@@ -594,6 +604,9 @@ class MainWindow(QMainWindow):
         # unsaved router; refresh_router_panel_header() no-ops for non-routers.
         if self.tabs.currentWidget() is self.router_panel:
             self.refresh_router_panel_header()
+        # Suggest-family + command preview only make sense while configuring, so
+        # hide them on the Monitor/Router/Benchmark tabs.
+        self._config_bottom.setVisible(self.tabs.currentWidget() is self._configure_tab)
 
     def _add_member_item(self, member: RouterMember) -> None:
         from PySide6.QtWidgets import QTableWidgetItem
@@ -1138,7 +1151,8 @@ class MainWindow(QMainWindow):
             # both at once: _spawn_async is asynchronous, so an unchained run
             # would race the removal and lose with "name already in use".
             self.monitor_panel.reset()
-            self.monitor_panel.set_benchmark_history(
+            self.benchmark_panel.reset()
+            self.benchmark_panel.set_benchmark_history(
                 benchmark_store.load(default_base_dir(), p.name))
             self._spec_prev = None
             self._props = None
@@ -1158,7 +1172,8 @@ class MainWindow(QMainWindow):
         if warn:
             QMessageBox.warning(self, "VRAM check", warn)
         self.monitor_panel.reset()
-        self.monitor_panel.set_benchmark_history(
+        self.benchmark_panel.reset()
+        self.benchmark_panel.set_benchmark_history(
             benchmark_store.load(default_base_dir(), p.name))
         self.monitor_panel.set_endpoints(
             p.settings.get("port", 8080),
@@ -1287,11 +1302,11 @@ class MainWindow(QMainWindow):
         p = self.current_profile()
         prepared = self._prepare_benchmark(p)
         if prepared is None:
-            self.monitor_panel.set_benchmark_progress("No model loaded to benchmark.")
+            self.benchmark_panel.set_benchmark_progress("No model loaded to benchmark.")
             return
         client, snapshot = prepared
         self._benchmark_profile_name = p.name
-        self.monitor_panel.set_benchmark_running(True)
+        self.benchmark_panel.set_benchmark_running(True)
         timestamp = datetime.datetime.now().isoformat(timespec="seconds")
         try:
             run = run_benchmark(client, cfg["sizes"], cfg["n_predict"], cfg["warmup"],
@@ -1310,7 +1325,7 @@ class MainWindow(QMainWindow):
         p = self.current_profile()
         prepared = self._prepare_benchmark(p)
         if prepared is None:
-            self.monitor_panel.set_benchmark_progress("No model loaded to benchmark.")
+            self.benchmark_panel.set_benchmark_progress("No model loaded to benchmark.")
             return
         client, snapshot = prepared
         self._benchmark_profile_name = p.name
@@ -1330,7 +1345,7 @@ class MainWindow(QMainWindow):
         thread.finished.connect(self._on_benchmark_thread_done)
         self._benchmark_thread = thread
         self._benchmark_worker = worker
-        self.monitor_panel.set_benchmark_running(True)
+        self.benchmark_panel.set_benchmark_running(True)
         thread.start()
 
     def _on_benchmark_thread_done(self) -> None:
@@ -1355,13 +1370,13 @@ class MainWindow(QMainWindow):
         benchmark_store.append(base, name, run)
         run_dict = dataclasses.asdict(run)
         delta = benchmark_store.delta(run_dict, previous) if previous is not None else None
-        self.monitor_panel.show_benchmark_run(run_dict, delta)
-        self.monitor_panel.set_benchmark_history(benchmark_store.load(base, name))
-        self.monitor_panel.set_benchmark_running(False)
+        self.benchmark_panel.show_benchmark_run(run_dict, delta)
+        self.benchmark_panel.set_benchmark_history(benchmark_store.load(base, name))
+        self.benchmark_panel.set_benchmark_running(False)
 
     def _on_benchmark_failed(self, msg: str) -> None:
-        self.monitor_panel.set_benchmark_progress(f"Benchmark failed: {msg}")
-        self.monitor_panel.set_benchmark_running(False)
+        self.benchmark_panel.set_benchmark_progress(f"Benchmark failed: {msg}")
+        self.benchmark_panel.set_benchmark_running(False)
 
     def on_fetch_latest(self):
         repo, tag = split_image(self.image_edit.text())
@@ -1465,7 +1480,7 @@ class MainWindow(QMainWindow):
         if not runtime.binary_available(p.runtime.binary):
             self.status_label.setText("● stopped")
             self.web_ui_btn.setEnabled(False)
-            self.monitor_panel.set_benchmark_available(False)
+            self.benchmark_panel.set_benchmark_available(False)
             return
         name = self._monitored_container_name()
         state = runtime.container_state(name, p.runtime.binary)
@@ -1490,7 +1505,7 @@ class MainWindow(QMainWindow):
         ready = state == "running" and hstatus == "ready"
         if ready and p.mode == "router":
             ready = router_model_key is not None
-        self.monitor_panel.set_benchmark_available(ready)
+        self.benchmark_panel.set_benchmark_available(ready)
         self._refresh_instances_list()
 
     def _refresh_instances_list(self) -> None:
@@ -1515,6 +1530,14 @@ class MainWindow(QMainWindow):
     def _on_instance_stop(self, name: str) -> None:
         binary = self.current_profile().runtime.binary
         self._spawn_async(runtime.stop_argv(name, binary), on_done=self.update_status)
+        if self._active_instance is not None and self._active_instance.name == name:
+            self._active_instance = None
+
+    def _on_instance_remove(self, name: str) -> None:
+        # A stopped launcher container lingers in `podman ps -a` with no useful
+        # action; remove it so the instances list can be cleared.
+        binary = self.current_profile().runtime.binary
+        self._spawn_async(runtime.rm_argv(name, binary), on_done=self.update_status)
         if self._active_instance is not None and self._active_instance.name == name:
             self._active_instance = None
 

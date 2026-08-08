@@ -2,22 +2,18 @@ from collections import deque
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
-    QLineEdit, QSpinBox, QTableWidget, QTableWidgetItem, QListWidget,
-    QAbstractItemView,
+    QWidget, QVBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+    QTableWidget,
 )
 
 from llama_launcher.core.mtp_stats import parse_draft_stats, sparkline
 
-_BENCH_TABLE_HEADERS = ["size", "prompt_n", "pp t/s", "gen t/s", "total s"]
-
 
 class MonitorPanel(QWidget):
     enable_metrics_requested = Signal()
-    benchmark_run_requested = Signal(dict)
-    benchmark_cancel_requested = Signal()
     instance_selected = Signal(str)
     instance_stop_requested = Signal(str)
+    instance_remove_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -48,46 +44,11 @@ class MonitorPanel(QWidget):
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(5000)
-        # The log is the primary payload of this tab; without a floor it gets
-        # shrunk to ~4 lines when the benchmark widgets below compete for space.
-        # It keeps stretch=1 so it also claims any surplus on a tall window.
+        # The log is the primary payload of this tab; a floor plus stretch=1
+        # lets it own the height (the benchmark lives on its own tab now).
         self.log_view.setMinimumHeight(240)
         layout.addWidget(self.log_view, 1)
 
-        layout.addWidget(QLabel("Benchmark"))
-        bench_config = QHBoxLayout()
-        self.bench_sizes = QLineEdit("128, 512, 2048")
-        bench_config.addWidget(self.bench_sizes)
-        self.bench_npredict = QSpinBox()
-        self.bench_npredict.setRange(1, 1_000_000)
-        self.bench_npredict.setValue(128)
-        bench_config.addWidget(self.bench_npredict)
-        self.bench_warmup = QSpinBox()
-        self.bench_warmup.setRange(0, 100)
-        self.bench_warmup.setValue(1)
-        bench_config.addWidget(self.bench_warmup)
-        self.bench_repeats = QSpinBox()
-        self.bench_repeats.setRange(1, 100)
-        self.bench_repeats.setValue(3)
-        bench_config.addWidget(self.bench_repeats)
-        self.bench_run_btn = QPushButton("Run")
-        self.bench_run_btn.setEnabled(False)
-        self.bench_run_btn.clicked.connect(self._on_bench_run_clicked)
-        bench_config.addWidget(self.bench_run_btn)
-        layout.addLayout(bench_config)
-        self.bench_progress = QLabel("")
-        layout.addWidget(self.bench_progress)
-        self.bench_table = QTableWidget(0, len(_BENCH_TABLE_HEADERS))
-        self.bench_table.setHorizontalHeaderLabels(_BENCH_TABLE_HEADERS)
-        self.bench_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        # Cap the benchmark widgets so they don't expand and starve the log view;
-        # the whole tab scrolls (see MainWindow), so overflow is reachable.
-        self.bench_table.setMaximumHeight(220)
-        layout.addWidget(self.bench_table)
-        self.bench_history = QListWidget()
-        self.bench_history.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.bench_history.setMaximumHeight(140)
-        layout.addWidget(self.bench_history)
         self._last = ""
         self._draft = None
         self._log_buf = ""
@@ -106,7 +67,6 @@ class MonitorPanel(QWidget):
         self.info_label.setWordWrap(True)
         self.info_label.setVisible(False)
         layout.insertWidget(1, self.info_label)
-        self._bench_running = False
 
     def _summary_text(self) -> str:
         return self._last
@@ -212,81 +172,6 @@ class MonitorPanel(QWidget):
         return (f"MTP  accept {d.acceptance * 100:.0f}%  ·  len {d.mean_len:.2f}  "
                 f"·  pos {pos}  ({source})")
 
-    def _on_bench_run_clicked(self) -> None:
-        if self._bench_running:
-            self.benchmark_cancel_requested.emit()
-            return
-        try:
-            sizes = [int(s) for s in self.bench_sizes.text().split(",") if s.strip()]
-        except ValueError:
-            return
-        self.benchmark_run_requested.emit({
-            "sizes": sizes,
-            "n_predict": self.bench_npredict.value(),
-            "warmup": self.bench_warmup.value(),
-            "repeats": self.bench_repeats.value(),
-        })
-
-    @staticmethod
-    def _snapshot_label(snapshot: dict) -> str:
-        """Compact join of non-null snapshot flags, e.g. '-ngl99 fa=on'."""
-        parts = []
-        for key, val in snapshot.items():
-            if val is None:
-                continue
-            if key == "ngl":
-                parts.append(f"-ngl{val}")
-            else:
-                parts.append(f"{key}={val}")
-        return " ".join(parts)
-
-    def set_benchmark_available(self, available: bool) -> None:
-        self.bench_run_btn.setEnabled(available)
-
-    def set_benchmark_running(self, running: bool) -> None:
-        self._bench_running = running
-        self.bench_run_btn.setText("Cancel" if running else "Run")
-        for w in (self.bench_sizes, self.bench_npredict, self.bench_warmup, self.bench_repeats):
-            w.setEnabled(not running)
-
-    def set_benchmark_progress(self, text: str) -> None:
-        self.bench_progress.setText(text)
-
-    def show_benchmark_run(self, run: dict, delta: dict | None) -> None:
-        rows = run.get("rows", [])
-        self.bench_table.setRowCount(len(rows))
-        for r, row in enumerate(rows):
-            values = [row.get("target_size"), row.get("prompt_n"), row.get("pp_tok_s"),
-                      row.get("gen_tok_s"), row.get("total_s")]
-            for c, val in enumerate(values):
-                self.bench_table.setItem(r, c, QTableWidgetItem("" if val is None else str(val)))
-        if delta:
-            # "shared" is a list of {"size","pp_pct","gen_pct"} -- one entry
-            # per target size present in both runs (see benchmark_store.delta).
-            parts = []
-            for entry in delta.get("shared") or []:
-                bits = []
-                pp = entry.get("pp_pct")
-                gen = entry.get("gen_pct")
-                if pp is not None:
-                    bits.append(f"pp {pp:+.0f}%")
-                if gen is not None:
-                    bits.append(f"gen {gen:+.0f}%")
-                if bits:
-                    parts.append(f"{entry.get('size')}: " + " ".join(bits))
-            summary = "Δ " + " · ".join(parts) if parts else "Δ"
-            if delta.get("sizes_differ"):
-                summary += " (sizes differ)"
-            current = self.bench_progress.text()
-            self.bench_progress.setText(f"{current}  {summary}" if current else summary)
-
-    def set_benchmark_history(self, runs: list) -> None:
-        self.bench_history.clear()
-        for run in sorted(runs, key=lambda r: r.get("timestamp") or "", reverse=True):
-            label = self._snapshot_label(run.get("snapshot") or {})
-            ts = run.get("timestamp", "")
-            self.bench_history.addItem(f"{ts}  {label}" if label else str(ts))
-
     def reset(self):
         self._draft = None
         self._log_buf = ""
@@ -300,9 +185,6 @@ class MonitorPanel(QWidget):
         self.endpoints_label.setVisible(False)
         self.info_label.setText("")
         self.info_label.setVisible(False)
-        self.bench_table.setRowCount(0)
-        self.bench_history.clear()
-        self.bench_progress.setText("")
 
     def set_instances(self, rows, selected_name=None) -> None:
         from PySide6.QtWidgets import QTableWidgetItem, QPushButton
@@ -314,9 +196,19 @@ class MonitorPanel(QWidget):
             dot = "●" if r["health"] == "ready" else ("◐" if r["running"] else "○")
             self.instances_table.setItem(i, 2, QTableWidgetItem(f"{dot} {r['health']}"))
             self.instances_table.setItem(i, 3, QTableWidgetItem(r["stat"]))
-            btn = QPushButton("■")
-            btn.setEnabled(r["running"])
-            btn.clicked.connect(lambda _=False, n=r["name"]: self.instance_stop_requested.emit(n))
+            # Running -> Stop (■); stopped/dead -> Remove (✕) so a down container
+            # can be cleared from the list (podman rm) instead of lingering with
+            # no available action.
+            if r["running"]:
+                btn = QPushButton("■")
+                btn.setToolTip("Stop this server")
+                btn.clicked.connect(
+                    lambda _=False, n=r["name"]: self.instance_stop_requested.emit(n))
+            else:
+                btn = QPushButton("✕")
+                btn.setToolTip("Remove this stopped container from the list")
+                btn.clicked.connect(
+                    lambda _=False, n=r["name"]: self.instance_remove_requested.emit(n))
             self.instances_table.setCellWidget(i, 4, btn)
         if selected_name in self._instance_names:
             self.instances_table.selectRow(self._instance_names.index(selected_name))

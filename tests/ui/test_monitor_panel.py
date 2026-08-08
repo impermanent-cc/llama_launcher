@@ -251,15 +251,18 @@ def test_instance_stop_button_emits(qtbot):
     assert got == ["llama-a"]
 
 
-def test_benchmark_section_is_below_logs(qtbot):
-    from PySide6.QtWidgets import QLabel
+def test_monitor_panel_has_no_benchmark_widgets(qtbot):
+    # Benchmark moved to its own BenchmarkPanel/tab; the Monitor panel is now
+    # just instances + logs and must not carry the benchmark controls.
     from llama_launcher.ui.panels.monitor_panel import MonitorPanel
     panel = MonitorPanel(); qtbot.addWidget(panel)
-    lay = panel.layout()
-    idx = {}
-    for i in range(lay.count()):
-        w = lay.itemAt(i).widget()
-        if isinstance(w, QLabel) and w.text() in ("Benchmark", "Logs:"):
-            idx[w.text()] = i
-    assert "Benchmark" in idx and "Logs:" in idx
-    assert idx["Benchmark"] > idx["Logs:"], "Benchmark should render below the Logs section"
+    for attr in ("bench_table", "bench_history", "bench_run_btn", "show_benchmark_run"):
+        assert not hasattr(panel, attr), attr
+
+
+def test_benchmark_panel_orders_controls_table_history(qtbot):
+    from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
+    panel = BenchmarkPanel(); qtbot.addWidget(panel)
+    assert panel.bench_run_btn is not None
+    assert panel.bench_table is not None
+    assert panel.bench_history is not None

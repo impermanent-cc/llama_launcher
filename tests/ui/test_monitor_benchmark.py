@@ -1,8 +1,8 @@
-from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
 
 
 def test_run_click_emits_config(qtbot):
-    p = MonitorPanel()
+    p = BenchmarkPanel()
     qtbot.addWidget(p)
     seen = []
     p.benchmark_run_requested.connect(seen.append)
@@ -14,7 +14,7 @@ def test_run_click_emits_config(qtbot):
 
 
 def test_show_run_fills_table_and_history(qtbot):
-    p = MonitorPanel()
+    p = BenchmarkPanel()
     qtbot.addWidget(p)
     run = {"timestamp": "t0", "snapshot": {"ngl": "99", "fa": "on", "ctx": None},
            "rows": [{"target_size": 512, "prompt_n": 528, "pp_tok_s": 340.0,
@@ -27,7 +27,7 @@ def test_show_run_fills_table_and_history(qtbot):
 
 
 def test_available_toggles_run_button(qtbot):
-    p = MonitorPanel()
+    p = BenchmarkPanel()
     qtbot.addWidget(p)
     p.set_benchmark_available(False)
     assert not p.bench_run_btn.isEnabled()

@@ -60,7 +60,7 @@ def test_run_benchmark_sync_saves_one_run_and_updates_the_table(win, monkeypatch
 
     runs = benchmark_store.load(default_base_dir(), p.name)
     assert len(runs) == 1
-    assert win.monitor_panel.bench_table.rowCount() == 2
+    assert win.benchmark_panel.bench_table.rowCount() == 2
     # the sizes/n_predict/warmup/repeats from cfg reached run_benchmark unchanged
     assert calls == [([128, 512], 64, 1, 3)]
 
@@ -70,13 +70,13 @@ def test_second_run_grows_history_and_shows_a_delta(win, monkeypatch):
     monkeypatch.setattr(benchmark, "run_benchmark", _fake_run_benchmark())
 
     deltas = []
-    orig_show = win.monitor_panel.show_benchmark_run
+    orig_show = win.benchmark_panel.show_benchmark_run
 
     def spy(run, delta):
         deltas.append(delta)
         orig_show(run, delta)
 
-    monkeypatch.setattr(win.monitor_panel, "show_benchmark_run", spy)
+    monkeypatch.setattr(win.benchmark_panel, "show_benchmark_run", spy)
 
     cfg = {"sizes": [128, 512], "n_predict": 64, "warmup": 1, "repeats": 3}
     win._run_benchmark_sync(cfg)
@@ -86,7 +86,7 @@ def test_second_run_grows_history_and_shows_a_delta(win, monkeypatch):
     assert len(runs) == 2
     assert deltas[0] is None        # first run: nothing stored yet to diff against
     assert deltas[1] is not None    # second run: delta vs the first
-    assert win.monitor_panel.bench_table.rowCount() == 2
+    assert win.benchmark_panel.bench_table.rowCount() == 2
 
 
 def test_run_benchmark_sync_refuses_when_router_has_no_loaded_model(win, monkeypatch):
@@ -115,7 +115,7 @@ def test_on_benchmark_failed_saves_nothing(win, monkeypatch):
     win._run_benchmark_sync({"sizes": [128], "n_predict": 64, "warmup": 1, "repeats": 1})
 
     assert benchmark_store.load(default_base_dir(), p.name) == []
-    assert "boom" in win.monitor_panel.bench_progress.text()
+    assert "boom" in win.benchmark_panel.bench_progress.text()
 
 
 def test_stop_timers_cancels_and_stops_a_running_benchmark_thread(win, monkeypatch):
@@ -172,7 +172,7 @@ def test_benchmark_run_enabled_when_server_running_and_ready(win, monkeypatch):
 
     win.update_status()
 
-    assert win.monitor_panel.bench_run_btn.isEnabled()
+    assert win.benchmark_panel.bench_run_btn.isEnabled()
 
 
 def test_benchmark_run_disabled_when_not_running(win, monkeypatch):
@@ -180,21 +180,21 @@ def test_benchmark_run_disabled_when_not_running(win, monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "exited")
     # Prove the gate actively disables rather than merely defaulting to off.
-    win.monitor_panel.set_benchmark_available(True)
+    win.benchmark_panel.set_benchmark_available(True)
 
     win.update_status()
 
-    assert not win.monitor_panel.bench_run_btn.isEnabled()
+    assert not win.benchmark_panel.bench_run_btn.isEnabled()
 
 
 def test_benchmark_run_disabled_when_binary_unavailable(win, monkeypatch):
     _load_server_profile(win)
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: False)
-    win.monitor_panel.set_benchmark_available(True)
+    win.benchmark_panel.set_benchmark_available(True)
 
     win.update_status()
 
-    assert not win.monitor_panel.bench_run_btn.isEnabled()
+    assert not win.benchmark_panel.bench_run_btn.isEnabled()
 
 
 def test_benchmark_run_disabled_for_router_with_no_pollable_model(win, monkeypatch):
@@ -207,7 +207,7 @@ def test_benchmark_run_disabled_for_router_with_no_pollable_model(win, monkeypat
 
     win.update_status()
 
-    assert not win.monitor_panel.bench_run_btn.isEnabled()
+    assert not win.benchmark_panel.bench_run_btn.isEnabled()
 
 
 def test_benchmark_run_enabled_for_router_with_pollable_model(win, monkeypatch):
@@ -220,7 +220,7 @@ def test_benchmark_run_enabled_for_router_with_pollable_model(win, monkeypatch):
 
     win.update_status()
 
-    assert win.monitor_panel.bench_run_btn.isEnabled()
+    assert win.benchmark_panel.bench_run_btn.isEnabled()
 
 
 def test_history_loaded_on_server_launch_reset(win, monkeypatch):
@@ -231,7 +231,7 @@ def test_history_loaded_on_server_launch_reset(win, monkeypatch):
 
     win.on_launch()
 
-    assert win.monitor_panel.bench_history.count() >= 1
+    assert win.benchmark_panel.bench_history.count() >= 1
 
 
 def test_history_loaded_on_router_launch_reset(win, monkeypatch):
@@ -249,4 +249,4 @@ def test_history_loaded_on_router_launch_reset(win, monkeypatch):
 
     win.on_launch()
 
-    assert win.monitor_panel.bench_history.count() >= 1
+    assert win.benchmark_panel.bench_history.count() >= 1

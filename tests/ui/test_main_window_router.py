@@ -656,3 +656,40 @@ def test_load_mode_disables_legacy_mmap_widgets(win):
     win._widgets["load-mode"].changed.emit()
     assert win._widgets["no-mmap"].isEnabled() is False
     assert win._widgets["mlock"].isEnabled() is False
+
+
+def test_benchmark_has_its_own_tab_and_config_strip_hidden_off_configure(win):
+    titles = [win.tabs.tabText(i) for i in range(win.tabs.count())]
+    assert titles == ["Configure", "Monitor", "Router", "Benchmark"]
+    # Config-only strip (suggest-family + command preview) shows on Configure...
+    win.tabs.setCurrentIndex(titles.index("Configure"))
+    assert win._config_bottom.isVisibleTo(win) is True
+    # ...and is hidden on Monitor/Router/Benchmark.
+    for name in ("Monitor", "Router", "Benchmark"):
+        win.tabs.setCurrentIndex(titles.index(name))
+        assert win._config_bottom.isVisibleTo(win) is False, name
+
+
+def test_stopped_instance_offers_remove(win, monkeypatch):
+    from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+    removed = []
+    win.monitor_panel.instance_remove_requested.connect(removed.append)
+    win.monitor_panel.set_instances([
+        {"name": "llama-dead", "profile": "Dead", "port": 8080,
+         "running": False, "health": "down", "stat": ""}])
+    btn = win.monitor_panel.instances_table.cellWidget(0, 4)
+    assert btn.text() == "✕"                     # remove, not stop
+    btn.click()
+    assert removed == ["llama-dead"]
+
+
+def test_running_instance_offers_stop(win):
+    stopped = []
+    win.monitor_panel.instance_stop_requested.connect(stopped.append)
+    win.monitor_panel.set_instances([
+        {"name": "llama-live", "profile": "Live", "port": 8080,
+         "running": True, "health": "ready", "stat": "42 t/s"}])
+    btn = win.monitor_panel.instances_table.cellWidget(0, 4)
+    assert btn.text() == "■"
+    btn.click()
+    assert stopped == ["llama-live"]
