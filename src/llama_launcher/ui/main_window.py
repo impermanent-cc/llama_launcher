@@ -1743,6 +1743,18 @@ class MainWindow(QMainWindow):
     def _monitored_container_name(self) -> str:
         return self._active_instance.name if self._active_instance else self._container_name()
 
+    def _instance_api_key(self, inst) -> str | None:
+        """API key for polling a specific running instance -- the key that
+        instance's server uses (mirrors _poll_api_key, but keyed off the
+        Instance since the summary runs per-row). A router reads its key store;
+        a server uses its stored --api-key. Without this, /metrics polls went
+        out unauthenticated and the auth middleware answered 401 every tick."""
+        if inst.mode == "router":
+            return api_key_store.read_api_key(self.router_base_dir(), inst.profile)
+        stored = next((p for p in list_profiles(base_dir())
+                       if p.name == inst.profile), None)
+        return (stored.settings.get("api-key") or None) if stored else None
+
     def instance_summary(self, inst) -> dict:
         if not inst.running or inst.port is None:
             return {"running": inst.running, "health": "down", "stat": ""}
@@ -1750,7 +1762,8 @@ class MainWindow(QMainWindow):
         if inst.embeddings or inst.reranking:
             stat = "ready" if hstatus == "ready" else ""
         else:
-            tok = metrics.fetch_metrics(inst.port, host=inst.host).get(
+            tok = metrics.fetch_metrics(inst.port, host=inst.host,
+                                        api_key=self._instance_api_key(inst)).get(
                 "llamacpp:predicted_tokens_seconds")
             stat = f"{tok:.0f} tok/s" if tok else ("ready" if hstatus == "ready" else "")
         return {"running": True, "health": hstatus, "stat": stat}

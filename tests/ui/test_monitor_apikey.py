@@ -75,3 +75,23 @@ def test_monitored_router_instance_resolves_router_key(qtbot, tmp_path, monkeypa
     assert mp.mode == "router" and mp.name == "Gemma"
     assert w._poll_api_key(mp) == ak.read_api_key(w.router_base_dir(), "Gemma")
     assert w._poll_api_key(mp) != "sk-wrong"                 # not the stored server key
+
+
+def test_instance_summary_sends_router_api_key(qtbot, tmp_path, monkeypatch):
+    # Regression: the per-row instance summary polled /metrics with NO key, so
+    # the auth middleware answered 401 every tick (the recurring router error).
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    from llama_launcher.core.instances import Instance
+    from llama_launcher.services import api_key as ak
+    seen = {}
+    monkeypatch.setattr(mw.health, "probe_health",
+                        lambda port, timeout=1.0, host="127.0.0.1", **kw: "ready")
+    monkeypatch.setattr(mw.metrics, "fetch_metrics",
+                        lambda port, timeout=1.0, model=None, api_key=None, host="127.0.0.1", **kw:
+                        (seen.update(api_key=api_key) or {}))
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    ak.ensure_api_key(w.router_base_dir(), "e2b")
+    inst = Instance(name="llama-e2b", profile="e2b", mode="router", running=True,
+                    port=8080, host="127.0.0.1", embeddings=False, reranking=False)
+    w.instance_summary(inst)
+    assert seen.get("api_key") == ak.read_api_key(w.router_base_dir(), "e2b")
