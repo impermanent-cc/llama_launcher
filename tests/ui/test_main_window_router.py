@@ -693,3 +693,20 @@ def test_running_instance_offers_stop(win):
     assert btn.text() == "■"
     btn.click()
     assert stopped == ["llama-live"]
+
+
+def test_router_panel_clears_when_router_not_running(win, monkeypatch):
+    # Regression: after a router stops/is removed, the Router tab kept showing
+    # its model list + "connected". update_status must clear them when the
+    # container isn't running.
+    import llama_launcher.ui.main_window as _mw
+    win.load_profile(Profile(name="R", mode="router", image="img",
+                             members=[RouterMember(profile="g12b")]))
+    # seed a stale "connected + one model" state
+    win._router_statuses = {"g12b": "loaded"}
+    win.router_panel.table.setRowCount(1)          # simulate a lingering model row
+    win.router_panel.set_connected(True)
+    # container is absent (conftest default) -> update_status should clear
+    win.update_status()
+    assert win._router_statuses == {}
+    assert win.router_panel.table.rowCount() == 0

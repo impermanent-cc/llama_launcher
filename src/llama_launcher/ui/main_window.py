@@ -1667,8 +1667,15 @@ class MainWindow(QMainWindow):
                 router_model_key = self._refresh_props(p)
             self.monitor_panel.update_stats(self.collect_monitor_data())
             self._update_spec_stats(p)
-        if p.mode == "router" and state == "running":
-            self.refresh_router_models()
+        if p.mode == "router":
+            if state == "running":
+                self.refresh_router_models()
+            else:
+                # Router stopped/removed: clear the stale model list + connected
+                # state so a dead router doesn't keep showing load/unload rows.
+                self._router_statuses = {}
+                self.router_panel.set_models([])
+                self.router_panel.set_connected(False)
         # router_model_key was resolved from _refresh_props above (when ready)
         # rather than polled again here, so this reuses that single call to
         # _router_pollable_model() instead of doubling it.
