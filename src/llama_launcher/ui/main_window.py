@@ -26,6 +26,7 @@ from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
     load_config, save_config, profile_to_dict, resolve_member_pairs,
 )
+from llama_launcher.core.instances import Instance, build_instances
 from llama_launcher.core.presets import PRESETS, Preset, preset_suggestions
 from llama_launcher.store.presets import list_presets as list_user_presets, save_preset as save_user_preset
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
@@ -385,6 +386,8 @@ class MainWindow(QMainWindow):
 
         self._log_proc = None
         self._stop_proc = None
+        self._active_instance = None      # Instance being monitored, or None -> current profile
+        self._instances = []              # last-built Instance list (for selection lookup)
 
         from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QStyle
         from llama_launcher.ui.icon import app_icon
@@ -1296,9 +1299,33 @@ class MainWindow(QMainWindow):
             ready = router_model_key is not None
         self.monitor_panel.set_benchmark_available(ready)
 
+    def _monitored_profile(self) -> Profile:
+        inst = self._active_instance
+        if inst is None:
+            return self.current_profile()
+        for prof in list_profiles(base_dir()):
+            if prof.name == inst.profile:
+                return prof
+        return self.current_profile()      # profile deleted under us -> fall back
+
+    def _monitored_container_name(self) -> str:
+        return self._active_instance.name if self._active_instance else self._container_name()
+
+    def instance_summary(self, inst) -> dict:
+        if not inst.running or inst.port is None:
+            return {"running": inst.running, "health": "down", "stat": ""}
+        hstatus = health.probe_health(inst.port, host=inst.host)
+        if inst.embeddings or inst.reranking:
+            stat = "ready" if hstatus == "ready" else ""
+        else:
+            tok = metrics.fetch_metrics(inst.port, host=inst.host).get(
+                "llamacpp:predicted_tokens_seconds")
+            stat = f"{tok:.0f} tok/s" if tok else ("ready" if hstatus == "ready" else "")
+        return {"running": True, "health": hstatus, "stat": stat}
+
     def collect_monitor_data(self) -> dict:
         from llama_launcher.services.metrics import kv_usage_ratio
-        p = self.current_profile()
+        p = self._monitored_profile()
         port = p.settings.get("port", 8080)
         metrics_on = bool(p.settings.get("metrics"))
         host, key, model_scope, poll = dial_host(p.runtime.bind_host), None, None, True
@@ -1311,7 +1338,7 @@ class MainWindow(QMainWindow):
              if metrics_on and poll else {})
         slots = (metrics.fetch_slots(port, model=model_scope, api_key=key, host=host)
                  if poll else [])
-        name = self._container_name()
+        name = self._monitored_container_name()
         st = runtime.stats(name, p.runtime.binary) or {}
         started = runtime.started_at(name, p.runtime.binary)
         uptime = _fmt_uptime(started)
@@ -1335,8 +1362,8 @@ class MainWindow(QMainWindow):
     def _start_log_follower(self):
         from PySide6.QtCore import QProcess
         self._stop_log_follower()
-        p = self.current_profile()
-        name = self._container_name()
+        p = self._monitored_profile()
+        name = self._monitored_container_name()
         # Attaching `podman logs -f` before the container exists just prints
         # "no such container" and exits, stranding the logs pane on that error.
         # Skip until it exists; update_status() retries once it's running and
