@@ -49,3 +49,57 @@ def test_instance_summary_gen_row_shows_tok_s(win, monkeypatch):
                         lambda *a, **k: {"llamacpp:predicted_tokens_seconds": 64.0})
     s = win.instance_summary(_inst(embeddings=False))
     assert s["stat"] == "64 tok/s"
+
+
+def _two_containers(*_a, **_k):
+    return [
+        {"name": "llama-solo", "running": True, "profile": "Solo", "mode": "server"},
+        {"name": "llama-emb", "running": True, "profile": "emb", "mode": "server"},
+    ]
+
+
+def test_tick_populates_two_instance_rows(win, monkeypatch):
+    base = store.default_base_dir()
+    store.save_profile(Profile(name="emb", image="img", settings={"port": 8081}), base)
+    win.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
+                        _two_containers)
+    monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
+                        lambda *a, **k: "ready")
+    win._refresh_instances_list()
+    assert win.monitor_panel.instances_table.rowCount() == 2
+
+
+def test_selecting_an_instance_sets_active_without_touching_form(win, monkeypatch):
+    base = store.default_base_dir()
+    store.save_profile(Profile(name="emb", image="img", settings={"port": 8081}), base)
+    win.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
+                        _two_containers)
+    monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
+                        lambda *a, **k: "ready")
+    win._refresh_instances_list()
+    win._on_instance_selected("llama-emb")
+    assert win._active_instance is not None and win._active_instance.name == "llama-emb"
+    assert win.current_profile().name == "Solo"          # form untouched
+    assert win._monitored_profile().name == "emb"        # monitor retargeted
+
+
+def test_selecting_own_container_clears_active(win, monkeypatch):
+    win.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
+                        _two_containers)
+    monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
+                        lambda *a, **k: "ready")
+    win._refresh_instances_list()
+    win._on_instance_selected("llama-solo")              # the form's own container
+    assert win._active_instance is None                  # falls back to current profile
+
+
+def test_stop_instance_spawns_stop_argv(win, monkeypatch):
+    win.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    spawned = []
+    monkeypatch.setattr(win, "_spawn_async",
+                        lambda argv, on_done=None, on_error=None: spawned.append(argv))
+    win._on_instance_stop("llama-emb")
+    assert spawned and spawned[0][:2] == ["podman", "stop"] and spawned[0][-1] == "llama-emb"

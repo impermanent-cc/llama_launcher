@@ -295,6 +295,8 @@ class MainWindow(QMainWindow):
         self.monitor_panel.enable_metrics_requested.connect(self._on_enable_metrics)
         self.monitor_panel.benchmark_run_requested.connect(self._on_benchmark_run)
         self.monitor_panel.benchmark_cancel_requested.connect(self._on_benchmark_cancel)
+        self.monitor_panel.instance_selected.connect(self._on_instance_selected)
+        self.monitor_panel.instance_stop_requested.connect(self._on_instance_stop)
         self.tabs.addTab(self.monitor_panel, "Monitor")
         self.router_panel = RouterPanel()
         self.router_panel.load_requested.connect(self._on_router_load)
@@ -1268,13 +1270,13 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def update_status(self):
-        p = self.current_profile()
+        p = self._monitored_profile()
         if not runtime.binary_available(p.runtime.binary):
             self.status_label.setText("● stopped")
             self.web_ui_btn.setEnabled(False)
             self.monitor_panel.set_benchmark_available(False)
             return
-        name = self._container_name()
+        name = self._monitored_container_name()
         state = runtime.container_state(name, p.runtime.binary)
         hstatus = health.probe_health(p.settings.get("port", 8080),
                                      host=dial_host(p.runtime.bind_host)) \
@@ -1298,6 +1300,32 @@ class MainWindow(QMainWindow):
         if ready and p.mode == "router":
             ready = router_model_key is not None
         self.monitor_panel.set_benchmark_available(ready)
+        self._refresh_instances_list()
+
+    def _refresh_instances_list(self) -> None:
+        binary = self.current_profile().runtime.binary
+        self._instances = build_instances(
+            runtime.list_launcher_containers(binary), list_profiles(base_dir()))
+        rows = []
+        for inst in self._instances:
+            summ = self.instance_summary(inst)
+            rows.append({"name": inst.name, "profile": inst.profile, "port": inst.port,
+                         "running": inst.running, "health": summ["health"],
+                         "stat": summ["stat"]})
+        self.monitor_panel.set_instances(rows, self._monitored_container_name())
+
+    def _on_instance_selected(self, name: str) -> None:
+        inst = next((i for i in self._instances if i.name == name), None)
+        # Selecting the form's own container means "monitor the current profile" (fallback).
+        self._active_instance = None if (inst is None or name == self._container_name()) else inst
+        self._start_log_follower()          # retarget the follower at the new container
+        self.update_status()
+
+    def _on_instance_stop(self, name: str) -> None:
+        binary = self.current_profile().runtime.binary
+        self._spawn_async(runtime.stop_argv(name, binary), on_done=self.update_status)
+        if self._active_instance is not None and self._active_instance.name == name:
+            self._active_instance = None
 
     def _monitored_profile(self) -> Profile:
         inst = self._active_instance
