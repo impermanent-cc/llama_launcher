@@ -26,6 +26,8 @@ from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
     load_config, save_config, profile_to_dict, resolve_member_pairs,
 )
+from llama_launcher.core.presets import PRESETS, preset_suggestions
+from llama_launcher.store.presets import list_presets as list_user_presets, save_preset as save_user_preset
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
 from llama_launcher.services import benchmark, benchmark_store
 from llama_launcher.core import vram
@@ -275,6 +277,7 @@ class MainWindow(QMainWindow):
         body.addWidget(right_scroll, 2)
         self.setStyleSheet((self.styleSheet() or "") + TIER_QSS)
         self._last_caps = None
+        self._preset_family = None
         self._router_statuses: dict = {}
         self._spec_prev = None      # previous /metrics spec-decode counter read
         self._props = None          # cached /props for the current model load
@@ -306,6 +309,13 @@ class MainWindow(QMainWindow):
         self.suggestions_strip = QWidget()
         self._suggestions_layout = _HBox(self.suggestions_strip)
         self._suggestions_layout.setContentsMargins(0, 0, 0, 0)
+        family_row = QHBoxLayout()
+        family_row.addWidget(QLabel("Suggest for family"))
+        self.family_combo = NoWheelComboBox()
+        self.family_combo.activated.connect(self._on_pick_family)
+        family_row.addWidget(self.family_combo, 1)
+        root.addLayout(family_row)
+        self._reload_family_combo()
         root.addWidget(self.suggestions_strip)
         self.model_edit.textChanged.connect(lambda _: self.apply_model_caps())
         self.mounts_panel.changed.connect(self.apply_model_caps)
@@ -1530,18 +1540,39 @@ class MainWindow(QMainWindow):
         self._set_field_relevance(self.draft_model_edit, tiers.get("draft_model", Tier.NEUTRAL))
         self._rebuild_suggestions(caps)
 
+    def _all_presets(self) -> list:
+        # User presets override curated ones of the same key.
+        merged = {p.key: p for p in PRESETS}
+        for p in list_user_presets(base_dir()):
+            merged[p.key] = p
+        return list(merged.values())
+
+    def _reload_family_combo(self) -> None:
+        self.family_combo.clear()
+        self.family_combo.addItem("(none)", None)
+        for preset in self._all_presets():
+            self.family_combo.addItem(preset.label, preset)
+
+    def _on_pick_family(self, _index) -> None:
+        self._preset_family = self.family_combo.currentData()
+        self._rebuild_suggestions(self._last_caps)
+
     def _rebuild_suggestions(self, caps) -> None:
         while self._suggestions_layout.count():
             item = self._suggestions_layout.takeAt(0)
             if item.widget():
                 item.widget().deleteLater()
-        if not caps:
-            return
-        sgs = compute_suggestions(
-            caps, self.current_profile().settings,
-            mmproj_set=bool(self.mmproj_edit.text()),
-            draft_set=bool(self.draft_model_edit.text()),
-        )
+        sgs = []
+        if caps:
+            sgs += compute_suggestions(
+                caps, self.current_profile().settings,
+                mmproj_set=bool(self.mmproj_edit.text()),
+                draft_set=bool(self.draft_model_edit.text()),
+            )
+        if self._preset_family is not None:
+            active = self.active_catalog()
+            sgs += [s for s in preset_suggestions(self._preset_family)
+                    if all(k in active for k in s.settings)]
         for sg in sgs:
             btn = QPushButton("💡 " + sg.text)
             btn.setFlat(True)
