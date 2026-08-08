@@ -1104,9 +1104,16 @@ class MainWindow(QMainWindow):
     def vram_check(self) -> str | None:
         p = self.current_profile()
         meta, weights, _caps = model_info.inspect_model(p.model, self.mounts_panel.mounts()) if p.model else (None, None, None)
-        free = gpu.free_vram_bytes()
-        if meta is None or free is None or not meta.n_layers or not meta.n_embd:
+        gpus = gpu.query_gpus()
+        if meta is None or not gpus or not meta.n_layers or not meta.n_embd:
             return None
+        mib = 1024 * 1024
+        free_per_gpu = [g.mem_free_mib * mib for g in gpus]
+        # Budget depends on how the model is placed: split across all GPUs (the
+        # default) means their combined free VRAM; split-mode none means one card.
+        split_mode = p.settings.get("split-mode", "layer")
+        main_gpu = p.settings.get("main-gpu", 0)
+        free = vram.available_free_bytes(free_per_gpu, split_mode, main_gpu)
         ctx = p.settings.get("ctx-size") or meta.ctx_train or 4096
         est = vram.estimate(
             n_layers=meta.n_layers, n_head=meta.n_head or 1,
@@ -1119,8 +1126,15 @@ class MainWindow(QMainWindow):
         if ok:
             return None
         gib = 1024 ** 3
+        # Show the per-GPU breakdown when the budget spans multiple cards, so the
+        # "free" number is transparent (e.g. "14.7 + 7.3 = 22.0 GiB across 2 GPUs").
+        if len(free_per_gpu) > 1 and split_mode != "none":
+            parts = " + ".join(f"{b/gib:.1f}" for b in free_per_gpu)
+            free_txt = f"~{free/gib:.1f} GiB ({parts} across {len(free_per_gpu)} GPUs)"
+        else:
+            free_txt = f"~{free/gib:.1f} GiB"
         return (f"Estimated VRAM need ~{est.total_bytes/gib:.1f} GiB exceeds free "
-                f"~{free/gib:.1f} GiB by ~{-margin/gib:.1f} GiB. It may not fit — "
+                f"{free_txt} by ~{-margin/gib:.1f} GiB. It may not fit — "
                 f"consider quantized KV cache (-ctk/-ctv q8_0) or a higher --n-cpu-moe. "
                 f"(Estimate is conservative; --n-cpu-moe/-ngl reduce actual GPU use.)")
 

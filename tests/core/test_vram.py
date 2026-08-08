@@ -31,3 +31,31 @@ def test_fits():
 def test_fits_boundary_zero_margin():
     """When estimate equals free exactly, margin==0 and fits==True."""
     assert fits(200, 200) == (True, 0)
+
+
+def test_available_free_bytes_sums_across_gpus_when_split():
+    from llama_launcher.core.vram import available_free_bytes
+    # Regression: a model split across GPUs (default split-mode) should see the
+    # COMBINED free VRAM, not just the largest single card. 16+12 GB rig with
+    # 14.7 + 7.3 GiB free must offer ~22 GiB, so a 20.2 GiB model fits.
+    gib = 1024 ** 3
+    free = [int(14.7 * gib), int(7.3 * gib)]
+    assert available_free_bytes(free, "layer", 0) == sum(free)
+    assert available_free_bytes(free, "row", 0) == sum(free)
+    assert available_free_bytes(free, "tensor", 0) == sum(free)
+
+
+def test_available_free_bytes_uses_main_gpu_when_split_none():
+    from llama_launcher.core.vram import available_free_bytes
+    gib = 1024 ** 3
+    free = [int(14.7 * gib), int(7.3 * gib)]
+    # split-mode none puts the whole model on one GPU (main-gpu index).
+    assert available_free_bytes(free, "none", 0) == free[0]
+    assert available_free_bytes(free, "none", 1) == free[1]
+    # out-of-range main-gpu falls back to the first card, not a crash.
+    assert available_free_bytes(free, "none", 5) == free[0]
+
+
+def test_available_free_bytes_empty():
+    from llama_launcher.core.vram import available_free_bytes
+    assert available_free_bytes([], "layer", 0) == 0

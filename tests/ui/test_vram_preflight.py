@@ -1,12 +1,18 @@
 import llama_launcher.ui.main_window as mw
 from llama_launcher.core.spec import Profile, Mount, Runtime
 from llama_launcher.core.gguf import GgufMeta
+from llama_launcher.services.gpu import GpuStat
 
 
-def _profile(ctx):
+def _profile(ctx, **settings):
     return Profile(name="v", image="img", runtime=Runtime(binary="podman"),
                    mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
-                   model="/models/m.gguf", settings={"port": 8080, "ctx-size": ctx})
+                   model="/models/m.gguf", settings={"port": 8080, "ctx-size": ctx, **settings})
+
+
+def _gpu(free_mib, total_mib=16384, name="GPU"):
+    return GpuStat(name=name, mem_used_mib=total_mib - free_mib, mem_total_mib=total_mib,
+                   mem_free_mib=free_mib, util_pct=0, temp_c=40)
 
 
 def test_vram_check_warns_when_over(qtbot, monkeypatch):
@@ -14,7 +20,7 @@ def test_vram_check_warns_when_over(qtbot, monkeypatch):
         lambda path: GgufMeta(arch="llama", n_layers=80, n_head=64, n_head_kv=8,
                               n_embd=8192, ctx_train=131072, quant="Q8_0"))
     monkeypatch.setattr(mw.model_info, "file_size", lambda path: 20 * 1024**3)
-    monkeypatch.setattr(mw.gpu, "free_vram_bytes", lambda: 1 * 1024**3)  # tiny
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [_gpu(1024)])  # ~1 GiB free
     w = mw.MainWindow(); qtbot.addWidget(w)
     w.load_profile(_profile(131072))
     msg = w.vram_check()
@@ -23,7 +29,57 @@ def test_vram_check_warns_when_over(qtbot, monkeypatch):
 
 def test_vram_check_none_when_unknown(qtbot, monkeypatch):
     monkeypatch.setattr(mw.model_info, "read_gguf_meta", lambda path: None)
-    monkeypatch.setattr(mw.gpu, "free_vram_bytes", lambda: None)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
     w = mw.MainWindow(); qtbot.addWidget(w)
     w.load_profile(_profile(4096))
     assert w.vram_check() is None
+
+
+def test_vram_check_sums_free_across_two_gpus(qtbot, monkeypatch):
+    # Regression (user report): 16+12 GB rig, 14.7 + 7.3 GiB free, model ~20.2
+    # GiB. Split across both GPUs it fits (~22 GiB), so NO warning -- the old
+    # max()-of-one-GPU check wrongly warned.
+    gib = 1024 ** 3
+    monkeypatch.setattr(mw.model_info, "read_gguf_meta",
+        lambda path: GgufMeta(arch="llama", n_layers=1, n_head=8, n_head_kv=8,
+                              n_embd=64, ctx_train=4096, quant="Q8_0"))
+    monkeypatch.setattr(mw.model_info, "file_size", lambda path: int(20.0 * gib))
+    monkeypatch.setattr(mw.gpu, "query_gpus",
+        lambda: [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    w.load_profile(_profile(4096))               # default split-mode -> summed
+    assert w.vram_check() is None                # ~22 GiB free covers ~20 GiB
+
+
+def test_vram_check_split_none_uses_single_gpu(qtbot, monkeypatch):
+    # split-mode none puts everything on main-gpu, so the same model that fits
+    # across both GPUs no longer fits on one 16 GB card -> warns, and the message
+    # reports the single-card free, not the sum.
+    gib = 1024 ** 3
+    monkeypatch.setattr(mw.model_info, "read_gguf_meta",
+        lambda path: GgufMeta(arch="llama", n_layers=1, n_head=8, n_head_kv=8,
+                              n_embd=64, ctx_train=4096, quant="Q8_0"))
+    monkeypatch.setattr(mw.model_info, "file_size", lambda path: int(20.0 * gib))
+    monkeypatch.setattr(mw.gpu, "query_gpus",
+        lambda: [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    w.load_profile(_profile(4096, **{"split-mode": "none"}))
+    msg = w.vram_check()
+    assert msg is not None
+    assert "across" not in msg                   # single-GPU budget, no breakdown
+
+
+def test_vram_check_shows_per_gpu_breakdown(qtbot, monkeypatch):
+    # When it genuinely doesn't fit across multiple GPUs, the message shows the
+    # per-card free so the "free" figure is transparent.
+    gib = 1024 ** 3
+    monkeypatch.setattr(mw.model_info, "read_gguf_meta",
+        lambda path: GgufMeta(arch="llama", n_layers=80, n_head=64, n_head_kv=8,
+                              n_embd=8192, ctx_train=131072, quant="Q8_0"))
+    monkeypatch.setattr(mw.model_info, "file_size", lambda path: 40 * gib)
+    monkeypatch.setattr(mw.gpu, "query_gpus",
+        lambda: [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    w.load_profile(_profile(131072))
+    msg = w.vram_check()
+    assert msg is not None and "across 2 GPUs" in msg and "+" in msg

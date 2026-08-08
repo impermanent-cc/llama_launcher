@@ -52,10 +52,3 @@ def query_gpus() -> list[GpuStat]:
     if res.returncode != 0:
         return []
     return parse_nvidia_smi(res.stdout)
-
-
-def free_vram_bytes() -> int | None:
-    gpus = query_gpus()
-    if not gpus:
-        return None
-    return max(g.mem_free_mib for g in gpus) * 1024 * 1024

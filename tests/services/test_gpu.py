@@ -17,11 +17,6 @@ def test_parse_handles_na():
     assert rows[0].mem_used_mib == 0 and rows[0].util_pct == 0
 
 
-def test_free_vram_bytes(monkeypatch):
-    monkeypatch.setattr(gpu, "query_gpus", lambda: parse_nvidia_smi("100, 200, 150, 10, 40, A\n"))
-    assert gpu.free_vram_bytes() == 150 * 1024 * 1024
-
-
-def test_free_vram_none_when_no_gpu(monkeypatch):
-    monkeypatch.setattr(gpu, "query_gpus", lambda: [])
-    assert gpu.free_vram_bytes() is None
+def test_query_gpus_none_when_no_smi(monkeypatch):
+    monkeypatch.setattr(gpu.shutil, "which", lambda _n: None)
+    assert gpu.query_gpus() == []
