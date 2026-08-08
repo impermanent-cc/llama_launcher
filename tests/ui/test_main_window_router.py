@@ -15,6 +15,11 @@ def win(qtbot, tmp_path, monkeypatch):
     return w
 
 
+def win_base(win):
+    from llama_launcher.ui.main_window import base_dir
+    return base_dir()
+
+
 def _member_profile(base, name="Qwen"):
     p = Profile(name=name, image="img", model="/models/qwen.gguf",
                 mounts=[Mount(host="/mnt/models", container="/models")],
@@ -609,3 +614,34 @@ def test_detached_checkbox_hidden_in_router_mode(win):
     win.load_profile(Profile(name="Host", mode="router", image="img",
                              members=[RouterMember(profile="Qwen")]))
     assert win.detached_check.isVisibleTo(win.centralWidget()) is False
+
+
+def test_member_candidates_include_profile_saved_this_session(win):
+    # Regression: a member profile saved this session must appear in the
+    # add-member list without an app restart. The natural flow leaves the new
+    # model's name in the Name field while the form is back in router mode; the
+    # old filter excluded exactly that name, hiding the just-made member.
+    base = Path(win_base(win))
+    _member_profile(base, name="modelB")
+    win.name_edit.setText("modelB")                 # name still lingers in the field
+    win.mode_combo.setCurrentIndex(win.mode_combo.findData("router"))
+    assert "modelB" in win._member_candidates()
+
+
+def test_member_candidates_exclude_routers(win):
+    base = Path(win_base(win))
+    _member_profile(base, name="modelA")
+    store.save_profile(Profile(name="someRouter", mode="router", image="img"), base)
+    cands = win._member_candidates()
+    assert "modelA" in cands
+    assert "someRouter" not in cands
+
+
+def test_fresh_window_hides_router_widgets_in_default_server_mode(win):
+    # Regression: on startup no profile is loaded and the mode combo defaults to
+    # "server"; the router-only member widgets must be hidden without the user
+    # having to flip the mode combo (which used to be the only trigger).
+    assert win.mode_combo.currentData() == "server"
+    assert win.add_member_btn.isVisibleTo(win.centralWidget()) is False
+    assert win.members_list.isVisibleTo(win.centralWidget()) is False
+    assert win.model_edit.isEnabled() is True

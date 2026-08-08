@@ -151,6 +151,7 @@ class MainWindow(QMainWindow):
         # LEFT: environment (image + model only for v1 binding; mounts editor TODO-UI)
         left = QGroupBox("Environment")
         left_form = QFormLayout(left)
+        self._left_form = left_form
         self.image_edit = QLineEdit()
         self.model_edit = QLineEdit()
         self.binary_combo = NoWheelComboBox(); self.binary_combo.addItems(["podman", "docker"])
@@ -239,6 +240,7 @@ class MainWindow(QMainWindow):
         members_row.addWidget(self.edit_member_btn)
         members_row.addWidget(self.remove_member_btn)
         members_widget = QWidget()
+        self._members_row = members_widget
         members_box = QVBoxLayout(members_widget)
         members_box.setContentsMargins(0, 0, 0, 0)
         members_box.addWidget(self.members_list)
@@ -360,7 +362,13 @@ class MainWindow(QMainWindow):
         self.monitor_panel.benchmark_cancel_requested.connect(self._on_benchmark_cancel)
         self.monitor_panel.instance_selected.connect(self._on_instance_selected)
         self.monitor_panel.instance_stop_requested.connect(self._on_instance_stop)
-        self.tabs.addTab(self.monitor_panel, "Monitor")
+        # Scroll the Monitor tab (like Configure): a short window otherwise
+        # squeezes the log to a few lines. Content keeps its natural height and
+        # the benchmark section scrolls into view below the fold.
+        monitor_scroll = QScrollArea()
+        monitor_scroll.setWidgetResizable(True)
+        monitor_scroll.setWidget(self.monitor_panel)
+        self.tabs.addTab(monitor_scroll, "Monitor")
         self.router_panel = RouterPanel()
         self.router_panel.load_requested.connect(self._on_router_load)
         self.router_panel.unload_requested.connect(self._on_router_unload)
@@ -448,6 +456,12 @@ class MainWindow(QMainWindow):
         self.restart_btn.clicked.connect(self.on_restart)
 
         self._reload_profile_list()
+
+        # Apply the initial mode's visibility. The combo defaults to "server"
+        # and startup loads no profile, so currentIndexChanged never fires --
+        # without this, the router-only member widgets (created visible) show on
+        # the default server-mode form until the user flips the mode combo.
+        self._on_mode_changed()
 
         self.refresh_preview()
 
@@ -544,9 +558,10 @@ class MainWindow(QMainWindow):
 
     def _on_mode_changed(self, _index=0) -> None:
         is_router = self.mode_combo.currentData() == "router"
-        for w in (self.members_list, self.add_member_btn, self.remove_member_btn,
-                  self.edit_member_btn, self.members_guidance):
-            w.setVisible(is_router)
+        # Hide the whole "Router members" form row (its QFormLayout label too),
+        # not just the inner widgets -- otherwise an orphaned "Router members"
+        # label lingers on the server-mode form.
+        self._left_form.setRowVisible(self._members_row, is_router)
         self._apply_mode_to_settings_form()
         # A router has no model of its own; its members carry those fields.
         for w in (self.model_edit, self.mmproj_edit, self.draft_model_edit):
@@ -602,9 +617,22 @@ class MainWindow(QMainWindow):
             self.members_list.item(row, 3).setText(str(stop_timeout))
         self.refresh_preview()
 
+    def _member_candidates(self) -> list[str]:
+        """Non-router profiles eligible to be added as router members.
+
+        Read fresh from disk so a profile saved this session shows up without a
+        restart. A router can't be a member, so router-mode profiles are
+        filtered out -- that filter also excludes the router being edited once
+        it's saved. We deliberately do NOT exclude by the Name field's current
+        text: the natural add-a-member flow (switch to server mode, save the new
+        model, switch back to router mode) leaves the new model's name in the
+        Name field, and excluding it hid the very member the user just made until
+        an app restart.
+        """
+        return [p.name for p in list_profiles(base_dir()) if p.mode != "router"]
+
     def _on_add_member(self) -> None:
-        names = [p.name for p in list_profiles(base_dir())
-                 if p.mode != "router" and p.name != self._profile_name()]
+        names = self._member_candidates()
         if not names:
             QMessageBox.information(self, "No profiles",
                                     "Save a model profile first; routers serve members.")

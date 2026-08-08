@@ -29,6 +29,9 @@ class MonitorPanel(QWidget):
         self.instances_table.setHorizontalHeaderLabels(["Profile", "Port", "Health", "Stat", ""])
         self.instances_table.verticalHeader().setVisible(False)
         self.instances_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        # Cap so an empty/short instances list doesn't dominate the tab; it
+        # holds ~5 rows before scrolling, leaving the log and stats in view.
+        self.instances_table.setMaximumHeight(160)
         self.instances_table.cellClicked.connect(lambda r, _c: self._emit_selected_for_row(r))
         self._instance_names: list[str] = []
         layout.insertWidget(0, self.instances_table)
@@ -45,6 +48,10 @@ class MonitorPanel(QWidget):
         self.log_view = QPlainTextEdit()
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(5000)
+        # The log is the primary payload of this tab; without a floor it gets
+        # shrunk to ~4 lines when the benchmark widgets below compete for space.
+        # It keeps stretch=1 so it also claims any surplus on a tall window.
+        self.log_view.setMinimumHeight(240)
         layout.addWidget(self.log_view, 1)
 
         layout.addWidget(QLabel("Benchmark"))
@@ -73,9 +80,13 @@ class MonitorPanel(QWidget):
         self.bench_table = QTableWidget(0, len(_BENCH_TABLE_HEADERS))
         self.bench_table.setHorizontalHeaderLabels(_BENCH_TABLE_HEADERS)
         self.bench_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        # Cap the benchmark widgets so they don't expand and starve the log view;
+        # the whole tab scrolls (see MainWindow), so overflow is reachable.
+        self.bench_table.setMaximumHeight(220)
         layout.addWidget(self.bench_table)
         self.bench_history = QListWidget()
         self.bench_history.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.bench_history.setMaximumHeight(140)
         layout.addWidget(self.bench_history)
         self._last = ""
         self._draft = None
