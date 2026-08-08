@@ -61,6 +61,18 @@ that then appears in the picker. Presets store only `llama-server` settings —
 never model paths — and a preset you save overrides a curated one of the same
 name.
 
+## Instances panel (Monitor tab)
+
+The top of the Monitor tab lists every server this launcher has started, with
+its port, health, and a live summary stat (generation tok/s, or "ready" for an
+embedding/rerank server). This means you can run, say, a generation model **and**
+an embedding model for RAG at once and keep an eye on both — switching the
+Configure form to another profile no longer hides what's running.
+
+Click a row to point the full Monitor (and logs) below at that instance; the
+■ button on a row stops it. Selecting an instance to watch does not change the
+profile you're editing.
+
 ## Benchmark (Monitor tab)
 
 The Monitor tab has a **Benchmark** section for a controlled, repeatable speed
