@@ -45,7 +45,7 @@ def test_opening_dock_starts_worker_and_teardown_drains_it(qtbot):
     w.stats_toggle_btn.setChecked(True)          # visible -> worker starts
     assert w._stats_worker is not None and w._stats_worker.isRunning()
     w._stop_timers()                             # teardown must join it
-    assert not w._stats_worker.isRunning()
+    assert w._stats_worker is None               # drained and released
 
 
 def test_start_stats_worker_snapshots_target_on_ui_thread(qtbot):
@@ -56,4 +56,14 @@ def test_start_stats_worker_snapshots_target_on_ui_thread(qtbot):
     assert w._stats_target[0] == w._monitored_container_name()
     assert w._stats_target[1] == w.current_profile().runtime.binary
     w._stop_timers()
-    assert not w._stats_worker.isRunning()
+    assert w._stats_worker is None               # drained and released
+
+
+def test_toggle_open_close_cycles_leave_no_running_worker(qtbot):
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    for _ in range(3):
+        w.stats_toggle_btn.setChecked(True)
+        assert w._stats_worker.isRunning()
+        w.stats_toggle_btn.setChecked(False)
+        assert w._stats_worker is None
+    w._stop_timers()

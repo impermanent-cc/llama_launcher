@@ -32,7 +32,11 @@ def parse_proc_stat(text: str) -> dict:
         if len(nums) < 5:
             continue
         idle = nums[3] + nums[4]
-        out[parts[0]] = (idle, sum(nums))
+        # guest/guest_nice (indices 8, 9) are already included inside
+        # user/nice by the kernel; summing all fields would double-count
+        # them, so only the first 8 fields go into total.
+        total = sum(nums[:8])
+        out[parts[0]] = (idle, total)
     return out
 
 

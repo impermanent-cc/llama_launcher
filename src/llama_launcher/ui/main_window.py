@@ -737,10 +737,10 @@ class MainWindow(QMainWindow):
         else:
             w.terminate()
             w.wait(100)
-        # Deliberately not reset to None here (matches the _fetch_worker /
-        # _update_worker drain pattern in _stop_timers below): the handle is
-        # left in place, stopped-but-not-running; _start_stats_worker's
-        # isRunning() guard is what decides whether to spin up a fresh one.
+        # Release the stopped worker so it doesn't linger as a child of the
+        # window for its whole lifetime; each dock open builds a fresh one.
+        w.deleteLater()
+        self._stats_worker = None
 
     def _save_stats_config(self) -> None:
         cfg = load_config(base_dir())

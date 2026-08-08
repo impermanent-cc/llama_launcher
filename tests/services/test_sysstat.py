@@ -21,6 +21,15 @@ def test_parse_proc_stat_idle_and_total():
     assert "intr" not in d
 
 
+def test_parse_proc_stat_excludes_guest_from_total():
+    # guest(=nums[8]) and guest_nice(=nums[9]) are already counted in user/nice,
+    # so they must not be added again into total.
+    line = "cpu  100 0 100 800 0 0 0 0 40 10\n"   # last two are guest, guest_nice
+    idle, total = parse_proc_stat(line)["cpu"]
+    assert idle == 800
+    assert total == 1000          # 100+0+100+800+0+0+0+0, NOT +40+10
+
+
 def test_cpu_percentages_delta():
     overall, cores = cpu_percentages(parse_proc_stat(_STAT_A), parse_proc_stat(_STAT_B))
     assert overall == 50.0

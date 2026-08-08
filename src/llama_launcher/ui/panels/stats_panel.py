@@ -27,7 +27,6 @@ class StatsPanel(QWidget):
         self.container_label = QLabel("Container —")
         for w in (self.gpu_label, self.system_label, self.container_label):
             w.setWordWrap(True)
-            w.setTextInteractionFlags(w.textInteractionFlags())
             layout.addWidget(w)
         layout.addStretch(1)
         self._gpu_util_hist = {}          # gpu index -> deque[int]
