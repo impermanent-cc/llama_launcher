@@ -173,10 +173,18 @@ class MainWindow(QMainWindow):
             "Fill the Image field from llama.cpp images already pulled locally "
             "(podman/docker images).")
         self.detect_image_btn.clicked.connect(self.detect_image)
+        self.fetch_btn = QPushButton("Fetch latest")
+        self.fetch_btn.setToolTip(
+            "Query the container registry (GHCR) for the newest build tag matching "
+            "this image's repo and variant, and update the Image field. Requires an "
+            "image to be set (use Detect or type one). This updates the tag only — it "
+            "does NOT download the build; pull it with podman/docker pull.")
+        self.fetch_btn.clicked.connect(self.on_fetch_latest)
         image_row = QHBoxLayout()
         image_row.setContentsMargins(0, 0, 0, 0)
         image_row.addWidget(self.image_edit, 1)
         image_row.addWidget(self.detect_image_btn)
+        image_row.addWidget(self.fetch_btn)
         image_row.addWidget(self.update_badge)
         image_widget = QWidget()
         image_widget.setLayout(image_row)
@@ -303,10 +311,6 @@ class MainWindow(QMainWindow):
         self.selinux_check.setToolTip(
             "Add --security-opt=label=disable. Needed on some SELinux hosts when a "
             "mounted model dir is otherwise unreadable in the container.")
-        self.fetch_btn = QPushButton("Fetch latest build")
-        self.fetch_btn.clicked.connect(self.on_fetch_latest)
-        left_form.addRow(self.fetch_btn)
-
         left_scroll = QScrollArea()
         left_scroll.setWidgetResizable(True)
         left_scroll.setWidget(left)
