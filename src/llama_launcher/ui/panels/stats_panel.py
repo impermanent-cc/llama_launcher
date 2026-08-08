@@ -1,8 +1,11 @@
 from collections import deque
 
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
 
 from llama_launcher.core.mtp_stats import sparkline
+
+_SPARK_W = 40          # fixed sparkline width -> the panel never widens over time
 
 
 def _gib_from_bytes(b: int) -> float:
@@ -18,19 +21,39 @@ class StatsPanel(QWidget):
 
     Fed one snapshot at a time via update_stats(); keeps small rolling histories
     for the sparklines. Pure display -- no polling here (see StatsWorker).
+
+    Width is kept CONSTANT across updates on purpose: a monospace font plus
+    fixed-width sparklines (pre-filled to _SPARK_W) and fixed-width numeric
+    fields. Otherwise the sparkline grew 1->_SPARK_W chars as history filled,
+    which widened the labels and made the QDockWidget (and the whole window)
+    grow tick after tick, never shrinking back.
     """
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
+        mono = QFont("monospace")
+        mono.setStyleHint(QFont.StyleHint.Monospace)
         self.gpu_label = QLabel("GPU —")
         self.system_label = QLabel("System —")
         self.container_label = QLabel("Container —")
         for w in (self.gpu_label, self.system_label, self.container_label):
+            w.setFont(mono)
             w.setWordWrap(True)
             layout.addWidget(w)
         layout.addStretch(1)
-        self._gpu_util_hist = {}          # gpu index -> deque[int]
-        self._cpu_hist = deque(maxlen=40)
+        self._hist: dict = {}          # metric key -> deque[float] (len == _SPARK_W)
+
+    def _spark(self, key, value: float) -> str:
+        """Push value into the key's rolling history and render a fixed-width
+        sparkline. The deque is pre-filled on first use so the string is always
+        _SPARK_W chars wide -- constant width from the very first update."""
+        hist = self._hist.get(key)
+        if hist is None:
+            hist = deque([value] * _SPARK_W, maxlen=_SPARK_W)
+            self._hist[key] = hist
+        else:
+            hist.append(value)
+        return sparkline(list(hist))
 
     def update_stats(self, snap) -> None:
         self._render_gpu(snap)
@@ -43,41 +66,38 @@ class StatsPanel(QWidget):
             return
         blocks = []
         for i, g in enumerate(snap.gpus):
-            hist = self._gpu_util_hist.setdefault(i, deque(maxlen=40))
-            hist.append(g.util_pct)
-            spark = sparkline(list(hist))
-            power = f"  {g.power_draw_w:.0f}W" if g.power_draw_w is not None else ""
+            spark = self._spark(("gpu", i), g.util_pct)
+            power = f"  {g.power_draw_w:4.0f}W" if g.power_draw_w is not None else ""
             blocks.append(
                 f"{g.name}\n"
-                f"  util {spark} {g.util_pct}%\n"
-                f"  vram {_gib_from_mib(g.mem_used_mib):.1f} / "
-                f"{_gib_from_mib(g.mem_total_mib):.1f} GiB  {g.temp_c}°C{power}")
+                f"  util {spark} {g.util_pct:3d}%\n"
+                f"  vram {_gib_from_mib(g.mem_used_mib):5.1f} / "
+                f"{_gib_from_mib(g.mem_total_mib):5.1f} GiB  {g.temp_c:3d}°C{power}")
         self.gpu_label.setText("GPU\n" + "\n".join(blocks))
 
     def _render_system(self, snap) -> None:
         if snap.cpu is None or snap.mem is None:
             self.system_label.setText("System — unavailable")
             return
-        self._cpu_hist.append(snap.cpu.overall_pct)
-        spark = sparkline(list(self._cpu_hist))
+        spark = self._spark("cpu", snap.cpu.overall_pct)
         cores = sparkline(snap.cpu.per_core_pct) if snap.cpu.per_core_pct else ""
         l1, l5, l15 = snap.cpu.load
         self.system_label.setText(
             f"System\n"
-            f"  cpu  {spark} {snap.cpu.overall_pct:.0f}%\n"
+            f"  cpu   {spark} {snap.cpu.overall_pct:5.1f}%\n"
             f"  cores {cores}\n"
-            f"  ram  {_gib_from_bytes(snap.mem.used_bytes):.1f} / "
-            f"{_gib_from_bytes(snap.mem.total_bytes):.1f} GiB\n"
-            f"  load {l1:.2f} {l5:.2f} {l15:.2f}")
+            f"  ram   {_gib_from_bytes(snap.mem.used_bytes):6.1f} / "
+            f"{_gib_from_bytes(snap.mem.total_bytes):6.1f} GiB\n"
+            f"  load  {l1:.2f} {l5:.2f} {l15:.2f}")
 
     def _render_container(self, snap) -> None:
         c = snap.container
         if c is None:
             self.container_label.setText("Container — no server running")
             return
-        limit = (f" / {_gib_from_bytes(c.mem_limit_bytes):.1f} GiB"
+        limit = (f" / {_gib_from_bytes(c.mem_limit_bytes):6.1f} GiB"
                  if c.mem_limit_bytes else "")
         self.container_label.setText(
             f"Container: {c.name}\n"
-            f"  cpu  {c.cpu_pct:.0f}%\n"
-            f"  mem  {_gib_from_bytes(c.mem_used_bytes):.1f} GiB{limit}")
+            f"  cpu   {c.cpu_pct:6.1f}%\n"
+            f"  mem   {_gib_from_bytes(c.mem_used_bytes):6.1f} GiB{limit}")
