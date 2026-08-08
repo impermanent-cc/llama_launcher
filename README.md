@@ -35,6 +35,17 @@ The launcher offers two GPU modes (Configure tab → **Runtime**):
   Interface spec.
 - **Legacy — `--gpus all`** — the older runtime hook; doesn't read the CDI spec.
 
+### Run detached (no terminal window)
+
+Each server profile has a **Run detached** checkbox next to Launch. Leave it
+off (the default) to launch into a terminal window as before. Check it to
+launch with no terminal — the container runs detached (`-d`), its output
+streams to the **Monitor** tab, and **Stop** shuts it down. Launch failures
+(bad image, GPU/CDI, bad flag) are reported in a dialog, and because a
+detached container is not auto-removed, its logs remain readable after a
+crash. The setting is saved per profile. Router profiles are always detached,
+so the checkbox is hidden for them.
+
 ## Benchmark (Monitor tab)
 
 The Monitor tab has a **Benchmark** section for a controlled, repeatable speed

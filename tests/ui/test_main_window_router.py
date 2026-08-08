@@ -106,6 +106,74 @@ def test_server_launch_still_uses_the_terminal(win, monkeypatch):
     assert "-d" not in called["argv"]
 
 
+def test_detached_server_launch_uses_spawn_chain_not_terminal(win, monkeypatch):
+    win.load_profile(Profile(name="Solo", image="img", model="/models/a.gguf",
+                             runtime=Runtime(detached=True),
+                             mounts=[Mount(host="/h", container="/models")],
+                             settings={"port": 8080}))
+    monkeypatch.setattr(win, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(win, "vram_check", lambda: None)
+    term_called = {}
+    monkeypatch.setattr("llama_launcher.ui.main_window.terminal.launch",
+                        lambda argv: term_called.setdefault("argv", argv))
+
+    spawned, pending, errbacks = [], [], []
+
+    def fake_spawn(argv, on_done=None, on_error=None):
+        spawned.append(argv)
+        if on_done is not None:
+            pending.append(on_done)
+        if on_error is not None:
+            errbacks.append(on_error)
+
+    monkeypatch.setattr(win, "_spawn_async", fake_spawn)
+    win.on_launch()
+
+    # No terminal window in detached mode.
+    assert term_called == {}
+    # Only the removal has spawned so far; the run waits on it.
+    assert [a[:3] for a in spawned] == [["podman", "rm", "-f"]]
+    assert pending, "the rm must carry a completion callback to chain the run"
+    pending.pop(0)()                      # rm finishes -> run starts
+
+    run_argv = next(a for a in spawned if "run" in a)
+    assert "-d" in run_argv
+    assert "--rm" not in run_argv
+    assert ":/router:ro" not in " ".join(run_argv)   # a server, not a router
+    # A detached launch surfaces failures the terminal used to show.
+    assert win._report_launch_error in errbacks
+
+
+def test_attached_server_launch_still_uses_terminal(win, monkeypatch):
+    win.load_profile(Profile(name="Solo", image="img", model="/models/a.gguf",
+                             runtime=Runtime(detached=False),
+                             mounts=[Mount(host="/h", container="/models")],
+                             settings={"port": 8080}))
+    monkeypatch.setattr(win, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(win, "vram_check", lambda: None)
+    spawned = []
+    monkeypatch.setattr(win, "_spawn_async",
+                        lambda argv, on_done=None, on_error=None: spawned.append(argv))
+    called = {}
+    monkeypatch.setattr("llama_launcher.ui.main_window.terminal.launch",
+                        lambda argv: called.setdefault("argv", argv))
+    win.on_launch()
+    assert "-d" not in called["argv"]     # terminal used, attached --rm command
+    assert spawned == []                  # no detached chain
+
+
+def test_preview_reflects_detached_flag(win):
+    win.load_profile(Profile(name="Solo", image="img", model="/models/a.gguf",
+                             runtime=Runtime(detached=True),
+                             mounts=[Mount(host="/h", container="/models")],
+                             settings={"port": 8080}))
+    argv = win.build_current_command()
+    assert "-d" in argv and "--rm" not in argv
+    win.detached_check.setChecked(False)
+    argv = win.build_current_command()
+    assert "--rm" in argv and "-d" not in argv
+
+
 def test_adopt_running_containers_reads_the_label_list(win, monkeypatch):
     monkeypatch.setattr(
         "llama_launcher.ui.main_window.runtime.list_launcher_containers",

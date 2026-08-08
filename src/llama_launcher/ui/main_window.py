@@ -681,7 +681,7 @@ class MainWindow(QMainWindow):
         """
         p = p or self.current_profile()
         if p.mode != "router":
-            return build_command(p)
+            return build_command(p, detach=p.runtime.detached)
         return build_command(
             p, router_host_dir=str(api_key_store.router_dir(self.router_base_dir(), p.name)))
 
@@ -968,7 +968,6 @@ class MainWindow(QMainWindow):
         warn = self.vram_check()
         if warn:
             QMessageBox.warning(self, "VRAM check", warn)
-        argv = build_command(p)
         self.monitor_panel.reset()
         self.monitor_panel.set_benchmark_history(
             benchmark_store.load(default_base_dir(), p.name))
@@ -977,11 +976,24 @@ class MainWindow(QMainWindow):
             bool(p.settings.get("embeddings")),
             bool(p.settings.get("reranking")),
         )
-        terminal.launch(argv)
-        # Don't attach the log follower here: the terminal creates the container
-        # asynchronously, so it doesn't exist yet. update_status() starts the
-        # follower once the container is actually running (podman logs replays
-        # from the start, so no early output is missed).
+        if p.runtime.detached:
+            argv = build_command(p, detach=True)
+            # Detached drops --rm, so a stale stopped container of this name
+            # would block the run with "name already in use". Remove it first,
+            # then chain the run (mirrors the router branch above). on_error
+            # surfaces bad image / CDI / flag failures the terminal used to show.
+            self._spawn_async(
+                runtime.rm_argv(self._container_name(), p.runtime.binary),
+                on_done=lambda: self._spawn_async(
+                    argv, on_done=self.update_status,
+                    on_error=self._report_launch_error))
+        else:
+            argv = build_command(p)
+            terminal.launch(argv)
+        # Don't attach the log follower here: the container is created
+        # asynchronously and doesn't exist yet. update_status() starts the
+        # follower once it is actually running (podman logs replays from the
+        # start, so no early output is missed).
 
     def _spawn_async(self, argv: list[str], on_done=None, on_error=None):
         """Run argv in the background via QProcess so the UI thread never blocks.
