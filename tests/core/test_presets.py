@@ -28,3 +28,44 @@ def test_empty_preset_yields_only_apply_all_or_nothing():
     sgs = preset_suggestions(Preset(key="e", label="E", settings={}))
     assert [s.text for s in sgs] == ["Apply all E defaults"]
     assert sgs[0].settings == {}
+
+
+from llama_launcher.core.presets import PRESETS
+from llama_launcher.core.settings_catalog import CATALOG
+
+
+def _valid_for(setting, val) -> bool:
+    t = setting.type
+    if t == "bool":
+        return isinstance(val, bool)
+    if t == "enum":
+        return val in setting.enum
+    if t in ("int", "float"):
+        if isinstance(val, bool) or not isinstance(val, (int, float)):
+            return False
+        if setting.minimum is not None and val < setting.minimum:
+            return False
+        if setting.maximum is not None and val > setting.maximum:
+            return False
+        return True
+    if t == "int_or_token":
+        return val in setting.tokens or isinstance(val, int)
+    if t == "string":
+        return isinstance(val, str)
+    return False
+
+
+def test_presets_roster_nonempty_with_unique_keys():
+    assert PRESETS
+    keys = [p.key for p in PRESETS]
+    assert len(keys) == len(set(keys))
+
+
+def test_curated_presets_valid_against_catalog():
+    for preset in PRESETS:
+        assert preset.settings, f"{preset.key} has no settings (dead preset)"
+        for key, val in preset.settings.items():
+            assert key in CATALOG, f"{preset.key}: unknown setting {key}"
+            s = CATALOG[key]
+            assert _valid_for(s, val), f"{preset.key}: {key}={val!r} invalid for {s.type}"
+            assert val != s.default, f"{preset.key}: {key}={val!r} equals default (dead-weight)"

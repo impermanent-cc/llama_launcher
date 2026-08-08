@@ -27,3 +27,13 @@ def preset_suggestions(preset: Preset) -> list[Suggestion]:
     out.append(Suggestion(text=f"Apply all {preset.label} defaults",
                           settings=dict(preset.settings), fields={}))
     return out
+
+
+# Curated starter roster. Values are generic, catalog-valid, non-default
+# suggestions the user is expected to tune; the guardrail test keeps them valid.
+PRESETS: tuple[Preset, ...] = (
+    Preset(key="qwen3-moe", label="Qwen3-MoE",
+           settings={"temp": 0.6, "top-k": 20, "top-p": 0.8, "jinja": True}),
+    Preset(key="general-chat", label="General chat",
+           settings={"jinja": True, "flash-attn": "on"}),
+)
