@@ -16,10 +16,23 @@ class MonitorPanel(QWidget):
     enable_metrics_requested = Signal()
     benchmark_run_requested = Signal(dict)
     benchmark_cancel_requested = Signal()
+    instance_selected = Signal(str)
+    instance_stop_requested = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
+
+        # Create instances table
+        from PySide6.QtWidgets import QHeaderView
+        self.instances_table = QTableWidget(0, 5)
+        self.instances_table.setHorizontalHeaderLabels(["Profile", "Port", "Health", "Stat", ""])
+        self.instances_table.verticalHeader().setVisible(False)
+        self.instances_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.instances_table.cellClicked.connect(lambda r, _c: self._emit_selected_for_row(r))
+        self._instance_names: list[str] = []
+        layout.insertWidget(0, self.instances_table)
+
         self.summary = QLabel("No server running.")
         self.summary.setWordWrap(True)
         layout.addWidget(self.summary)
@@ -279,3 +292,34 @@ class MonitorPanel(QWidget):
         self.bench_table.setRowCount(0)
         self.bench_history.clear()
         self.bench_progress.setText("")
+
+    def set_instances(self, rows, selected_name=None) -> None:
+        from PySide6.QtWidgets import QTableWidgetItem, QPushButton
+        self._instance_names = [r["name"] for r in rows]
+        self.instances_table.setRowCount(len(rows))
+        for i, r in enumerate(rows):
+            self.instances_table.setItem(i, 0, QTableWidgetItem(r["profile"]))
+            self.instances_table.setItem(i, 1, QTableWidgetItem(str(r["port"] or "")))
+            dot = "●" if r["health"] == "ready" else ("◐" if r["running"] else "○")
+            self.instances_table.setItem(i, 2, QTableWidgetItem(f"{dot} {r['health']}"))
+            self.instances_table.setItem(i, 3, QTableWidgetItem(r["stat"]))
+            btn = QPushButton("■")
+            btn.setEnabled(r["running"])
+            btn.clicked.connect(lambda _=False, n=r["name"]: self.instance_stop_requested.emit(n))
+            self.instances_table.setCellWidget(i, 4, btn)
+        if selected_name in self._instance_names:
+            self.instances_table.selectRow(self._instance_names.index(selected_name))
+
+    def selected_instance_name(self):
+        items = self.instances_table.selectionModel().selectedRows()
+        if not items:
+            return None
+        return self._instance_names[items[0].row()]
+
+    def _emit_selected_for_row(self, row) -> None:
+        if 0 <= row < len(self._instance_names):
+            self.instance_selected.emit(self._instance_names[row])
+
+    def _emit_stop_for_row(self, row) -> None:
+        if 0 <= row < len(self._instance_names):
+            self.instance_stop_requested.emit(self._instance_names[row])

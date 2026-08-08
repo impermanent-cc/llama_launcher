@@ -212,3 +212,39 @@ def test_update_stats_omits_indicator_when_not_speculating(qtbot):
     qtbot.addWidget(panel)
     panel.update_stats({"metrics_on": False, "speculating": False})
     assert "spec ●" not in panel.summary.text()
+
+
+def test_set_instances_renders_rows_and_selects(qtbot):
+    from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+    panel = MonitorPanel(); qtbot.addWidget(panel)
+    rows = [
+        {"name": "llama-a", "profile": "a", "port": 8080, "running": True,
+         "health": "ready", "stat": "64 tok/s"},
+        {"name": "llama-b", "profile": "b", "port": 8081, "running": True,
+         "health": "ready", "stat": "ready"},
+    ]
+    panel.set_instances(rows, selected_name="llama-b")
+    assert panel.instances_table.rowCount() == 2
+    assert panel.selected_instance_name() == "llama-b"
+
+
+def test_instance_row_click_emits_selected(qtbot):
+    from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+    panel = MonitorPanel(); qtbot.addWidget(panel)
+    panel.set_instances([{"name": "llama-a", "profile": "a", "port": 8080,
+                          "running": True, "health": "ready", "stat": ""}], None)
+    got = []
+    panel.instance_selected.connect(got.append)
+    panel._emit_selected_for_row(0)            # what a row click calls
+    assert got == ["llama-a"]
+
+
+def test_instance_stop_button_emits(qtbot):
+    from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+    panel = MonitorPanel(); qtbot.addWidget(panel)
+    panel.set_instances([{"name": "llama-a", "profile": "a", "port": 8080,
+                          "running": True, "health": "ready", "stat": ""}], None)
+    got = []
+    panel.instance_stop_requested.connect(got.append)
+    panel._emit_stop_for_row(0)
+    assert got == ["llama-a"]
