@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QObject, QThread, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
     QCheckBox, QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
-    QMessageBox, QFileDialog, QInputDialog, QTabWidget
+    QMessageBox, QFileDialog, QInputDialog, QTabWidget, QDockWidget
 )
 
 from llama_launcher.core.spec import (
@@ -47,6 +47,7 @@ from llama_launcher.ui.widgets.collapsible import CollapsibleSection
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
 from llama_launcher.ui.panels.router_panel import RouterPanel
 from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
+from llama_launcher.ui.panels.stats_panel import StatsPanel
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import router_api
 
@@ -387,6 +388,18 @@ class MainWindow(QMainWindow):
         self.tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self.tabs)
 
+        # Right-hand stats dock (GPU / system / container). Hidden by default;
+        # a checkable button in the top bar toggles it. Polling is wired in the
+        # StatsWorker task and runs only while the dock is visible.
+        self.stats_panel = StatsPanel()
+        self.stats_dock = QDockWidget("Stats", self)
+        self.stats_dock.setObjectName("stats_dock")
+        self.stats_dock.setWidget(self.stats_panel)
+        self.stats_dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+        self.addDockWidget(Qt.RightDockWidgetArea, self.stats_dock)
+        self.stats_dock.hide()
+        self.stats_dock.visibilityChanged.connect(self._on_stats_visibility)
+
         # BOTTOM: suggest-family + command preview are config-only; wrap them in
         # one container so they can be hidden on the Monitor/Router/Benchmark
         # tabs (see _on_tab_changed). Launch/Stop/etc stay shared below.
@@ -451,11 +464,15 @@ class MainWindow(QMainWindow):
         self.save_as_btn = QPushButton("Save As")
         self.delete_btn = QPushButton("Delete")
         self.report_btn = QPushButton("Generate report")
+        self.stats_toggle_btn = QPushButton("📊 Stats")
+        self.stats_toggle_btn.setCheckable(True)
+        self.stats_toggle_btn.setToolTip("Show/hide the live stats panel (Ctrl+Shift+S)")
         self.status_label = QLabel("● stopped")
         bar.addWidget(QLabel("Name"))
         bar.addWidget(self.name_edit, 1)
         bar.addWidget(self.profile_combo, 1)
-        for b in (self.save_btn, self.save_as_btn, self.delete_btn, self.report_btn):
+        for b in (self.save_btn, self.save_as_btn, self.delete_btn, self.report_btn,
+                  self.stats_toggle_btn):
             bar.addWidget(b)
         bar.addWidget(self.status_label)
         root.insertLayout(0, bar)
@@ -463,6 +480,10 @@ class MainWindow(QMainWindow):
         self.save_as_btn.clicked.connect(self.save_as_profile)
         self.delete_btn.clicked.connect(self.delete_current_profile)
         self.report_btn.clicked.connect(self.on_generate_report)
+        self.stats_toggle_btn.toggled.connect(self.stats_dock.setVisible)
+        from PySide6.QtGui import QShortcut, QKeySequence
+        QShortcut(QKeySequence("Ctrl+Shift+S"), self,
+                  activated=lambda: self.stats_toggle_btn.toggle())
         self.profile_combo.activated.connect(self._on_pick_profile)
 
         # lifecycle buttons
@@ -479,6 +500,12 @@ class MainWindow(QMainWindow):
         self._on_mode_changed()
 
         self.refresh_preview()
+
+        _stats_cfg = load_config(base_dir())
+        if _stats_cfg.get("stats_open", False):
+            self.stats_toggle_btn.setChecked(True)     # shows the dock
+        _w = int(_stats_cfg.get("stats_width", 320) or 320)
+        self.resizeDocks([self.stats_dock], [_w], Qt.Horizontal)
 
         self._log_proc = None
         self._stop_proc = None
@@ -607,6 +634,19 @@ class MainWindow(QMainWindow):
         # Suggest-family + command preview only make sense while configuring, so
         # hide them on the Monitor/Router/Benchmark tabs.
         self._config_bottom.setVisible(self.tabs.currentWidget() is self._configure_tab)
+
+    def _on_stats_visibility(self, visible: bool) -> None:
+        # Keep the toolbar button in sync when the dock is closed via its own X,
+        # and persist the state. (Worker start/stop is added in the next task.)
+        if self.stats_toggle_btn.isChecked() != visible:
+            self.stats_toggle_btn.setChecked(visible)
+        self._save_stats_config()
+
+    def _save_stats_config(self) -> None:
+        cfg = load_config(base_dir())
+        cfg["stats_open"] = self.stats_dock.isVisibleTo(self)
+        cfg["stats_width"] = self.stats_dock.width() or cfg.get("stats_width", 320)
+        save_config(cfg, base_dir())
 
     def _add_member_item(self, member: RouterMember) -> None:
         from PySide6.QtWidgets import QTableWidgetItem
