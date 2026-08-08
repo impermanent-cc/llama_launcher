@@ -437,6 +437,15 @@ class MainWindow(QMainWindow):
         # before __init__ reaches that later block.
         self._stats_worker = None
         self._cpu_sampler = None
+        # (container_name, binary) snapshot the StatsWorker reads instead of
+        # touching GUI widgets from its own thread -- see _refresh_stats_target.
+        self._stats_target = ("", "podman")
+        # Same early-init hazard as above: _refresh_stats_target() (called
+        # from _start_stats_worker) reads _monitored_container_name(), which
+        # reads _active_instance -- so it must exist before the stats_open
+        # restore/toggle wiring below can reach it. (Moved up from its
+        # original spot further down, near _fetch_worker/_update_worker.)
+        self._active_instance = None      # Instance being monitored, or None -> current profile
         self.stats_dock.visibilityChanged.connect(self._on_stats_visibility)
 
         # BOTTOM: suggest-family + command preview are config-only; wrap them in
@@ -559,7 +568,6 @@ class MainWindow(QMainWindow):
         self._stop_proc = None
         self._fetch_worker = None
         self._update_worker = None
-        self._active_instance = None      # Instance being monitored, or None -> current profile
         self._instances = []              # last-built Instance list (for selection lookup)
 
         from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QStyle
@@ -694,18 +702,23 @@ class MainWindow(QMainWindow):
             self._stop_stats_worker()
         self._save_stats_config()
 
+    def _refresh_stats_target(self) -> None:
+        # Read GUI/profile state on the UI thread only; the worker reads the
+        # resulting plain tuple (safe under the GIL), never the widgets.
+        self._stats_target = (self._monitored_container_name(),
+                              self.current_profile().runtime.binary)
+
     def _start_stats_worker(self) -> None:
         if self._stats_worker is not None and self._stats_worker.isRunning():
             return
         from llama_launcher.services import stats as stats_svc
         from llama_launcher.services.sysstat import CpuSampler
         self._cpu_sampler = CpuSampler()
+        self._refresh_stats_target()
 
         def _build():
-            return stats_svc.build_snapshot(
-                self._monitored_container_name(),
-                self.current_profile().runtime.binary,
-                self._cpu_sampler)
+            name, binary = self._stats_target
+            return stats_svc.build_snapshot(name, binary, self._cpu_sampler)
 
         self._stats_worker = StatsWorker(_build, interval_ms=1000, parent=self)
         self._stats_worker.sampled.connect(self.stats_panel.update_stats)
@@ -1617,6 +1630,11 @@ class MainWindow(QMainWindow):
         worker.start()
 
     def update_status(self):
+        # Keep the (container_name, binary) snapshot StatsWorker reads current
+        # while the dock is open and the user switches profile/instance --
+        # this UI-thread timer callback is the only writer of _stats_target.
+        if self._stats_worker is not None and self._stats_worker.isRunning():
+            self._refresh_stats_target()
         p = self._monitored_profile()
         if not runtime.binary_available(p.runtime.binary):
             self.status_label.setText("● stopped")
@@ -1770,6 +1788,8 @@ class MainWindow(QMainWindow):
         """Stop background timers so a torn-down window stops firing update_status
         (and any pending update check). Idempotent — QTimer.stop() on a stopped
         timer is a no-op. _update_timer exists only when update_check is enabled.
+        Also drains the stats worker via _stop_stats_worker() so a torn-down
+        window can't leave a StatsWorker QThread running.
 
         Also tears down a running benchmark thread: cancels the worker (so a
         loop mid-repeat unwinds instead of running to completion against a
