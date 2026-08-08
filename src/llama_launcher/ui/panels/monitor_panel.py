@@ -319,7 +319,3 @@ class MonitorPanel(QWidget):
     def _emit_selected_for_row(self, row) -> None:
         if 0 <= row < len(self._instance_names):
             self.instance_selected.emit(self._instance_names[row])
-
-    def _emit_stop_for_row(self, row) -> None:
-        if 0 <= row < len(self._instance_names):
-            self.instance_stop_requested.emit(self._instance_names[row])

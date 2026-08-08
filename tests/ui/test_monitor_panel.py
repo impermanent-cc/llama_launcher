@@ -246,5 +246,6 @@ def test_instance_stop_button_emits(qtbot):
                           "running": True, "health": "ready", "stat": ""}], None)
     got = []
     panel.instance_stop_requested.connect(got.append)
-    panel._emit_stop_for_row(0)
+    btn = panel.instances_table.cellWidget(0, 4)   # column 4 is the Stop button
+    btn.click()
     assert got == ["llama-a"]
