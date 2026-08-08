@@ -26,7 +26,7 @@ from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
     load_config, save_config, profile_to_dict, resolve_member_pairs,
 )
-from llama_launcher.core.presets import PRESETS, preset_suggestions
+from llama_launcher.core.presets import PRESETS, Preset, preset_suggestions
 from llama_launcher.store.presets import list_presets as list_user_presets, save_preset as save_user_preset
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
 from llama_launcher.services import benchmark, benchmark_store
@@ -314,6 +314,9 @@ class MainWindow(QMainWindow):
         self.family_combo = NoWheelComboBox()
         self.family_combo.activated.connect(self._on_pick_family)
         family_row.addWidget(self.family_combo, 1)
+        self.save_preset_btn = QPushButton("Save as preset…")
+        self.save_preset_btn.clicked.connect(self.on_save_preset)
+        family_row.addWidget(self.save_preset_btn)
         root.addLayout(family_row)
         self._reload_family_combo()
         root.addWidget(self.suggestions_strip)
@@ -1556,6 +1559,28 @@ class MainWindow(QMainWindow):
     def _on_pick_family(self, _index) -> None:
         self._preset_family = self.family_combo.currentData()
         self._rebuild_suggestions(self._last_caps)
+
+    def on_save_preset(self) -> None:
+        active = self.active_catalog()
+        captured = {k: self._widgets[k].value()
+                    for k in active if self._widgets[k].is_set()}
+        captured.pop("port", None)                 # port is machine state, not a family flag
+        if not captured:
+            QMessageBox.information(
+                self, "Nothing to save",
+                "Set some options first — a preset captures the options you've set.")
+            return
+        name, ok = QInputDialog.getText(self, "Save as preset", "Preset name:")
+        if not ok or not name.strip():
+            return
+        preset = Preset(key=slugify(name), label=name.strip(),
+                        settings=captured, source="user")
+        save_user_preset(preset, base_dir())
+        self._reload_family_combo()
+        idx = self.family_combo.findText(preset.label)
+        if idx >= 0:
+            self.family_combo.setCurrentIndex(idx)
+            self._on_pick_family(idx)
 
     def _rebuild_suggestions(self, caps) -> None:
         while self._suggestions_layout.count():

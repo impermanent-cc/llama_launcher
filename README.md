@@ -46,6 +46,21 @@ container also persists (it isn't auto-removed), so its logs remain readable
 after a crash. The setting is saved per profile. Router profiles are always
 detached, so the checkbox is hidden for them.
 
+## Family presets
+
+Next to the settings is a **Suggest for family** picker. Choose a family
+(curated, e.g. Qwen3-MoE, or one you saved) and its recommended flags appear as
+one-click 💡 chips in the suggestions strip — the same chips the app already
+shows for GGUF-detected capabilities. Each chip is a **suggestion, not a rule**:
+nothing changes until you click it, and clicking applies only that one option
+(there's also an "Apply all …" chip). Your model, mounts, and any values you
+don't accept are left untouched.
+
+**Save as preset…** turns the options you've currently set into a named preset
+that then appears in the picker. Presets store only `llama-server` settings —
+never model paths — and a preset you save overrides a curated one of the same
+name.
+
 ## Benchmark (Monitor tab)
 
 The Monitor tab has a **Benchmark** section for a controlled, repeatable speed
