@@ -303,6 +303,7 @@ class MainWindow(QMainWindow):
         self.router_panel.unload_requested.connect(self._on_router_unload)
         self.router_panel.regenerate_requested.connect(self._on_regenerate_key)
         self.tabs.addTab(self.router_panel, "Router")
+        self.tabs.currentChanged.connect(self._on_tab_changed)
         root.addWidget(self.tabs)
 
         # BOTTOM: preview + buttons (shared, below both tabs)
@@ -486,6 +487,14 @@ class MainWindow(QMainWindow):
         self.lora_panel.setEnabled(not is_router)
         self.detached_check.setVisible(not is_router)
         self.refresh_preview()
+        if is_router:
+            self.refresh_router_panel_header()
+
+    def _on_tab_changed(self, _index: int) -> None:
+        # Entering the Router tab must show a live key even for an edited-but-
+        # unsaved router; refresh_router_panel_header() no-ops for non-routers.
+        if self.tabs.currentWidget() is self.router_panel:
+            self.refresh_router_panel_header()
 
     def _add_member_item(self, member: RouterMember) -> None:
         from PySide6.QtWidgets import QTableWidgetItem
