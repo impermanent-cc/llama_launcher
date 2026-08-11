@@ -107,6 +107,35 @@ def test_failed_props_fetch_retries_next_poll(qtbot, monkeypatch):
     assert len(calls) == 2                 # None result is not cached; retries
 
 
+def test_log_updates_are_coalesced_until_flush(qtbot):
+    """Incoming `podman logs` chunks are buffered and NOT written to the widget
+    per chunk; one flush writes them all at once.
+
+    This is the anti-freeze fix: during heavy generation the log follower fires
+    readyRead very rapidly, and a per-chunk widget append floods the UI thread.
+    _enqueue_log must defer to the flush timer so the widget updates at a bounded
+    rate instead of once per chunk.
+    """
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._enqueue_log("first line\n")
+    w._enqueue_log("second line\n")
+    # Deferred: nothing on the widget yet -- coalesced, not written per chunk.
+    assert w.monitor_panel.log_view.toPlainText() == ""
+    w._flush_log()
+    text = w.monitor_panel.log_view.toPlainText()
+    assert "first line" in text and "second line" in text
+
+
+def test_flush_with_no_pending_is_a_noop(qtbot):
+    """Flushing an empty buffer writes nothing (an idle server must not append
+    blank lines every tick)."""
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._flush_log()
+    assert w.monitor_panel.log_view.toPlainText() == ""
+
+
 def test_router_model_switch_refetches(qtbot, monkeypatch):
     # Strict form (restored after the _status_timer teardown fix, 2026-08-07):
     # a one-shot iterator over the model-id sequence raises StopIteration on any

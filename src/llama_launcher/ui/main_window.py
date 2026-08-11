@@ -565,6 +565,16 @@ class MainWindow(QMainWindow):
         self.resizeDocks([self.stats_dock], [_w], Qt.Horizontal)
 
         self._log_proc = None
+        # Follower output is buffered here and drained to the widget by a timer
+        # at a bounded rate. A per-chunk widget append floods the UI thread when
+        # a model logs heavily during generation (the "unusable while generating"
+        # freeze); coalescing bursts into one append per tick keeps the event
+        # loop free for user input.
+        self._log_pending: list[str] = []
+        from PySide6.QtCore import QTimer
+        self._log_flush_timer = QTimer(self)
+        self._log_flush_timer.setInterval(100)     # 10 Hz -> ~1 widget write / 100 ms
+        self._log_flush_timer.timeout.connect(self._flush_log)
         self._stop_proc = None
         self._fetch_worker = None
         self._update_worker = None
@@ -1818,12 +1828,41 @@ class MainWindow(QMainWindow):
         proc = QProcess(self)
         proc.setProcessChannelMode(QProcess.MergedChannels)
         proc.readyReadStandardOutput.connect(
-            lambda: self.monitor_panel.append_log(bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")))
+            lambda: self._enqueue_log(bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")))
         argv = runtime.logs_argv(name, p.runtime.binary)
         proc.start(argv[0], argv[1:])
         self._log_proc = proc
 
+    def _enqueue_log(self, text: str) -> None:
+        """Buffer a chunk of follower output and ensure the flush timer runs.
+
+        Called from the follower's readyRead, so it must be cheap: it only
+        appends to the buffer. The expensive widget write happens in _flush_log
+        at 10 Hz, so a flood of readyRead during generation can't starve the UI
+        thread of user-input events.
+        """
+        self._log_pending.append(text)
+        if not self._log_flush_timer.isActive():
+            self._log_flush_timer.start()
+
+    def _flush_log(self) -> None:
+        """Drain all buffered follower output to the panel in a single append.
+
+        Stops the timer once the buffer is empty (an idle server shouldn't run a
+        10 Hz timer forever); the next _enqueue_log restarts it.
+        """
+        if not self._log_pending:
+            self._log_flush_timer.stop()
+            return
+        text = "".join(self._log_pending)
+        self._log_pending.clear()
+        self.monitor_panel.append_log(text)
+
     def _stop_log_follower(self):
+        # Stop the flush timer and drop any buffered tail so switching/stopping a
+        # container can't leak one container's trailing lines into the next.
+        self._log_flush_timer.stop()
+        self._log_pending.clear()
         if self._log_proc is not None:
             self._log_proc.kill()
             self._log_proc = None
