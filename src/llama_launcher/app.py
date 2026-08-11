@@ -28,7 +28,7 @@ def _resolve_and_gate(action, profile_name, base_dir):
     p = profiles[profile_name]
     # A launch will create the key if absent, so the exposure guard is satisfied
     # for launch; for stop/health, reflect whether a key actually exists today.
-    api_key_present = (action == "launch") or bool(api_key_store.read_api_key(base_dir, p.name))
+    api_key_present = (action == "launch") or bool(api_key_store.resolve_api_key(base_dir, p))
     members = resolve_member_pairs(p.members, base_dir)
     errs = [i for i in validate(p, binary_found=binary_available(p.runtime.binary),
                                 members=members,

@@ -43,7 +43,7 @@ def launch_router(profile, base_dir, binary) -> LaunchResult:
 
     pairs = resolve_member_pairs(profile.members, base_dir)
     result = render_preset(pairs)
-    api_key_store.ensure_api_key(base_dir, profile.name)
+    api_key_store.prepare_launch_key(base_dir, profile)
     api_key_store.write_preset(base_dir, profile.name, result.text)
     router_host_dir = str(api_key_store.router_dir(base_dir, profile.name))
 

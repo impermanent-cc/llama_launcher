@@ -1134,13 +1134,15 @@ class MainWindow(QMainWindow):
         return base_dir()
 
     def router_api_key(self) -> str:
-        return api_key_store.ensure_api_key(self.router_base_dir(), self._profile_name())
+        p = self.current_profile()
+        return (api_key_store.resolve_api_key(self.router_base_dir(), p)
+                or api_key_store.ensure_api_key(self.router_base_dir(), p.name))
 
     def prepare_router_files(self) -> tuple:
         """Write models.ini + api-key for the current router. Returns (dir, warnings)."""
         name = self._profile_name()
         result = render_preset(self.member_pairs())
-        api_key_store.ensure_api_key(self.router_base_dir(), name)
+        api_key_store.prepare_launch_key(self.router_base_dir(), self.current_profile())
         api_key_store.write_preset(self.router_base_dir(), name, result.text)
         return str(api_key_store.router_dir(self.router_base_dir(), name)), result.warnings
 
@@ -1164,7 +1166,8 @@ class MainWindow(QMainWindow):
         # A router without a key is unusable, and the harness block exists so the
         # key can be copied BEFORE the first launch. Generating here is
         # idempotent and is the only side effect on this path.
-        key = api_key_store.ensure_api_key(self.router_base_dir(), p.name)
+        key = (api_key_store.resolve_api_key(self.router_base_dir(), p)
+               or api_key_store.ensure_api_key(self.router_base_dir(), p.name))
         self.router_panel.set_endpoint(
             f"http://{display_host}:{port}", key,
             [member_model_id(m) for m in p.members])
@@ -1319,7 +1322,7 @@ class MainWindow(QMainWindow):
         # The key must exist before the exposure rule is evaluated: a router
         # always gets one at launch, but this runs before prepare_router_files.
         if p.mode == "router":
-            api_key_store.ensure_api_key(self.router_base_dir(), p.name)
+            api_key_store.prepare_launch_key(self.router_base_dir(), p)
         issues = self.router_issues()
         errors = [i for i in issues if i.level == "error"]
         if errors:
@@ -2066,7 +2069,7 @@ class MainWindow(QMainWindow):
         issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
                           members=self.member_pairs(),
                           api_key_present=bool(
-                              api_key_store.read_api_key(self.router_base_dir(), p.name))
+                              api_key_store.resolve_api_key(self.router_base_dir(), p))
                           if p.mode == "router" else False)
         gpus = gpu.query_gpus()
         gpu_txt = "\n".join(f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, "

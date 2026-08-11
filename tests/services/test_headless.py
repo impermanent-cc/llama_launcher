@@ -185,3 +185,26 @@ def test_launch_dispatches_by_mode(monkeypatch):
     assert headless.launch(_router(), "/base", "podman") == "R"
     assert headless.launch(_server(), "/base", "podman") == "S"
     assert calls == ["router", "server"]
+
+
+from llama_launcher.core.spec import Profile, Runtime
+from llama_launcher.services import api_key, headless
+
+
+def test_launch_router_serves_the_global_key(tmp_path, monkeypatch):
+    # a global key is set; a global-mode router must serve it (per-profile file materialized)
+    api_key.write_global_key(tmp_path, "sk-shared")
+    captured = {}
+
+    def fake_run(argv):
+        captured["argv"] = argv
+        import subprocess
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(headless, "_run", fake_run)
+    monkeypatch.setattr(headless, "container_state", lambda *a, **k: "absent")
+    monkeypatch.setattr(headless, "resolve_member_pairs", lambda *a, **k: [])
+    p = Profile(name="R", image="img", mode="router",
+                runtime=Runtime(router_key_mode="global"), settings={"port": 8080})
+    headless.launch_router(p, tmp_path, "podman")
+    assert api_key.read_api_key(tmp_path, "R") == "sk-shared"
