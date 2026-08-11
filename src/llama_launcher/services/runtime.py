@@ -3,9 +3,22 @@ import shutil
 import subprocess
 
 
-def _run(args: list[str]) -> subprocess.CompletedProcess:
+_DEFAULT_TIMEOUT = 10        # seconds; bounds a hung container binary
+
+
+def _run(args: list[str], timeout: float = _DEFAULT_TIMEOUT) -> subprocess.CompletedProcess:
+    """Run a container-binary command, capturing output.
+
+    A timeout is always passed: these run on the UI thread from update_status,
+    so an unbounded call would freeze the GUI indefinitely if podman/docker
+    hangs. On timeout (or a missing binary) a failing CompletedProcess is
+    returned -- every caller already treats returncode != 0 as "absent/none".
+    """
     try:
-        return subprocess.run(args, capture_output=True, text=True, check=False)
+        return subprocess.run(args, capture_output=True, text=True, check=False,
+                             timeout=timeout)
+    except subprocess.TimeoutExpired as exc:
+        return subprocess.CompletedProcess(args, returncode=124, stdout="", stderr=str(exc))
     except OSError as exc:
         return subprocess.CompletedProcess(args, returncode=127, stdout="", stderr=str(exc))
 

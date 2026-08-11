@@ -59,6 +59,31 @@ def test_run_oserror_returns_completed_process(monkeypatch):
     assert result.returncode == 127
 
 
+def test_run_timeout_returns_completed_process_not_hang(monkeypatch):
+    """A hung podman must never block indefinitely: _run bounds the call with a
+    timeout and, when it fires, returns a failing CompletedProcess (returncode
+    != 0) instead of raising or hanging. update_status runs these on the UI
+    thread, so an unbounded call freezes the GUI forever."""
+    import subprocess as sp
+
+    def _boom(*a, **k):
+        assert k.get("timeout") is not None      # a timeout must be passed
+        raise sp.TimeoutExpired(cmd=a[0] if a else "podman", timeout=k["timeout"])
+
+    monkeypatch.setattr(rt.subprocess, "run", _boom)
+    result = rt._run(["podman", "stats"])
+    assert result.returncode != 0
+    assert result.stdout == ""
+
+
+def test_run_passes_timeout_to_subprocess(monkeypatch):
+    captured = {}
+    monkeypatch.setattr(rt.subprocess, "run",
+                        lambda *a, **k: captured.update(k) or rt.subprocess.CompletedProcess(a, 0, "", ""))
+    rt._run(["podman", "ps"])
+    assert captured.get("timeout") is not None
+
+
 def test_is_rootless_returns_false_when_binary_missing(monkeypatch):
     monkeypatch.setattr(rt.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("no podman")))
     assert rt.is_rootless("podman") is False
