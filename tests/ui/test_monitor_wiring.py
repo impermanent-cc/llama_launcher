@@ -107,6 +107,76 @@ def test_failed_props_fetch_retries_next_poll(qtbot, monkeypatch):
     assert len(calls) == 2                 # None result is not cached; retries
 
 
+def test_build_monitor_data_gathers_from_a_plain_target(monkeypatch):
+    """build_monitor_data() is a pure function of a primitives-only target so it
+    can run off the UI thread: it must gather from those primitives, never from
+    live widget/profile state."""
+    monkeypatch.setattr(mw.metrics, "fetch_metrics",
+                        lambda *a, **k: {"llamacpp:predicted_tokens_seconds": 50.0})
+    monkeypatch.setattr(mw.metrics, "fetch_slots",
+                        lambda *a, **k: [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.runtime, "stats",
+                        lambda name, b: {"cpu_perc": "9%", "mem_usage": "1G / 16G"})
+    monkeypatch.setattr(mw.runtime, "started_at", lambda name, b: None)
+    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
+              "key": None, "model_scope": None, "poll": True,
+              "name": "llama-x", "binary": "podman"}
+    d = mw.build_monitor_data(target)
+    assert d["tok_s"] == 50.0 and d["cpu"] == "9%"
+    assert abs(d["kv_pct"] - 0.40) < 1e-9
+
+
+def test_build_monitor_data_returns_none_when_not_running(monkeypatch):
+    """A not-running target does no I/O and returns None, so the worker emits
+    nothing (an idle/stopped server isn't polled off-thread every second)."""
+    called = []
+    monkeypatch.setattr(mw.runtime, "stats", lambda *a, **k: called.append(1))
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: called.append(1))
+    assert mw.build_monitor_data({"running": False}) is None
+    assert called == []
+
+
+def test_update_status_populates_monitor_target_off_ui_thread(qtbot, monkeypatch):
+    """update_status snapshots the poll inputs into _monitor_target on the UI
+    thread; the worker reads that plain dict and does the blocking gather. When
+    the container is running the target is marked running=True."""
+    _ready(monkeypatch)
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w.update_status()
+    assert w._monitor_target.get("running") is True
+
+
+def test_update_status_marks_target_not_running_when_stopped(qtbot, monkeypatch):
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "stopped")
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w.update_status()
+    assert w._monitor_target.get("running") is False
+
+
+def test_monitor_summary_gathered_off_thread_is_rendered(qtbot, monkeypatch):
+    """End-to-end: the pooled gather's result is rendered on a later tick.
+
+    Tick 1 dispatches the off-thread gather (nothing to render yet); once it
+    completes, tick 2 renders the stored result via update_stats. Guards against
+    the result being cleared before it can be shown.
+    """
+    _ready(monkeypatch)
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    got = []
+    w.monitor_panel.update_stats = lambda d: got.append(d)
+    w.update_status()                       # dispatch; _monitor_result still None
+    from PySide6.QtCore import QThreadPool
+    QThreadPool.globalInstance().waitForDone(2000)
+    w.update_status()                       # renders the gathered result
+    assert got, "no monitor summary was rendered"
+    assert "gpus" in got[-1] and "uptime" in got[-1]
+
+
 def test_log_updates_are_coalesced_until_flush(qtbot):
     """Incoming `podman logs` chunks are buffered and NOT written to the widget
     per chunk; one flush writes them all at once.

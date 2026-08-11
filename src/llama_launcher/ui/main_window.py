@@ -5,7 +5,7 @@ from pathlib import Path
 
 import datetime
 
-from PySide6.QtCore import Qt, QObject, QThread, Signal
+from PySide6.QtCore import Qt, QObject, QRunnable, QThread, QThreadPool, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
     QCheckBox, QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
@@ -69,6 +69,64 @@ def _fmt_uptime(started_at: str | None) -> str:
         return f"{h}h{m:02d}m"
     except (ValueError, TypeError):
         return ""
+
+
+def build_monitor_data(target: dict) -> dict | None:
+    """Gather the Monitor summary from a primitives-only `target`.
+
+    Pure by design: it touches no widget/profile state, only the plain values
+    the UI thread snapshotted into `target` (GIL-safe to read from a worker).
+    This is the blocking part of the poll -- podman stats, nvidia-smi and the
+    /metrics + /slots HTTP calls -- so a worker runs it off the UI thread while
+    update_status keeps the target fresh. Returns None (no I/O) when nothing is
+    running, so the worker emits nothing.
+    """
+    if not target.get("running"):
+        return None
+    from llama_launcher.services.metrics import kv_usage_ratio
+    port, host, key = target["port"], target["host"], target["key"]
+    model_scope, poll = target["model_scope"], target["poll"]
+    name, binary = target["name"], target["binary"]
+    m = (metrics.fetch_metrics(port, model=model_scope, api_key=key, host=host)
+         if target["metrics_on"] and poll else {})
+    slots = (metrics.fetch_slots(port, model=model_scope, api_key=key, host=host)
+             if poll else [])
+    st = runtime.stats(name, binary) or {}
+    uptime = _fmt_uptime(runtime.started_at(name, binary))
+    return {
+        "tok_s": m.get("llamacpp:predicted_tokens_seconds"),
+        "prompt_tok_s": m.get("llamacpp:prompt_tokens_seconds"),
+        "kv_pct": kv_usage_ratio(slots),
+        "speculating": any(s.get("speculative") for s in slots),
+        "gpus": gpu.query_gpus(),
+        "cpu": st.get("cpu_perc", ""),
+        "mem": st.get("mem_usage", ""),
+        "uptime": uptime,
+        "metrics_on": target["metrics_on"],
+    }
+
+
+class _MonitorGather(QRunnable):
+    """Run build_monitor_data() off the UI thread on the global thread pool.
+
+    Delivery is by writing plain attributes on the window (assignment is atomic
+    under the GIL) rather than a cross-thread Qt signal, and the task holds a
+    reference to the window so it can't be garbage-collected mid-gather. That
+    sidesteps the "C++ object deleted while its thread runs" aborts a persistent
+    QThread worker risks when a MainWindow is torn down (notably across tests).
+    """
+    def __init__(self, window, target):
+        super().__init__()
+        self._window = window
+        self._target = target
+
+    def run(self):
+        try:
+            data = build_monitor_data(self._target)
+        except Exception:            # noqa: BLE001 - worker must never raise
+            data = None
+        self._window._monitor_result = data
+        self._window._monitor_inflight = False
 
 
 class _UpdateWorker(QThread):
@@ -620,6 +678,17 @@ class MainWindow(QMainWindow):
 
         # Auto-insert the local image when there's exactly one and none is set yet.
         self._autofill_image_if_empty()
+
+        # The blocking Monitor summary (podman stats, nvidia-smi, /metrics,
+        # /slots) is gathered off the UI thread by a short-lived _MonitorGather
+        # task on the global thread pool (dispatched from update_status);
+        # update_status only snapshots the cheap primitives into _monitor_target
+        # and renders the latest result. No persistent worker thread -- a slow
+        # podman stats can't stutter the GUI, and there's no long-lived QThread
+        # to abort on teardown.
+        self._monitor_target = {"running": False}
+        self._monitor_result = None
+        self._monitor_inflight = False
 
         from PySide6.QtCore import QTimer
         self._status_timer = QTimer(self)
@@ -1661,9 +1730,17 @@ class MainWindow(QMainWindow):
             self.status_label.setText("● stopped")
             self.web_ui_btn.setEnabled(False)
             self.benchmark_panel.set_benchmark_available(False)
+            self._monitor_target = {"running": False}
+            self._monitor_result = None
             return
         name = self._monitored_container_name()
         state = runtime.container_state(name, p.runtime.binary)
+        # Default the gather target to "don't poll"; the running branch below
+        # overwrites it with the live snapshot. Nothing is gathered off-thread
+        # until update_status confirms the container is up. (_monitor_result is
+        # left intact here so the running branch can render the last gather;
+        # it's cleared below only when nothing is running.)
+        self._monitor_target = {"running": False}
         hstatus = health.probe_health(p.settings.get("port", 8080),
                                      host=dial_host(p.runtime.bind_host)) \
             if state == "running" else "down"
@@ -1675,8 +1752,25 @@ class MainWindow(QMainWindow):
                 self._start_log_follower()
             if hstatus == "ready":
                 router_model_key = self._refresh_props(p)
-            self.monitor_panel.update_stats(self.collect_monitor_data())
+            # Snapshot the poll inputs (cheap) and hand the blocking gather to a
+            # pooled task off the UI thread. router_model_key was already
+            # resolved by _refresh_props above -- reuse it so a router tick polls
+            # _router_pollable_model() once. Render the previous tick's result
+            # (up to one tick stale) and dispatch a fresh gather unless one is
+            # already in flight (so a slow podman stats can't pile up).
+            self._monitor_target = self._compute_monitor_target(
+                running=True, model_scope=router_model_key)
+            if self._monitor_result is not None:
+                self.monitor_panel.update_stats(self._monitor_result)
+            if not self._monitor_inflight:
+                self._monitor_inflight = True
+                QThreadPool.globalInstance().start(
+                    _MonitorGather(self, self._monitor_target))
             self._update_spec_stats(p)
+        else:
+            # Nothing running: drop the last gather so a stale summary isn't
+            # rendered on the next start before a fresh gather completes.
+            self._monitor_result = None
         if p.mode == "router":
             if state == "running":
                 self.refresh_router_models()
@@ -1778,36 +1872,44 @@ class MainWindow(QMainWindow):
             stat = f"{tok:.0f} tok/s" if tok else ("ready" if hstatus == "ready" else "")
         return {"running": True, "health": hstatus, "stat": stat}
 
-    def collect_monitor_data(self) -> dict:
-        from llama_launcher.services.metrics import kv_usage_ratio
+    def _compute_monitor_target(self, running: bool, model_scope=None) -> dict:
+        """Snapshot the poll inputs into a primitives-only dict on the UI thread.
+
+        The monitor worker reads this (never the widgets/profile) and calls
+        build_monitor_data() off-thread, so the blocking gather -- podman stats,
+        nvidia-smi, /metrics, /slots -- no longer runs on the UI thread. Only
+        the cheap derivation of these primitives stays here.
+
+        The router model to scope polling to is passed in (already resolved by
+        _refresh_props this tick) rather than re-polled here, so a router tick
+        calls _router_pollable_model() exactly once.
+        """
+        if not running:
+            return {"running": False}
         p = self._monitored_profile()
-        port = p.settings.get("port", 8080)
-        metrics_on = bool(p.settings.get("metrics"))
-        host, key, model_scope, poll = (dial_host(p.runtime.bind_host),
-                                        self._poll_api_key(p), None, True)
+        host, key, ms, poll = (dial_host(p.runtime.bind_host),
+                               self._poll_api_key(p), None, True)
         if p.mode == "router":
             host = self._router_host(p)
-            model_scope = self._router_pollable_model()
-            poll = model_scope is not None
-        m = (metrics.fetch_metrics(port, model=model_scope, api_key=key, host=host)
-             if metrics_on and poll else {})
-        slots = (metrics.fetch_slots(port, model=model_scope, api_key=key, host=host)
-                 if poll else [])
-        name = self._monitored_container_name()
-        st = runtime.stats(name, p.runtime.binary) or {}
-        started = runtime.started_at(name, p.runtime.binary)
-        uptime = _fmt_uptime(started)
+            ms = model_scope
+            poll = ms is not None
         return {
-            "tok_s": m.get("llamacpp:predicted_tokens_seconds"),
-            "prompt_tok_s": m.get("llamacpp:prompt_tokens_seconds"),
-            "kv_pct": kv_usage_ratio(slots),
-            "speculating": any(s.get("speculative") for s in slots),
-            "gpus": gpu.query_gpus(),
-            "cpu": st.get("cpu_perc", ""),
-            "mem": st.get("mem_usage", ""),
-            "uptime": uptime,
-            "metrics_on": metrics_on,
+            "running": True,
+            "port": p.settings.get("port", 8080),
+            "metrics_on": bool(p.settings.get("metrics")),
+            "host": host, "key": key, "model_scope": ms, "poll": poll,
+            "name": self._monitored_container_name(),
+            "binary": p.runtime.binary,
         }
+
+    def collect_monitor_data(self) -> dict:
+        """Gather the Monitor summary synchronously (used by tests and any
+        direct caller). The live poll instead snapshots _compute_monitor_target()
+        and lets the worker call build_monitor_data() off the UI thread."""
+        p = self._monitored_profile()
+        ms = self._router_pollable_model() if p.mode == "router" else None
+        return build_monitor_data(
+            self._compute_monitor_target(running=True, model_scope=ms)) or {}
 
     def _log_follower_active(self) -> bool:
         from PySide6.QtCore import QProcess
@@ -1892,6 +1994,10 @@ class MainWindow(QMainWindow):
         if update_timer is not None:
             update_timer.stop()
         self._stop_stats_worker()
+        # Let any in-flight monitor gather finish (bounded) so it isn't writing
+        # to the window during teardown; the pool's threads outlive the window,
+        # so there's nothing to abort even if this times out.
+        QThreadPool.globalInstance().waitForDone(3000)
 
         # Drain any in-flight registry-fetch / update-check QThread so closing
         # the window mid-fetch can't destroy a running QThread (abort/crash).

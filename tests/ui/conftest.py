@@ -38,3 +38,8 @@ def _hermetic_ui_boundaries(monkeypatch):
     monkeypatch.setattr(_router_api, "load_model", lambda *a, **kw: True)
     monkeypatch.setattr(_router_api, "unload_model", lambda *a, **kw: True)
     monkeypatch.setattr(_registry, "fetch_latest", lambda repo, prefix, timeout=10.0: None)
+    yield
+    # Drain any in-flight pooled monitor gather so a task can't run (and write to
+    # a window) during the next test's teardown.
+    from PySide6.QtCore import QThreadPool
+    QThreadPool.globalInstance().waitForDone(2000)
