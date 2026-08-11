@@ -104,3 +104,57 @@ def test_set_profile_key_overwrites_and_reads_back(tmp_path):
     assert api_key.read_api_key(tmp_path, "R") == "sk-mine"
     mode = api_key._key_path(tmp_path, "R", create=False).stat().st_mode & 0o777
     assert mode == 0o600
+
+
+# Task 3: Resolver + launch-time materializer
+from llama_launcher.core.spec import Profile, Runtime
+
+
+def _profile(name, mode):
+    return Profile(name=name, image="img", runtime=Runtime(router_key_mode=mode))
+
+
+def test_resolve_global_prefers_global_key(tmp_path):
+    api_key.ensure_api_key(tmp_path, "R")            # a legacy per-profile key exists
+    api_key.write_global_key(tmp_path, "sk-shared")
+    assert api_key.resolve_api_key(tmp_path, _profile("R", "global")) == "sk-shared"
+
+
+def test_resolve_global_falls_back_to_per_profile_when_no_global(tmp_path):
+    legacy = api_key.ensure_api_key(tmp_path, "R")
+    assert api_key.resolve_api_key(tmp_path, _profile("R", "global")) == legacy
+
+
+def test_resolve_own_ignores_global(tmp_path):
+    api_key.set_profile_key(tmp_path, "R", "sk-own")
+    api_key.write_global_key(tmp_path, "sk-shared")
+    assert api_key.resolve_api_key(tmp_path, _profile("R", "own")) == "sk-own"
+
+
+def test_resolve_returns_none_when_nothing_set(tmp_path):
+    assert api_key.resolve_api_key(tmp_path, _profile("R", "global")) is None
+
+
+def test_resolve_is_side_effect_free(tmp_path):
+    # global mode, no keys -> must NOT create a per-profile file
+    api_key.resolve_api_key(tmp_path, _profile("R", "global"))
+    assert api_key.read_api_key(tmp_path, "R") is None
+
+
+def test_prepare_launch_materializes_global_into_per_profile_file(tmp_path):
+    api_key.write_global_key(tmp_path, "sk-shared")
+    key = api_key.prepare_launch_key(tmp_path, _profile("R", "global"))
+    assert key == "sk-shared"
+    # the container reads the per-profile file, so it must now hold the global key
+    assert api_key.read_api_key(tmp_path, "R") == "sk-shared"
+
+
+def test_prepare_launch_generates_when_no_global(tmp_path):
+    key = api_key.prepare_launch_key(tmp_path, _profile("R", "global"))
+    assert key and api_key.read_api_key(tmp_path, "R") == key
+
+
+def test_prepare_launch_own_uses_per_profile(tmp_path):
+    api_key.set_profile_key(tmp_path, "R", "sk-own")
+    api_key.write_global_key(tmp_path, "sk-shared")
+    assert api_key.prepare_launch_key(tmp_path, _profile("R", "own")) == "sk-own"

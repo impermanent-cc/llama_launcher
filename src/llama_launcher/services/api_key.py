@@ -128,3 +128,31 @@ def write_global_key(base_dir: Path, key: str) -> str:
 def set_profile_key(base_dir: Path, router_name: str, key: str) -> str:
     """Write a user-supplied value to the per-profile key file (0600)."""
     return _write_key(base_dir, router_name, key)
+
+
+def resolve_api_key(base_dir: Path, profile) -> str | None:
+    """The effective key for this profile, read-only (no generate, no write).
+
+    own    -> the per-profile key file.
+    global -> the shared global key if set, else the per-profile file (legacy).
+    """
+    name = profile.name
+    if profile.runtime.router_key_mode == "own":
+        return read_api_key(base_dir, name)
+    return read_global_key(base_dir) or read_api_key(base_dir, name)
+
+
+def prepare_launch_key(base_dir: Path, profile) -> str:
+    """Ensure an effective key exists and write it into the per-profile file the
+    container serves (--api-key-file). Returns the key.
+
+    In global mode this copies the shared key into the per-profile file so the
+    launched container serves the shared key without any command_builder change.
+    """
+    name = profile.name
+    if profile.runtime.router_key_mode == "own":
+        return ensure_api_key(base_dir, name)
+    key = read_global_key(base_dir)
+    if key is None:
+        return ensure_api_key(base_dir, name)   # legacy: generate + persist per-profile
+    return set_profile_key(base_dir, name, key)
