@@ -96,11 +96,12 @@ def test_scope_toggle_emits_mode(qtbot):
 def test_set_scope_does_not_emit(qtbot):
     panel = RouterPanel()
     qtbot.addWidget(panel)
-    panel.set_scope("own")
-    assert panel._current_scope() == "own"
-    # set_scope must be silent; a spy would time out, so assert state only
-    panel.set_scope("global")
+    seen = []
+    panel.key_scope_changed.connect(seen.append)
+    panel.set_scope("own")      # global -> own
+    panel.set_scope("global")   # own -> global
     assert panel._current_scope() == "global"
+    assert seen == [], f"set_scope must be silent, but emitted {seen}"
 
 
 def test_save_key_normalizes_and_emits_current_scope(qtbot):

@@ -157,10 +157,11 @@ class RouterPanel(QWidget):
         return "own" if self.scope_own.isChecked() else "global"
 
     def set_scope(self, mode: str) -> None:
-        btn = self.scope_own if mode == "own" else self.scope_global
-        btn.blockSignals(True)
-        btn.setChecked(True)
-        btn.blockSignals(False)
+        self.scope_global.blockSignals(True)
+        self.scope_own.blockSignals(True)
+        (self.scope_own if mode == "own" else self.scope_global).setChecked(True)
+        self.scope_global.blockSignals(False)
+        self.scope_own.blockSignals(False)
 
     def _on_scope_toggled(self, _checked: bool) -> None:
         self.key_scope_changed.emit(self._current_scope())
