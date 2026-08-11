@@ -72,3 +72,35 @@ def test_key_file_is_never_world_readable_even_briefly(tmp_path, monkeypatch):
     api_key.ensure_api_key(tmp_path, "R")
     path = api_key.router_dir(tmp_path, "R") / "api-key"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+import pytest
+
+
+def test_normalize_strips_surrounding_whitespace():
+    assert api_key.normalize_key("  sk-abc \n") == "sk-abc"
+
+
+@pytest.mark.parametrize("bad", ["", "   ", "a\nb"])
+def test_normalize_rejects_empty_or_multiline(bad):
+    with pytest.raises(ValueError):
+        api_key.normalize_key(bad)
+
+
+def test_write_and_read_global_key(tmp_path):
+    assert api_key.read_global_key(tmp_path) is None
+    api_key.write_global_key(tmp_path, "sk-global")
+    assert api_key.read_global_key(tmp_path) == "sk-global"
+
+
+def test_global_key_file_is_0600(tmp_path):
+    api_key.write_global_key(tmp_path, "sk-global")
+    mode = api_key.global_key_path(tmp_path).stat().st_mode & 0o777
+    assert mode == 0o600
+
+
+def test_set_profile_key_overwrites_and_reads_back(tmp_path):
+    api_key.set_profile_key(tmp_path, "R", "sk-mine")
+    assert api_key.read_api_key(tmp_path, "R") == "sk-mine"
+    mode = api_key._key_path(tmp_path, "R", create=False).stat().st_mode & 0o777
+    assert mode == 0o600
