@@ -467,7 +467,8 @@ class MainWindow(QMainWindow):
         self.router_panel = RouterPanel()
         self.router_panel.load_requested.connect(self._on_router_load)
         self.router_panel.unload_requested.connect(self._on_router_unload)
-        self.router_panel.regenerate_requested.connect(self._on_regenerate_key)
+        self.router_panel.key_scope_changed.connect(self._on_key_scope_changed)
+        self.router_panel.key_saved.connect(self._on_key_saved)
         self.tabs.addTab(self.router_panel, "Router")
         self.benchmark_panel = BenchmarkPanel()
         self.benchmark_panel.benchmark_run_requested.connect(self._on_benchmark_run)
@@ -1044,6 +1045,7 @@ class MainWindow(QMainWindow):
         self.refresh_preview()
         # Reattach-after-restart is the common path: selecting a saved router
         # must show its key, harness block and exposure banner immediately.
+        self.router_panel.set_scope(p.runtime.router_key_mode)
         self.refresh_router_panel_header()
 
     def current_profile(self) -> Profile:
@@ -1066,7 +1068,8 @@ class MainWindow(QMainWindow):
                             extra_run_args=self.extra_args_edit.text(),
                             bind_host=self.bind_host_combo.currentText().strip()
                                       or "127.0.0.1",
-                            detached=self.detached_check.isChecked()),
+                            detached=self.detached_check.isChecked(),
+                            router_key_mode=self.router_panel._current_scope()),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
@@ -1146,14 +1149,17 @@ class MainWindow(QMainWindow):
         api_key_store.write_preset(self.router_base_dir(), name, result.text)
         return str(api_key_store.router_dir(self.router_base_dir(), name)), result.warnings
 
-    def _on_regenerate_key(self) -> None:
-        name = self._profile_name()
-        answer = QMessageBox.question(
-            self, "Regenerate API key",
-            "This invalidates the key any configured harness is using. Continue?")
-        if answer != QMessageBox.Yes:
-            return
-        api_key_store.regenerate_api_key(self.router_base_dir(), name)
+    def _on_key_scope_changed(self, mode: str) -> None:
+        # The radio already feeds current_profile(); persist and re-resolve display.
+        self.save_current_profile()
+        self.refresh_router_panel_header()
+
+    def _on_key_saved(self, scope: str, value: str) -> None:
+        base = self.router_base_dir()
+        if scope == "global":
+            api_key_store.write_global_key(base, value)
+        else:
+            api_key_store.set_profile_key(base, self._profile_name(), value)
         self.refresh_router_panel_header()
 
     def refresh_router_panel_header(self) -> None:
