@@ -43,6 +43,7 @@ class Runtime:
     extra_run_args: str = ""
     bind_host: str = "127.0.0.1"  # publish address; non-loopback exposes the port
     detached: bool = False        # GUI server launch: no terminal, Monitor-driven
+    router_key_mode: str = "global"  # "global" (shared key) | "own" (per-profile key)
 
 
 @dataclass
