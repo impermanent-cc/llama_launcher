@@ -81,6 +81,33 @@ def test_saving_own_key_writes_per_profile_file(win):
     assert api_key.read_api_key(win.router_base_dir(), "r_own") == "sk-mine"
 
 
+def test_saving_key_while_router_running_warns_a_relaunch_is_needed(win, monkeypatch):
+    from llama_launcher.ui import main_window as mw
+
+    _make_router(win, "r_running")
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
+    calls = []
+    monkeypatch.setattr(mw.QMessageBox, "information",
+                        lambda *a, **k: calls.append((a, k)))
+    win.router_panel.set_scope("global")
+    win.router_panel._save_key("sk-shared")
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("state", ["absent", "stopped"])
+def test_saving_key_while_router_not_running_does_not_warn(win, monkeypatch, state):
+    from llama_launcher.ui import main_window as mw
+
+    _make_router(win, "r_idle")
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: state)
+    calls = []
+    monkeypatch.setattr(mw.QMessageBox, "information",
+                        lambda *a, **k: calls.append((a, k)))
+    win.router_panel.set_scope("global")
+    win.router_panel._save_key("sk-shared")
+    assert calls == []
+
+
 def test_loading_profile_syncs_scope_radio(win):
     from llama_launcher.core.spec import Runtime, RouterMember
     store.save_profile(Profile(name="gen", image="img", settings={"port": 8080}),

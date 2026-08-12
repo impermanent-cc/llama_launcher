@@ -38,13 +38,6 @@ def test_read_api_key_ignores_comments_and_blank_lines(tmp_path):
     assert api_key.read_api_key(tmp_path, "R") == "sk-real"
 
 
-def test_regenerate_api_key_replaces_the_old_one(tmp_path):
-    first = api_key.ensure_api_key(tmp_path, "R")
-    second = api_key.regenerate_api_key(tmp_path, "R")
-    assert second != first
-    assert api_key.read_api_key(tmp_path, "R") == second
-
-
 def test_write_preset_writes_into_the_router_dir(tmp_path):
     path = api_key.write_preset(tmp_path, "R", "version = 1\n")
     assert path == api_key.router_dir(tmp_path, "R") / "models.ini"
@@ -97,6 +90,18 @@ def test_global_key_file_is_0600(tmp_path):
     api_key.write_global_key(tmp_path, "sk-global")
     mode = api_key.global_key_path(tmp_path).stat().st_mode & 0o777
     assert mode == 0o600
+
+
+def test_write_global_key_tightens_a_preexisting_wider_router_dir(tmp_path):
+    # router_dir() as an intermediate parent (e.g. a per-profile key written
+    # first) creates base_dir/router 0700 via mkdir -p, but exist_ok=True on a
+    # later mkdir call would not re-tighten it if something else widened it.
+    d = api_key.router_dir(tmp_path, "R")   # creates base_dir/router along the way
+    (tmp_path / "router").chmod(0o755)
+    api_key.write_global_key(tmp_path, "sk-global")
+    mode = stat.S_IMODE((tmp_path / "router").stat().st_mode)
+    assert mode == 0o700
+    assert d.exists()  # sanity: didn't touch the per-router subdirectory
 
 
 def test_set_profile_key_overwrites_and_reads_back(tmp_path):

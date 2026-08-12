@@ -971,7 +971,7 @@ class MainWindow(QMainWindow):
     def router_issues(self) -> list:
         """Validation issues for the current profile, router context included."""
         p = self.current_profile()
-        key_present = bool(api_key_store.read_api_key(self.router_base_dir(), p.name)) \
+        key_present = bool(api_key_store.resolve_api_key(self.router_base_dir(), p)) \
             if p.mode == "router" else False
         issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
                           members=self.member_pairs(), api_key_present=key_present)
@@ -1153,6 +1153,7 @@ class MainWindow(QMainWindow):
         # The radio already feeds current_profile(); persist and re-resolve display.
         self.save_current_profile()
         self.refresh_router_panel_header()
+        self._notify_key_change_needs_relaunch()
 
     def _on_key_saved(self, scope: str, value: str) -> None:
         base = self.router_base_dir()
@@ -1161,6 +1162,20 @@ class MainWindow(QMainWindow):
         else:
             api_key_store.set_profile_key(base, self._profile_name(), value)
         self.refresh_router_panel_header()
+        self._notify_key_change_needs_relaunch()
+
+    def _notify_key_change_needs_relaunch(self) -> None:
+        """The running router keeps serving the key it launched with -- a key
+        change here only takes effect on the NEXT launch. Without this, a user
+        who copies the newly-shown key into their harness while the router is
+        still up gets a bare 401 with nothing in the GUI explaining why."""
+        p = self.current_profile()
+        if runtime.container_state(self._container_name(),
+                                   p.runtime.binary) == "running":
+            QMessageBox.information(
+                self, "Relaunch needed",
+                "The router is running. Relaunch it for the new API key to "
+                "take effect.")
 
     def refresh_router_panel_header(self) -> None:
         p = self.current_profile()
