@@ -105,6 +105,24 @@ so changing a flag and re-running tells you immediately whether it helped. Works
 for both single-model **server** and **router** profiles (router scopes the
 request to the loaded model).
 
+## Router API key
+
+A router authenticates clients with a bearer API key (`sk-…`), shown on the
+Router panel with Reveal/Copy. Point your harness at `http://HOST:PORT/v1`
+with this key.
+
+Two scopes control where the key comes from:
+
+- **Global** (default) — one shared key used by every router profile. Set it
+  once and every global-scope profile serves it, so a harness needs the key
+  only once, even when you switch profiles.
+- **Own key for this profile** — pin a distinct key on a specific profile
+  when you want it isolated from the shared one.
+
+Use **Edit…** to paste your own key value or click **Generate** for a fresh
+one, then **Save**. Saving a global key updates every global-scope profile at
+once. Changing a key takes effect the next time the router launches.
+
 ## Headless control
 
 Drive a profile without the GUI (for test harnesses). Runs on the host with

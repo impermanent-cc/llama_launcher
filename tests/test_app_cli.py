@@ -336,3 +336,32 @@ def test_json_health_down(monkeypatch, capsys):
     assert app.main(["--health", "--profile", "r", "--json"]) == 4
     obj = json.loads(capsys.readouterr().out)
     assert obj["ok"] is False and obj["status"] == "stopped"
+
+
+from llama_launcher.core.spec import Mount, Profile, Runtime, RouterMember
+from llama_launcher.services import api_key
+from llama_launcher import app
+from llama_launcher.store import profiles as store
+
+
+def test_gate_treats_global_key_as_present_for_health(tmp_path):
+    # global-mode router, only a global key exists, never launched (no per-profile file)
+    api_key.write_global_key(tmp_path, "sk-shared")
+    # A resolvable member is included so the real validate()'s "needs at least
+    # one model" rule (unrelated to this test) doesn't also fire -- this test
+    # isolates the api-key exposure check, per test_gate_router_with_valid_
+    # member_passes_real_validate's pattern above.
+    store.save_profile(
+        Profile(name="R", image="img", mode="router",
+                runtime=Runtime(bind_host="0.0.0.0", router_key_mode="global"),
+                mounts=[Mount(host="/host/models", container="/models", role="model")],
+                members=[RouterMember(profile="m1")],
+                settings={"port": 8080}),
+        tmp_path)
+    store.save_profile(
+        Profile(name="m1", image="img2", runtime=Runtime(), model="/models/model.gguf"),
+        tmp_path)
+    p, code, msg = app._resolve_and_gate("health", "R", tmp_path)
+    # bound to 0.0.0.0 => exposure rule fires ONLY if the key looks absent;
+    # with a global key present there must be no error.
+    assert code is None, msg

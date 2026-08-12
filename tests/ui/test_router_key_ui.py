@@ -47,3 +47,73 @@ def test_showing_router_tab_populates_the_key(win):
             win.tabs.setCurrentIndex(i)
             break
     assert win.router_panel._api_key, "key should repopulate when the Router tab is shown"
+
+
+from llama_launcher.services import api_key
+
+
+def _make_router(win, name):
+    from llama_launcher.core.spec import RouterMember
+    store.save_profile(Profile(name="gen", image="img", settings={"port": 8080}),
+                       store.default_base_dir())
+    win.name_edit.setText(name)
+    win._add_member_item(RouterMember(profile="gen"))
+    win.mode_combo.setCurrentIndex(_router_index(win))
+
+
+def test_scope_radio_flows_into_current_profile(win):
+    _make_router(win, "r_mode")
+    win.router_panel.scope_own.setChecked(True)     # fires key_scope_changed
+    assert win.current_profile().runtime.router_key_mode == "own"
+
+
+def test_saving_global_key_writes_global_file(win):
+    _make_router(win, "r_glob")
+    win.router_panel.set_scope("global")
+    win.router_panel._save_key("sk-shared")         # fires key_saved
+    assert api_key.read_global_key(win.router_base_dir()) == "sk-shared"
+
+
+def test_saving_own_key_writes_per_profile_file(win):
+    _make_router(win, "r_own")
+    win.router_panel.set_scope("own")
+    win.router_panel._save_key("sk-mine")
+    assert api_key.read_api_key(win.router_base_dir(), "r_own") == "sk-mine"
+
+
+def test_saving_key_while_router_running_warns_a_relaunch_is_needed(win, monkeypatch):
+    from llama_launcher.ui import main_window as mw
+
+    _make_router(win, "r_running")
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
+    calls = []
+    monkeypatch.setattr(mw.QMessageBox, "information",
+                        lambda *a, **k: calls.append((a, k)))
+    win.router_panel.set_scope("global")
+    win.router_panel._save_key("sk-shared")
+    assert len(calls) == 1
+
+
+@pytest.mark.parametrize("state", ["absent", "stopped"])
+def test_saving_key_while_router_not_running_does_not_warn(win, monkeypatch, state):
+    from llama_launcher.ui import main_window as mw
+
+    _make_router(win, "r_idle")
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: state)
+    calls = []
+    monkeypatch.setattr(mw.QMessageBox, "information",
+                        lambda *a, **k: calls.append((a, k)))
+    win.router_panel.set_scope("global")
+    win.router_panel._save_key("sk-shared")
+    assert calls == []
+
+
+def test_loading_profile_syncs_scope_radio(win):
+    from llama_launcher.core.spec import Runtime, RouterMember
+    store.save_profile(Profile(name="gen", image="img", settings={"port": 8080}),
+                       store.default_base_dir())
+    p = Profile(name="r_load", image="img", mode="router",
+                runtime=Runtime(router_key_mode="own"), settings={"port": 8080},
+                members=[RouterMember(profile="gen")])
+    win.load_profile(p)
+    assert win.router_panel._current_scope() == "own"

@@ -467,7 +467,8 @@ class MainWindow(QMainWindow):
         self.router_panel = RouterPanel()
         self.router_panel.load_requested.connect(self._on_router_load)
         self.router_panel.unload_requested.connect(self._on_router_unload)
-        self.router_panel.regenerate_requested.connect(self._on_regenerate_key)
+        self.router_panel.key_scope_changed.connect(self._on_key_scope_changed)
+        self.router_panel.key_saved.connect(self._on_key_saved)
         self.tabs.addTab(self.router_panel, "Router")
         self.benchmark_panel = BenchmarkPanel()
         self.benchmark_panel.benchmark_run_requested.connect(self._on_benchmark_run)
@@ -970,7 +971,7 @@ class MainWindow(QMainWindow):
     def router_issues(self) -> list:
         """Validation issues for the current profile, router context included."""
         p = self.current_profile()
-        key_present = bool(api_key_store.read_api_key(self.router_base_dir(), p.name)) \
+        key_present = bool(api_key_store.resolve_api_key(self.router_base_dir(), p)) \
             if p.mode == "router" else False
         issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
                           members=self.member_pairs(), api_key_present=key_present)
@@ -1044,6 +1045,7 @@ class MainWindow(QMainWindow):
         self.refresh_preview()
         # Reattach-after-restart is the common path: selecting a saved router
         # must show its key, harness block and exposure banner immediately.
+        self.router_panel.set_scope(p.runtime.router_key_mode)
         self.refresh_router_panel_header()
 
     def current_profile(self) -> Profile:
@@ -1066,7 +1068,8 @@ class MainWindow(QMainWindow):
                             extra_run_args=self.extra_args_edit.text(),
                             bind_host=self.bind_host_combo.currentText().strip()
                                       or "127.0.0.1",
-                            detached=self.detached_check.isChecked()),
+                            detached=self.detached_check.isChecked(),
+                            router_key_mode=self.router_panel._current_scope()),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
@@ -1134,25 +1137,45 @@ class MainWindow(QMainWindow):
         return base_dir()
 
     def router_api_key(self) -> str:
-        return api_key_store.ensure_api_key(self.router_base_dir(), self._profile_name())
+        p = self.current_profile()
+        return (api_key_store.resolve_api_key(self.router_base_dir(), p)
+                or api_key_store.ensure_api_key(self.router_base_dir(), p.name))
 
     def prepare_router_files(self) -> tuple:
         """Write models.ini + api-key for the current router. Returns (dir, warnings)."""
         name = self._profile_name()
         result = render_preset(self.member_pairs())
-        api_key_store.ensure_api_key(self.router_base_dir(), name)
+        api_key_store.prepare_launch_key(self.router_base_dir(), self.current_profile())
         api_key_store.write_preset(self.router_base_dir(), name, result.text)
         return str(api_key_store.router_dir(self.router_base_dir(), name)), result.warnings
 
-    def _on_regenerate_key(self) -> None:
-        name = self._profile_name()
-        answer = QMessageBox.question(
-            self, "Regenerate API key",
-            "This invalidates the key any configured harness is using. Continue?")
-        if answer != QMessageBox.Yes:
-            return
-        api_key_store.regenerate_api_key(self.router_base_dir(), name)
+    def _on_key_scope_changed(self, mode: str) -> None:
+        # The radio already feeds current_profile(); persist and re-resolve display.
+        self.save_current_profile()
         self.refresh_router_panel_header()
+        self._notify_key_change_needs_relaunch()
+
+    def _on_key_saved(self, scope: str, value: str) -> None:
+        base = self.router_base_dir()
+        if scope == "global":
+            api_key_store.write_global_key(base, value)
+        else:
+            api_key_store.set_profile_key(base, self._profile_name(), value)
+        self.refresh_router_panel_header()
+        self._notify_key_change_needs_relaunch()
+
+    def _notify_key_change_needs_relaunch(self) -> None:
+        """The running router keeps serving the key it launched with -- a key
+        change here only takes effect on the NEXT launch. Without this, a user
+        who copies the newly-shown key into their harness while the router is
+        still up gets a bare 401 with nothing in the GUI explaining why."""
+        p = self.current_profile()
+        if runtime.container_state(self._container_name(),
+                                   p.runtime.binary) == "running":
+            QMessageBox.information(
+                self, "Relaunch needed",
+                "The router is running. Relaunch it for the new API key to "
+                "take effect.")
 
     def refresh_router_panel_header(self) -> None:
         p = self.current_profile()
@@ -1164,7 +1187,8 @@ class MainWindow(QMainWindow):
         # A router without a key is unusable, and the harness block exists so the
         # key can be copied BEFORE the first launch. Generating here is
         # idempotent and is the only side effect on this path.
-        key = api_key_store.ensure_api_key(self.router_base_dir(), p.name)
+        key = (api_key_store.resolve_api_key(self.router_base_dir(), p)
+               or api_key_store.ensure_api_key(self.router_base_dir(), p.name))
         self.router_panel.set_endpoint(
             f"http://{display_host}:{port}", key,
             [member_model_id(m) for m in p.members])
@@ -1319,7 +1343,7 @@ class MainWindow(QMainWindow):
         # The key must exist before the exposure rule is evaluated: a router
         # always gets one at launch, but this runs before prepare_router_files.
         if p.mode == "router":
-            api_key_store.ensure_api_key(self.router_base_dir(), p.name)
+            api_key_store.prepare_launch_key(self.router_base_dir(), p)
         issues = self.router_issues()
         errors = [i for i in issues if i.level == "error"]
         if errors:
@@ -2066,7 +2090,7 @@ class MainWindow(QMainWindow):
         issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
                           members=self.member_pairs(),
                           api_key_present=bool(
-                              api_key_store.read_api_key(self.router_base_dir(), p.name))
+                              api_key_store.resolve_api_key(self.router_base_dir(), p))
                           if p.mode == "router" else False)
         gpus = gpu.query_gpus()
         gpu_txt = "\n".join(f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, "

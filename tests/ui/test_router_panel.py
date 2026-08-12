@@ -83,3 +83,38 @@ def test_disconnected_state_is_reported(qtbot):
     qtbot.addWidget(panel)
     panel.set_connected(False)
     assert "disconnected" in panel.status_label.text().lower()
+
+
+def test_scope_toggle_emits_mode(qtbot):
+    panel = RouterPanel()
+    qtbot.addWidget(panel)
+    with qtbot.waitSignal(panel.key_scope_changed) as sig:
+        panel.scope_own.setChecked(True)
+    assert sig.args == ["own"]
+
+
+def test_set_scope_does_not_emit(qtbot):
+    panel = RouterPanel()
+    qtbot.addWidget(panel)
+    seen = []
+    panel.key_scope_changed.connect(seen.append)
+    panel.set_scope("own")      # global -> own
+    panel.set_scope("global")   # own -> global
+    assert panel._current_scope() == "global"
+    assert seen == [], f"set_scope must be silent, but emitted {seen}"
+
+
+def test_save_key_normalizes_and_emits_current_scope(qtbot):
+    panel = RouterPanel()
+    qtbot.addWidget(panel)
+    panel.set_scope("global")
+    with qtbot.waitSignal(panel.key_saved) as sig:
+        panel._save_key("  sk-typed \n")
+    assert sig.args == ["global", "sk-typed"]
+
+
+def test_save_key_rejects_empty(qtbot):
+    panel = RouterPanel()
+    qtbot.addWidget(panel)
+    # empty must not emit; _save_key returns False and swallows the ValueError
+    assert panel._save_key("   ") is False
