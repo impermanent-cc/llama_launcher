@@ -48,6 +48,20 @@ def validate(profile: Profile, running_ports: tuple = (),
         issues.append(Issue("error",
                             f"Runtime '{profile.runtime.binary}' not found on PATH."))
 
+    img = profile.image.lower()
+    looks_ik = "ik-llama" in img or "ik_llama" in img
+    if profile.runtime.engine == "ik_llama.cpp" and img and not looks_ik:
+        issues.append(Issue(
+            "warning",
+            "Engine is ik_llama.cpp but the image doesn't look like an ik build "
+            "(no 'ik-llama'/'ik_llama' in the ref); ik-only flags may be rejected. "
+            "Use an ik-llama-cpp image."))
+    elif profile.runtime.engine == "llama.cpp" and looks_ik:
+        issues.append(Issue(
+            "warning",
+            "Engine is llama.cpp but the image looks like an ik_llama.cpp build; "
+            "switch the Engine to ik_llama.cpp to reach its flags."))
+
     for m in profile.mounts:
         if bool(m.host) != bool(m.container):
             issues.append(Issue("error",
@@ -119,6 +133,13 @@ def validate(profile: Profile, running_ports: tuple = (),
                             "A draft model is selected but spec-type is 'none', so the draft "
                             "model is loaded and never used. Set spec-type (e.g. draft-simple) "
                             "to enable speculative decoding, or clear the draft model."))
+
+    if profile.runtime.engine == "ik_llama.cpp" and profile.settings.get("run-time-repack"):
+        msg = ("Run-time repack (--run-time-repack) disables mmap and increases load "
+               "time and RAM.")
+        if profile.settings.get("load-mode", "mmap") == "mmap":
+            msg += " Your load-mode is mmap, which it overrides."
+        issues.append(Issue("warning", msg))
 
     # Embedding / reranking bad-combo warnings. A reranker needs all three of
     # --reranking, --pooling rank, and --embeddings; sampling is ignored here.

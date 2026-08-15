@@ -321,3 +321,52 @@ def test_validate_emits_warning_issue_for_raw_collision():
 def test_validate_no_raw_warning_when_clean():
     issues = validate(_srv(raw="--numa distribute"))
     assert not any("overrides" in i.message for i in issues)
+
+
+from llama_launcher.core.spec import Profile, Runtime, Mount
+from llama_launcher.core.validation import validate
+
+
+def _ok_server(**kw):
+    base = dict(
+        name="p", image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
+        runtime=Runtime(engine="ik_llama.cpp"),
+        mounts=[Mount(host="/m", container="/models", role="model")],
+        model="/models/x.gguf",
+    )
+    base.update(kw)
+    return Profile(**base)
+
+
+def _msgs(p):
+    return [i.message for i in validate(p)]
+
+
+def test_engine_ik_but_mainline_image_warns():
+    p = _ok_server(image="ghcr.io/ggml-org/llama.cpp:server-cuda")
+    assert any("doesn't look like an ik" in m for m in _msgs(p))
+    assert all(i.level != "error" for i in validate(p) if "ik" in i.message)
+
+
+def test_engine_llama_but_ik_image_warns():
+    p = Profile(name="p", image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
+                runtime=Runtime(engine="llama.cpp"),
+                mounts=[Mount(host="/m", container="/models", role="model")],
+                model="/models/x.gguf")
+    assert any("looks like an ik_llama.cpp build" in m for m in _msgs(p))
+
+
+def test_matched_engine_and_image_no_mismatch_warning():
+    p = _ok_server()
+    assert not any("ik" in m and "look" in m for m in _msgs(p))
+
+
+def test_rtr_warns_and_mentions_mmap_override():
+    p = _ok_server(settings={"run-time-repack": True})  # load-mode defaults to mmap
+    msg = next(m for m in _msgs(p) if "run-time-repack" in m)
+    assert "mmap" in msg
+
+
+def test_no_rtr_no_warning():
+    p = _ok_server(settings={})
+    assert not any("run-time-repack" in m for m in _msgs(p))
