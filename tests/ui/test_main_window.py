@@ -12,6 +12,22 @@ def _profile():
     )
 
 
+def test_configure_tab_body_and_bottom_are_a_vertical_splitter(qtbot):
+    """The Configure tab's two-column body and its command-preview/api-key
+    section sit in a vertical QSplitter so the user can drag the divider to
+    give the Environment/Settings columns more or less height."""
+    from PySide6.QtWidgets import QSplitter
+    from PySide6.QtCore import Qt
+    w = MainWindow()
+    qtbot.addWidget(w)
+    sp = w._configure_splitter
+    assert isinstance(sp, QSplitter)
+    assert sp.orientation() == Qt.Vertical
+    assert sp.count() == 2
+    # the command-preview / api-key / harness block is the draggable bottom pane
+    assert sp.widget(1) is w._config_bottom
+
+
 def test_name_field_drives_profile_name_and_container(qtbot):
     """Typing in the Name field sets the profile name (and thus --name/container)."""
     w = MainWindow()

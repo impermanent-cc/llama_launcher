@@ -278,9 +278,12 @@ def test_monitor_stats_legend_explains_gen_prompt_kv(qtbot):
     p = MonitorPanel()
     qtbot.addWidget(p)
     assert not hasattr(p, "stats_legend")
-    # legend text now lives on the summary tooltip + an InfoButton popover
-    t = p.summary.toolTip().lower()
+    # legend text now lives ONLY on the compact InfoButton (popover + its own
+    # hover), NOT on the full-width summary bar -- a tooltip there fired on
+    # hover anywhere along the bar, duplicating the button.
+    assert p.summary.toolTip() == ""
+    btn = p.findChild(InfoButton)
+    assert btn is not None
+    t = btn.info_text.lower()
     assert "gen" in t and "prompt" in t and "kv" in t
     assert "idle" in t          # explains why they can read 0 while running
-    btn = p.findChild(InfoButton)
-    assert btn is not None and btn.info_text.lower() == t

@@ -60,6 +60,27 @@ def _make_router(win, name):
     win.mode_combo.setCurrentIndex(_router_index(win))
 
 
+def test_router_key_ui_hidden_in_server_mode(win):
+    # The reusable API key + harness block are ROUTER-only concepts. The default
+    # startup profile is single-server, so they must not show there -- otherwise
+    # the box sits masked with nothing to reveal, looking broken.
+    assert win.mode_combo.currentData() == "server"
+    assert win.api_key_box.isHidden()
+    assert win.harness_box.isHidden()
+    # The router status/exposure banner is likewise a router concept -- it must
+    # not sit showing a stale "disconnected" on a single-server profile.
+    assert win.configure_status.isHidden()
+    assert win.monitor_status.isHidden()
+
+
+def test_router_key_ui_shown_in_router_mode(win):
+    _make_router(win, "r_vis")
+    assert not win.api_key_box.isHidden()
+    assert not win.harness_box.isHidden()
+    assert not win.configure_status.isHidden()
+    assert not win.monitor_status.isHidden()
+
+
 def test_scope_radio_flows_into_current_profile(win):
     _make_router(win, "r_mode")
     win.api_key_box.scope_own.setChecked(True)      # fires key_scope_changed

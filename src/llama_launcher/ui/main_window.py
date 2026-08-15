@@ -9,7 +9,7 @@ from PySide6.QtCore import Qt, QObject, QRunnable, QThread, QThreadPool, Signal
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
     QCheckBox, QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
-    QMessageBox, QFileDialog, QInputDialog, QTabWidget, QDockWidget
+    QMessageBox, QFileDialog, QInputDialog, QTabWidget, QDockWidget, QSplitter
 )
 
 from llama_launcher.core.spec import (
@@ -238,7 +238,15 @@ class MainWindow(QMainWindow):
 
         # Configure tab = the existing left+right body
         configure_tab = QWidget()
-        body = QHBoxLayout(configure_tab)
+        # The two-column body and the bottom command-preview/api-key section sit
+        # in a vertical splitter so the user can drag the divider to give the
+        # Environment/Settings columns more or less height.
+        configure_tab_layout = QVBoxLayout(configure_tab)
+        configure_tab_layout.setContentsMargins(0, 0, 0, 0)
+        self._configure_splitter = QSplitter(Qt.Vertical)
+        configure_tab_layout.addWidget(self._configure_splitter)
+        body_widget = QWidget()
+        body = QHBoxLayout(body_widget)
 
         # LEFT: environment (image + model only for v1 binding; mounts editor TODO-UI)
         left = QGroupBox("Environment")
@@ -440,6 +448,7 @@ class MainWindow(QMainWindow):
             self._widgets["load-mode"].changed.connect(self._sync_load_mode_legacy)
         right_scroll.setWidget(right_inner)
         body.addWidget(right_scroll, 2)
+        self._configure_splitter.addWidget(body_widget)
         self._last_caps = None
         self._router_statuses: dict = {}
         self._spec_prev = None      # previous /metrics spec-decode counter read
@@ -537,7 +546,15 @@ class MainWindow(QMainWindow):
         self.export_sh_btn.clicked.connect(self._on_export_sh)
         config_bottom_box.addWidget(QLabel("Command preview:"))
         config_bottom_box.addLayout(preview_row)
-        root.addWidget(self._config_bottom)
+        # Bottom pane of the Configure splitter (see configure_tab above).
+        # Body absorbs extra height; the preview/api-key block keeps its size
+        # hint but the user can drag the handle to enlarge either. Neither pane
+        # fully collapses.
+        self._configure_splitter.addWidget(self._config_bottom)
+        self._configure_splitter.setStretchFactor(0, 1)
+        self._configure_splitter.setStretchFactor(1, 0)
+        self._configure_splitter.setCollapsible(0, False)
+        self._configure_splitter.setCollapsible(1, False)
         buttons = QHBoxLayout()
         self.launch_btn = QPushButton("▶ Launch")
         self.stop_btn = QPushButton("■ Stop")
@@ -743,6 +760,16 @@ class MainWindow(QMainWindow):
             w.setEnabled(not is_router)
         self.lora_panel.setEnabled(not is_router)
         self.detached_check.setVisible(not is_router)
+        # The reusable API key + harness "server info to copy" block are
+        # ROUTER-only concepts (a single server has no router key). Show them
+        # only in router mode -- otherwise they sit masked with nothing to
+        # reveal, which reads as a broken Reveal checkbox.
+        self.api_key_box.setVisible(is_router)
+        self.harness_box.setVisible(is_router)
+        # The status/exposure banner reports the ROUTER control plane; in server
+        # mode it would sit showing a stale "disconnected". Hide it on both tabs.
+        self.configure_status.setVisible(is_router)
+        self.monitor_status.setVisible(is_router)
         self._sync_load_mode_legacy()
         self.refresh_preview()
         if is_router:
@@ -765,9 +792,9 @@ class MainWindow(QMainWindow):
         # non-routers.
         if self.tabs.currentWidget() is self._configure_tab:
             self.refresh_router_panel_header()
-        # Suggest-family + command preview only make sense while configuring, so
-        # hide them on the Monitor/Benchmark tabs.
-        self._config_bottom.setVisible(self.tabs.currentWidget() is self._configure_tab)
+        # _config_bottom (command preview / api-key / harness) now lives inside
+        # the Configure tab's splitter, so it is shown only on Configure without
+        # an explicit per-tab visibility toggle.
 
     def _on_stats_visibility(self, visible: bool) -> None:
         # Keep the toolbar button in sync when the dock is closed via its own X,

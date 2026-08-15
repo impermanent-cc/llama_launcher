@@ -42,7 +42,10 @@ def test_monitor_legend_is_behind_info_button(qtbot):
     assert not hasattr(p, "stats_legend")               # no always-on legend label
     btn = p.findChild(InfoButton)
     assert btn is not None and "gen" in btn.info_text    # legend text lives in the popover
-    assert "gen" in p.summary.toolTip()                  # hover tooltip preserved
+    # The summary bar spans the whole width, so a tooltip on it fires on hover
+    # anywhere along the bar -- duplicating the info button. Keep the legend
+    # ONLY on the compact info button, not on the summary label.
+    assert p.summary.toolTip() == ""
 
 
 def test_benchmark_legend_is_behind_info_button(qtbot):

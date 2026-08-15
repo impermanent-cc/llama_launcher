@@ -42,7 +42,9 @@ class MonitorPanel(QWidget):
         # always-visible label, to avoid cluttering the tab with reminder text.
         _legend = ("gen / prompt = generation / prefill tok/s of the last request "
                    "(0 when idle between requests)  ·  KV = KV-cache used")
-        self.summary.setToolTip(_legend)
+        # Deliberately NOT a tooltip on `summary`: the summary spans the whole
+        # bar, so a tooltip there fires on hover anywhere along it, duplicating
+        # the info button. The legend lives only on the compact ⓘ button.
         summary_row = QHBoxLayout()
         summary_row.addWidget(self.summary, 1)
         summary_row.addWidget(InfoButton(_legend))
