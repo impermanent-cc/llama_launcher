@@ -234,3 +234,9 @@ class MonitorPanel(QWidget):
     def _emit_selected_for_row(self, row) -> None:
         if 0 <= row < len(self._instance_names):
             self.instance_selected.emit(self._instance_names[row])
+
+    def add_below_log(self, widget) -> None:
+        self.layout().addWidget(widget)
+
+    def add_status_banner(self, banner) -> None:
+        self.layout().insertWidget(0, banner)   # above the instances table

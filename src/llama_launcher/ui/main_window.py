@@ -43,9 +43,12 @@ from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
 from llama_launcher.ui.widgets.collapsible import CollapsibleSection
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
-from llama_launcher.ui.panels.router_panel import RouterPanel
 from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
 from llama_launcher.ui.panels.stats_panel import StatsPanel
+from llama_launcher.ui.widgets.api_key_box import ApiKeyBox
+from llama_launcher.ui.widgets.harness_info_box import HarnessInfoBox
+from llama_launcher.ui.widgets.router_models_table import RouterModelsTable
+from llama_launcher.ui.widgets.status_banner import StatusBanner
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import router_api
 
@@ -462,12 +465,19 @@ class MainWindow(QMainWindow):
         monitor_scroll.setWidgetResizable(True)
         monitor_scroll.setWidget(self.monitor_panel)
         self.tabs.addTab(monitor_scroll, "Monitor")
-        self.router_panel = RouterPanel()
-        self.router_panel.load_requested.connect(self._on_router_load)
-        self.router_panel.unload_requested.connect(self._on_router_unload)
-        self.router_panel.key_scope_changed.connect(self._on_key_scope_changed)
-        self.router_panel.key_saved.connect(self._on_key_saved)
-        self.tabs.addTab(self.router_panel, "Router")
+
+        self.api_key_box = ApiKeyBox()
+        self.api_key_box.key_scope_changed.connect(self._on_key_scope_changed)
+        self.api_key_box.key_saved.connect(self._on_key_saved)
+        self.harness_box = HarnessInfoBox()
+        self.configure_status = StatusBanner()
+        self.router_models_table = RouterModelsTable()
+        self.router_models_table.load_requested.connect(self._on_router_load)
+        self.router_models_table.unload_requested.connect(self._on_router_unload)
+        self.monitor_status = StatusBanner()
+        self.monitor_panel.add_status_banner(self.monitor_status)
+        self.monitor_panel.add_below_log(self.router_models_table)
+
         self.benchmark_panel = BenchmarkPanel()
         self.benchmark_panel.benchmark_run_requested.connect(self._on_benchmark_run)
         self.benchmark_panel.benchmark_cancel_requested.connect(self._on_benchmark_cancel)
@@ -516,6 +526,9 @@ class MainWindow(QMainWindow):
         config_bottom_box.addWidget(self.model_meta_label)
         self.model_edit.textChanged.connect(lambda _: self.apply_model_caps())
         self.mounts_panel.changed.connect(self.apply_model_caps)
+        config_bottom_box.addWidget(self.configure_status)
+        config_bottom_box.addWidget(self.api_key_box)
+        config_bottom_box.addWidget(self.harness_box)
         preview_row = QHBoxLayout()
         self.preview = QPlainTextEdit(); self.preview.setReadOnly(True)
         self.preview.setMaximumHeight(120)
@@ -747,12 +760,13 @@ class MainWindow(QMainWindow):
                 w.setEnabled(not load_mode_active)
 
     def _on_tab_changed(self, _index: int) -> None:
-        # Entering the Router tab must show a live key even for an edited-but-
-        # unsaved router; refresh_router_panel_header() no-ops for non-routers.
-        if self.tabs.currentWidget() is self.router_panel:
+        # Entering the Configure tab must show a live key even for an edited-
+        # but-unsaved router; refresh_router_panel_header() no-ops for
+        # non-routers.
+        if self.tabs.currentWidget() is self._configure_tab:
             self.refresh_router_panel_header()
         # Suggest-family + command preview only make sense while configuring, so
-        # hide them on the Monitor/Router/Benchmark tabs.
+        # hide them on the Monitor/Benchmark tabs.
         self._config_bottom.setVisible(self.tabs.currentWidget() is self._configure_tab)
 
     def _on_stats_visibility(self, visible: bool) -> None:
@@ -1031,7 +1045,7 @@ class MainWindow(QMainWindow):
         self.refresh_preview()
         # Reattach-after-restart is the common path: selecting a saved router
         # must show its key, harness block and exposure banner immediately.
-        self.router_panel.set_scope(p.runtime.router_key_mode)
+        self.api_key_box.set_scope(p.runtime.router_key_mode)
         self.refresh_router_panel_header()
 
     def current_profile(self) -> Profile:
@@ -1055,7 +1069,7 @@ class MainWindow(QMainWindow):
                             bind_host=self.bind_host_combo.currentText().strip()
                                       or "127.0.0.1",
                             detached=self.detached_check.isChecked(),
-                            router_key_mode=self.router_panel._current_scope()),
+                            router_key_mode=self.api_key_box._current_scope()),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
@@ -1163,6 +1177,18 @@ class MainWindow(QMainWindow):
                 "The router is running. Relaunch it for the new API key to "
                 "take effect.")
 
+    def _set_router_connected(self, connected: bool) -> None:
+        self.configure_status.set_connected(connected)
+        self.monitor_status.set_connected(connected)
+
+    def _set_router_error(self, text: str) -> None:
+        self.configure_status.set_error(text)
+        self.monitor_status.set_error(text)
+
+    def _set_router_exposure(self, text: str) -> None:
+        self.configure_status.set_exposure_warning(text)
+        self.monitor_status.set_exposure_warning(text)
+
     def refresh_router_panel_header(self) -> None:
         p = self.current_profile()
         if p.mode != "router":
@@ -1175,10 +1201,11 @@ class MainWindow(QMainWindow):
         # idempotent and is the only side effect on this path.
         key = (api_key_store.resolve_api_key(self.router_base_dir(), p)
                or api_key_store.ensure_api_key(self.router_base_dir(), p.name))
-        self.router_panel.set_endpoint(
-            f"http://{display_host}:{port}", key,
+        self.api_key_box.set_key(key)
+        self.harness_box.set_endpoint(
+            f"http://{display_host}:{port}",
             [member_model_id(m) for m in p.members])
-        self.router_panel.set_exposure_warning(
+        self._set_router_exposure(
             f"Bound to {host}: reachable beyond this machine. The API key is required."
             if host not in LOOPBACK_HOSTS else "")
 
@@ -1250,10 +1277,10 @@ class MainWindow(QMainWindow):
 
     def _report_launch_error(self, text: str = None, *, show_dialog: bool = False) -> None:
         """Show why a detached launch -- router or server -- failed to start.
-        Routed to the router panel (non-modal: this fires from a QProcess
+        Routed to the status banners (non-modal: this fires from a QProcess
         signal, which tests drive); a detached SERVER launch also pops a
-        QMessageBox, since a Monitor-tab-only user may never see the router
-        panel and would otherwise miss the failure entirely.
+        QMessageBox, since a Monitor-tab-only user may never see the
+        Configure tab's banner and would otherwise miss the failure entirely.
 
         `show_dialog` is decided by the CALLER at launch time (when the
         profile's mode is known synchronously), not re-derived here from
@@ -1264,7 +1291,7 @@ class MainWindow(QMainWindow):
         self.status_label.setText("● failed to start")
         reason = (f"launch failed: {text.splitlines()[-1][:200]}"
                   if text else "launch failed")
-        self.router_panel.set_error(reason)
+        self._set_router_error(reason)
         if show_dialog:
             QMessageBox.critical(self, "Launch failed", reason)
 
@@ -1287,12 +1314,12 @@ class MainWindow(QMainWindow):
         models = router_api.list_models(host, port, key)
         if models is None:            # unreachable, as opposed to serving nothing
             self._router_statuses = {}
-            self.router_panel.set_models([])
-            self.router_panel.set_connected(False)
+            self.router_models_table.set_models([])
+            self._set_router_connected(False)
             return
         self._router_statuses = {m.id: m.status for m in models}
-        self.router_panel.set_models(models)
-        self.router_panel.set_connected(True)
+        self.router_models_table.set_models(models)
+        self._set_router_connected(True)
 
     def _router_pollable_model(self) -> str | None:
         """The resident model to scope Monitor polling to, or None.
@@ -1313,7 +1340,7 @@ class MainWindow(QMainWindow):
         if not ok:
             # Silently discarding this left a failed load looking identical to a
             # slow one: the row just stayed "unloaded" forever.
-            self.router_panel.set_error(f"load failed: {model_id}")
+            self._set_router_error(f"load failed: {model_id}")
 
     def _on_router_unload(self, model_id: str) -> None:
         p = self.current_profile()
@@ -1322,7 +1349,7 @@ class MainWindow(QMainWindow):
                                      key, model_id)
         self.refresh_router_models()
         if not ok:
-            self.router_panel.set_error(f"unload failed: {model_id}")
+            self._set_router_error(f"unload failed: {model_id}")
 
     def _validate_or_warn(self) -> bool:
         p = self.current_profile()
@@ -1793,8 +1820,8 @@ class MainWindow(QMainWindow):
                 # Router stopped/removed: clear the stale model list + connected
                 # state so a dead router doesn't keep showing load/unload rows.
                 self._router_statuses = {}
-                self.router_panel.set_models([])
-                self.router_panel.set_connected(False)
+                self.router_models_table.set_models([])
+                self._set_router_connected(False)
         # router_model_key was resolved from _refresh_props above (when ready)
         # rather than polled again here, so this reuses that single call to
         # _router_pollable_model() instead of doubling it.

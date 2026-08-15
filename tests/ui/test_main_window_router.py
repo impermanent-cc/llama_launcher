@@ -28,9 +28,12 @@ def _member_profile(base, name="Qwen"):
     return p
 
 
-def test_router_tab_exists(win):
+def test_router_controls_relocated_to_configure_and_monitor(win):
     titles = [win.tabs.tabText(i) for i in range(win.tabs.count())]
-    assert "Router" in titles
+    assert "Router" not in titles
+    assert win.api_key_box is not None
+    assert win.harness_box is not None
+    assert win.router_models_table is not None
 
 
 def test_mode_round_trips_through_the_form(win):
@@ -368,8 +371,8 @@ def test_refresh_router_models_populates_the_panel(win, monkeypatch):
         "llama_launcher.ui.main_window.router_api.list_models",
         lambda host, port, key, **kw: [RouterModel(id="qwen", status="sleeping")])
     win.refresh_router_models()
-    assert win.router_panel.table.rowCount() == 1
-    assert win.router_panel.table.item(0, 0).text() == "qwen"
+    assert win.router_models_table.table.rowCount() == 1
+    assert win.router_models_table.table.item(0, 0).text() == "qwen"
 
 
 def test_sleeping_models_are_not_polled_for_metrics(win, monkeypatch):
@@ -458,19 +461,20 @@ def test_exported_script_includes_the_router_mount(win, tmp_path):
     assert "--models-preset" in text
 
 
-def test_router_tab_populates_on_profile_load_not_only_on_launch(win):
+def test_router_header_populates_on_profile_load_not_only_on_launch(win):
     _member_profile(store.default_base_dir())
     _router_win(win)
     # Reattach-after-restart is the common path: select the profile, see the key.
-    assert "qwen" in win.router_panel.harness_text.toPlainText()
-    win.router_panel.reveal_key(True)
-    assert win.router_panel.key_label.text().startswith("sk-")
+    assert "qwen" in win.harness_box.harness_text.toPlainText()
+    win.api_key_box.reveal_key(True)
+    assert win.api_key_box.key_label.text().startswith("sk-")
 
 
 def test_exposure_banner_shows_on_load_for_a_non_loopback_router(win):
     _member_profile(store.default_base_dir())
     _router_win(win, runtime=Runtime(bind_host="0.0.0.0"))
-    assert "0.0.0.0" in win.router_panel.banner.text()
+    assert "0.0.0.0" in win.configure_status.banner.text()
+    assert "0.0.0.0" in win.monitor_status.banner.text()
 
 
 def test_report_validation_does_not_invent_router_errors(win):
@@ -504,7 +508,8 @@ def test_router_load_failure_is_surfaced(win, monkeypatch):
     monkeypatch.setattr("llama_launcher.ui.main_window.router_api.load_model",
                         lambda *a, **kw: False)
     win._on_router_load("qwen")
-    assert "fail" in win.router_panel.status_label.text().lower()
+    assert "fail" in win.configure_status.status_label.text().lower()
+    assert "fail" in win.monitor_status.status_label.text().lower()
 
 
 def test_connected_state_distinguishes_down_from_empty(win, monkeypatch):
@@ -512,13 +517,15 @@ def test_connected_state_distinguishes_down_from_empty(win, monkeypatch):
     monkeypatch.setattr("llama_launcher.ui.main_window.router_api.list_models",
                         lambda host, port, key, **kw: None)
     win.refresh_router_models()
-    assert "disconnected" in win.router_panel.status_label.text().lower()
+    assert "disconnected" in win.configure_status.status_label.text().lower()
+    assert "disconnected" in win.monitor_status.status_label.text().lower()
 
     monkeypatch.setattr("llama_launcher.ui.main_window.router_api.list_models",
                         lambda host, port, key, **kw: [])
     win.refresh_router_models()
     # Reachable, just serving nothing -- not the same as unreachable.
-    assert "disconnected" not in win.router_panel.status_label.text().lower()
+    assert "disconnected" not in win.configure_status.status_label.text().lower()
+    assert "disconnected" not in win.monitor_status.status_label.text().lower()
 
 
 def test_failed_router_launch_is_reported(win):
@@ -528,7 +535,8 @@ def test_failed_router_launch_is_reported(win):
     # QMessageBox and hang the offscreen test run.
     win._report_launch_error("Error: short-name resolution enforced but cannot prompt")
     assert "failed" in win.status_label.text().lower()
-    assert "resolution" in win.router_panel.status_label.text()
+    assert "resolution" in win.configure_status.status_label.text()
+    assert "resolution" in win.monitor_status.status_label.text()
 
 
 def test_member_fields_are_editable(win):
@@ -660,12 +668,12 @@ def test_load_mode_disables_legacy_mmap_widgets(win):
 
 def test_benchmark_has_its_own_tab_and_config_strip_hidden_off_configure(win):
     titles = [win.tabs.tabText(i) for i in range(win.tabs.count())]
-    assert titles == ["Configure", "Monitor", "Router", "Benchmark"]
+    assert titles == ["Configure", "Monitor", "Benchmark"]
     # Config-only strip (suggest-family + command preview) shows on Configure...
     win.tabs.setCurrentIndex(titles.index("Configure"))
     assert win._config_bottom.isVisibleTo(win) is True
-    # ...and is hidden on Monitor/Router/Benchmark.
-    for name in ("Monitor", "Router", "Benchmark"):
+    # ...and is hidden on Monitor/Benchmark.
+    for name in ("Monitor", "Benchmark"):
         win.tabs.setCurrentIndex(titles.index(name))
         assert win._config_bottom.isVisibleTo(win) is False, name
 
@@ -695,18 +703,17 @@ def test_running_instance_offers_stop(win):
     assert stopped == ["llama-live"]
 
 
-def test_router_panel_clears_when_router_not_running(win, monkeypatch):
-    # Regression: after a router stops/is removed, the Router tab kept showing
-    # its model list + "connected". update_status must clear them when the
-    # container isn't running.
-    import llama_launcher.ui.main_window as _mw
+def test_router_status_clears_when_router_not_running(win, monkeypatch):
+    # Regression: after a router stops/is removed, the models table + banners
+    # kept showing its model list + "connected". update_status must clear
+    # them when the container isn't running.
     win.load_profile(Profile(name="R", mode="router", image="img",
                              members=[RouterMember(profile="g12b")]))
     # seed a stale "connected + one model" state
     win._router_statuses = {"g12b": "loaded"}
-    win.router_panel.table.setRowCount(1)          # simulate a lingering model row
-    win.router_panel.set_connected(True)
+    win.router_models_table.table.setRowCount(1)   # simulate a lingering model row
+    win._set_router_connected(True)
     # container is absent (conftest default) -> update_status should clear
     win.update_status()
     assert win._router_statuses == {}
-    assert win.router_panel.table.rowCount() == 0
+    assert win.router_models_table.table.rowCount() == 0

@@ -28,25 +28,24 @@ def test_switching_to_router_mode_populates_the_key(win):
     win._add_member_item(win._member_from_name("gen") if hasattr(win, "_member_from_name")
                          else __import__("llama_launcher.core.spec", fromlist=["RouterMember"]).RouterMember(profile="gen"))
     win.mode_combo.setCurrentIndex(_router_index(win))   # fires _on_mode_changed
-    assert win.router_panel._api_key, "key should be generated on entering router mode"
-    win.router_panel.reveal_check.setChecked(True)
-    assert win.router_panel.key_label.text() == win.router_panel._api_key
+    assert win.api_key_box._api_key, "key should be generated on entering router mode"
+    win.api_key_box.reveal_check.setChecked(True)
+    assert win.api_key_box.key_label.text() == win.api_key_box._api_key
 
 
-def test_showing_router_tab_populates_the_key(win):
+def test_switching_to_configure_tab_populates_the_key(win):
     store.save_profile(Profile(name="gen", image="img", settings={"port": 8080}),
                        store.default_base_dir())
     win.name_edit.setText("r2")
     from llama_launcher.core.spec import RouterMember
     win._add_member_item(RouterMember(profile="gen"))
     win.mode_combo.setCurrentIndex(_router_index(win))
-    win.router_panel._api_key = ""            # simulate a stale/empty panel
-    # switch to the Router tab -> _on_tab_changed should refresh the header
-    for i in range(win.tabs.count()):
-        if win.tabs.widget(i) is win.router_panel:
-            win.tabs.setCurrentIndex(i)
-            break
-    assert win.router_panel._api_key, "key should repopulate when the Router tab is shown"
+    win.api_key_box._api_key = ""             # simulate a stale/empty box
+    # switch away then back to Configure -> _on_tab_changed should refresh the header
+    titles = [win.tabs.tabText(i) for i in range(win.tabs.count())]
+    win.tabs.setCurrentIndex(titles.index("Monitor"))
+    win.tabs.setCurrentIndex(titles.index("Configure"))
+    assert win.api_key_box._api_key, "key should repopulate when the Configure tab is shown"
 
 
 from llama_launcher.services import api_key
@@ -63,21 +62,21 @@ def _make_router(win, name):
 
 def test_scope_radio_flows_into_current_profile(win):
     _make_router(win, "r_mode")
-    win.router_panel.scope_own.setChecked(True)     # fires key_scope_changed
+    win.api_key_box.scope_own.setChecked(True)      # fires key_scope_changed
     assert win.current_profile().runtime.router_key_mode == "own"
 
 
 def test_saving_global_key_writes_global_file(win):
     _make_router(win, "r_glob")
-    win.router_panel.set_scope("global")
-    win.router_panel._save_key("sk-shared")         # fires key_saved
+    win.api_key_box.set_scope("global")
+    win.api_key_box._save_key("sk-shared")          # fires key_saved
     assert api_key.read_global_key(win.router_base_dir()) == "sk-shared"
 
 
 def test_saving_own_key_writes_per_profile_file(win):
     _make_router(win, "r_own")
-    win.router_panel.set_scope("own")
-    win.router_panel._save_key("sk-mine")
+    win.api_key_box.set_scope("own")
+    win.api_key_box._save_key("sk-mine")
     assert api_key.read_api_key(win.router_base_dir(), "r_own") == "sk-mine"
 
 
@@ -89,8 +88,8 @@ def test_saving_key_while_router_running_warns_a_relaunch_is_needed(win, monkeyp
     calls = []
     monkeypatch.setattr(mw.QMessageBox, "information",
                         lambda *a, **k: calls.append((a, k)))
-    win.router_panel.set_scope("global")
-    win.router_panel._save_key("sk-shared")
+    win.api_key_box.set_scope("global")
+    win.api_key_box._save_key("sk-shared")
     assert len(calls) == 1
 
 
@@ -103,8 +102,8 @@ def test_saving_key_while_router_not_running_does_not_warn(win, monkeypatch, sta
     calls = []
     monkeypatch.setattr(mw.QMessageBox, "information",
                         lambda *a, **k: calls.append((a, k)))
-    win.router_panel.set_scope("global")
-    win.router_panel._save_key("sk-shared")
+    win.api_key_box.set_scope("global")
+    win.api_key_box._save_key("sk-shared")
     assert calls == []
 
 
@@ -116,4 +115,4 @@ def test_loading_profile_syncs_scope_radio(win):
                 runtime=Runtime(router_key_mode="own"), settings={"port": 8080},
                 members=[RouterMember(profile="gen")])
     win.load_profile(p)
-    assert win.router_panel._current_scope() == "own"
+    assert win.api_key_box._current_scope() == "own"
