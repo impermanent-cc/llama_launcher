@@ -1,6 +1,12 @@
 from llama_launcher.ui.widgets.status_banner import StatusBanner
 
 
+def test_exposure_banner_hidden_by_default(qtbot):
+    b = StatusBanner()
+    qtbot.addWidget(b)
+    assert not b.banner.isVisible()
+
+
 def test_exposure_warning_toggles_visibility(qtbot):
     b = StatusBanner()
     qtbot.addWidget(b); b.show()

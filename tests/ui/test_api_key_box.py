@@ -26,3 +26,12 @@ def test_set_scope_does_not_emit(qtbot):
     box.set_scope("own")
     assert fired == []                              # programmatic set is silent
     assert box._current_scope() == "own"
+
+
+def test_save_key_rejects_empty(qtbot):
+    box = ApiKeyBox()
+    qtbot.addWidget(box)
+    seen = []
+    box.key_saved.connect(lambda *args: seen.append(args))
+    assert box._save_key("   ") is False
+    assert seen == []
