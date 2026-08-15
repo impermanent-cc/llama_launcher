@@ -80,14 +80,21 @@ def stats(name: str, binary: str) -> dict | None:
     return {"cpu_perc": row.get("CPUPerc", ""), "mem_usage": row.get("MemUsage", "")}
 
 
-def parse_images(output: str) -> list[str]:
-    """Filter `repo:tag` lines to llama.cpp images (dropping dangling/<none>),
-    preserving order and de-duplicating."""
+_ENGINE_IMAGE_MATCH = {
+    "llama.cpp": ("llama.cpp",),
+    "ik_llama.cpp": ("ik-llama-cpp", "ik_llama"),
+}
+
+
+def parse_images(output: str, engine: str = "llama.cpp") -> list[str]:
+    """Filter `repo:tag` lines to the given engine's images (dropping
+    dangling/<none>), preserving order and de-duplicating."""
+    matches = _ENGINE_IMAGE_MATCH.get(engine, _ENGINE_IMAGE_MATCH["llama.cpp"])
     seen: set[str] = set()
     out: list[str] = []
     for line in output.splitlines():
         ref = line.strip()
-        if not ref or "<none>" in ref or "llama.cpp" not in ref:
+        if not ref or "<none>" in ref or not any(m in ref for m in matches):
             continue
         if ref not in seen:
             seen.add(ref)
@@ -95,12 +102,12 @@ def parse_images(output: str) -> list[str]:
     return out
 
 
-def list_local_images(binary: str) -> list[str]:
-    """Locally-pulled llama.cpp images (`<binary> images`), [] on error/missing binary."""
+def list_local_images(binary: str, engine: str = "llama.cpp") -> list[str]:
+    """Locally-pulled images for `engine` (`<binary> images`), [] on error."""
     res = _run([binary, "images", "--format", "{{.Repository}}:{{.Tag}}"])
     if res.returncode != 0:
         return []
-    return parse_images(res.stdout)
+    return parse_images(res.stdout, engine)
 
 
 _PROFILE_LABEL = "llama-launcher.profile"
