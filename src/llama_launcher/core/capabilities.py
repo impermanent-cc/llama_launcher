@@ -142,6 +142,35 @@ def relevance(caps: ModelCaps) -> dict:
     return t
 
 
+# Short, human reasons per setting group. Keyed by membership in the relevance
+# sub-maps so the dot's hover can explain *why* a setting is (not) suggested.
+_MOE_KEYS = ("n-cpu-moe", "cpu-moe", "override-tensor")
+_MTP_KEYS = ("spec-type", "spec-draft-n-max", "spec-draft-ngl",
+             "spec-draft-n-min", "cache-type-k-draft", "cache-type-v-draft",
+             "draft_model")
+
+
+def _reason_for(key: str, tier: "Tier", caps) -> str:
+    if tier == Tier.NA:
+        if key in _MOE_KEYS:
+            return "Not applicable — not a MoE model."
+        if key in _MTP_KEYS:
+            return "Not applicable — model has no MTP/draft head."
+        return "Not applicable to this model."
+    if key in _MOE_KEYS:
+        return "MoE model — offload experts to CPU to fit VRAM."
+    if key in _MTP_KEYS:
+        return "Model ships an MTP/draft head — enable speculative decoding."
+    if tier == Tier.RECOMMENDED:
+        return "Recommended for this model."
+    return "Worth tuning for this model."
+
+
+def describe_relevance(caps: ModelCaps) -> dict:
+    """Like relevance(), but each key maps to (Tier, human reason)."""
+    return {k: (t, _reason_for(k, t, caps)) for k, t in relevance(caps).items()}
+
+
 def _sug_mtp(caps, settings, mmproj_set, draft_set):
     out = []
     if caps.has_mtp_infile and settings.get("spec-type") != "draft-mtp":
