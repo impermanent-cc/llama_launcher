@@ -442,10 +442,6 @@ class MainWindow(QMainWindow):
         # ignored. Kept in sync on edit, mode change and profile load.
         if "load-mode" in self._widgets:
             self._widgets["load-mode"].changed.connect(self._sync_load_mode_legacy)
-        # Keep the API-key box mirrored to the --api-key setting in server mode
-        # (typing in the field updates the box; no-op in router mode).
-        if "api-key" in self._widgets:
-            self._widgets["api-key"].changed.connect(self._sync_server_api_key)
         right_scroll.setWidget(right_inner)
         body.addWidget(right_scroll, 2)
         self._last_caps = None
@@ -493,7 +489,10 @@ class MainWindow(QMainWindow):
         self.tabs.addTab(self.benchmark_panel, "Benchmark")
         self._configure_tab = configure_tab
         self.tabs.currentChanged.connect(self._on_tab_changed)
-        root.addWidget(self.tabs)
+        # Stretch=1 so the tab body (Configure's Environment/Settings columns)
+        # fills the vertical space down to the command-preview strip, rather
+        # than leaving dead space where the router-only widgets are hidden.
+        root.addWidget(self.tabs, 1)
 
         # Right-hand stats dock (GPU / system / container). Hidden by default;
         # a checkable button in the top bar toggles it. Polling is wired in the
@@ -752,17 +751,13 @@ class MainWindow(QMainWindow):
             w.setEnabled(not is_router)
         self.lora_panel.setEnabled(not is_router)
         self.detached_check.setVisible(not is_router)
-        # The API-key box stays visible in both modes: in router mode it manages
-        # the router's reusable key (with Global/Own scope); in single-server
-        # mode it manages that server's --api-key. Only the router-specific parts
-        # -- scope selector, harness block, status/exposure banner -- are gated.
-        self.api_key_box.setVisible(True)
-        self.api_key_box.set_scope_visible(is_router)
+        # The reusable API key + harness block + status/exposure banner are
+        # ROUTER-only concepts (a single server uses its own --api-key field in
+        # the Settings column). Show them only in router mode.
+        self.api_key_box.setVisible(is_router)
         self.harness_box.setVisible(is_router)
         self.configure_status.setVisible(is_router)
         self.monitor_status.setVisible(is_router)
-        if not is_router:
-            self._sync_server_api_key()
         self._sync_load_mode_legacy()
         self.refresh_preview()
         if is_router:
@@ -1175,26 +1170,7 @@ class MainWindow(QMainWindow):
         self.refresh_router_panel_header()
         self._notify_key_change_needs_relaunch()
 
-    def _sync_server_api_key(self) -> None:
-        """In single-server mode the API-key box mirrors the --api-key setting.
-        No-op in router mode, where the box shows the router's reusable key."""
-        if getattr(self, "api_key_box", None) is None:
-            return   # wired before the box exists in __init__
-        if self.mode_combo.currentData() == "router":
-            return
-        w = self._widgets.get("api-key")
-        if w is not None:
-            self.api_key_box.set_key(str(w.value() or ""))
-
     def _on_key_saved(self, scope: str, value: str) -> None:
-        # In single-server mode the box edits the server's --api-key setting, not
-        # the router key store. (Editing the setting re-fires _sync_server_api_key
-        # via the widget's `changed` signal, so the box updates too.)
-        if self.mode_combo.currentData() != "router":
-            w = self._widgets.get("api-key")
-            if w is not None:
-                w.set_value(value)
-            return
         base = self.router_base_dir()
         if scope == "global":
             api_key_store.write_global_key(base, value)
@@ -1231,12 +1207,12 @@ class MainWindow(QMainWindow):
     def refresh_router_panel_header(self) -> None:
         p = self.current_profile()
         if p.mode != "router":
-            # Clear the router-only exposure banner + harness endpoint so a
-            # previous router's state doesn't linger. The API-key box is NOT
-            # cleared -- in server mode it mirrors this profile's --api-key.
+            # Clear relocated router state so a previous router's exposure
+            # banner, API key, and harness endpoint don't linger on the
+            # Configure/Monitor tabs after switching to an unrelated profile.
             self._set_router_exposure("")
+            self.api_key_box.set_key("")
             self.harness_box.harness_text.setPlainText("")
-            self._sync_server_api_key()
             return
         host = p.runtime.bind_host
         display_host = dial_host(host)
