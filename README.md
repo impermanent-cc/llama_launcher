@@ -58,6 +58,21 @@ container also persists (it isn't auto-removed), so its logs remain readable
 after a crash. The setting is saved per profile. Router profiles are always
 detached, so the checkbox is hidden for them.
 
+### ik_llama.cpp engine
+
+Select **Engine → ik_llama.cpp** in Configure to run ikawrakow's fork instead of
+mainline llama.cpp. It uses the same `llama-server` CLI, so profiles work the same
+way; the launcher adds ik-only flags (run-time-repack, MLA, fused-MoE toggle,
+attention-max-batch, smart-expert-reduction) and extra KV-cache quant types, shown
+only when this engine is selected and never passed to a mainline launch.
+
+Images live at `ghcr.io/ikawrakow/ik-llama-cpp` — use the `*-server` tag for single
+server mode and the `*-swap` tag for router mode (e.g. `cu12-server`, `cpu-server`).
+**Detect** lists your locally-pulled ik images when this engine is selected.
+
+Self-built (native, non-container) launch is not yet supported for either engine —
+run via Podman or Docker for now.
+
 ## Family presets
 
 Next to the settings is a **Suggest for family** picker. Choose a family
