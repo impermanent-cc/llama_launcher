@@ -36,7 +36,13 @@ class ApiKeyBox(QWidget):
         key_row.addWidget(self.edit_btn)
         root.addLayout(key_row)
 
-        scope_row = QHBoxLayout()
+        # The Global/Own scope selector only applies to the ROUTER's reusable
+        # key. In single-server mode this box instead edits the server's
+        # --api-key, so the scope row is hidden (see set_scope_visible).
+        self._scope_applies = True
+        self.scope_widget = QWidget()
+        scope_row = QHBoxLayout(self.scope_widget)
+        scope_row.setContentsMargins(0, 0, 0, 0)
         scope_row.addWidget(QLabel("Scope:"))
         self.scope_global = QRadioButton("Global")
         self.scope_own = QRadioButton("Own key for this profile")
@@ -49,11 +55,16 @@ class ApiKeyBox(QWidget):
         scope_row.addWidget(self.scope_global)
         scope_row.addWidget(self.scope_own)
         scope_row.addStretch(1)
-        root.addLayout(scope_row)
+        root.addWidget(self.scope_widget)
 
     def set_key(self, api_key: str) -> None:
         self._api_key = api_key or ""
         self.reveal_key(self._revealed)
+
+    def set_scope_visible(self, visible: bool) -> None:
+        """Show/hide the router-only Global/Own scope selector."""
+        self._scope_applies = bool(visible)
+        self.scope_widget.setVisible(visible)
 
     def reveal_key(self, revealed: bool) -> None:
         self._revealed = bool(revealed)
@@ -90,7 +101,8 @@ class ApiKeyBox(QWidget):
         return True
 
     def _open_edit(self) -> None:
-        dlg = _ApiKeyEditDialog(self._current_scope(), self)
+        scope = self._current_scope() if self._scope_applies else None
+        dlg = _ApiKeyEditDialog(scope, self)
         if dlg.exec():
             self._save_key(dlg.value())
 
@@ -103,8 +115,10 @@ class _ApiKeyEditDialog(QDialog):
         self.setWindowTitle("Set API key")
         self._value = ""
         lay = QVBoxLayout(self)
-        where = "shared global" if scope == "global" else "per-profile"
-        lay.addWidget(QLabel(f"Set the {where} API key:"))
+        where = ("shared global" if scope == "global"
+                 else "per-profile" if scope == "own" else None)
+        label = f"Set the {where} API key:" if where else "Set the API key:"
+        lay.addWidget(QLabel(label))
         self.field = QLineEdit()
         lay.addWidget(self.field)
         self.warn = QLabel("")

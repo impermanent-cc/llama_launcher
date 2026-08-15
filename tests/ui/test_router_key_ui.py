@@ -60,25 +60,41 @@ def _make_router(win, name):
     win.mode_combo.setCurrentIndex(_router_index(win))
 
 
-def test_router_key_ui_hidden_in_server_mode(win):
-    # The reusable API key + harness block are ROUTER-only concepts. The default
-    # startup profile is single-server, so they must not show there -- otherwise
-    # the box sits masked with nothing to reveal, looking broken.
+def test_api_key_box_visible_both_modes_scope_and_harness_router_only(win):
+    # The API-key box stays visible in BOTH modes (it manages the server's
+    # --api-key in single-server mode). Only the router-specific parts -- the
+    # Global/Own scope selector, the harness block, and the status/exposure
+    # banner -- are router-only.
     assert win.mode_combo.currentData() == "server"
-    assert win.api_key_box.isHidden()
+    assert not win.api_key_box.isHidden()
+    assert win.api_key_box.scope_widget.isHidden()
     assert win.harness_box.isHidden()
-    # The router status/exposure banner is likewise a router concept -- it must
-    # not sit showing a stale "disconnected" on a single-server profile.
     assert win.configure_status.isHidden()
     assert win.monitor_status.isHidden()
 
-
-def test_router_key_ui_shown_in_router_mode(win):
     _make_router(win, "r_vis")
     assert not win.api_key_box.isHidden()
+    assert not win.api_key_box.scope_widget.isHidden()
     assert not win.harness_box.isHidden()
     assert not win.configure_status.isHidden()
-    assert not win.monitor_status.isHidden()
+
+
+def test_server_mode_box_reflects_the_api_key_setting(win):
+    # Single-server mode: the box mirrors the --api-key setting, and Reveal
+    # shows it (this was the original "Reveal reveals nothing" complaint).
+    assert win.mode_combo.currentData() == "server"
+    win._widgets["api-key"].set_value("sk-serverkey")
+    win.api_key_box.reveal_check.setChecked(True)
+    assert win.api_key_box.key_label.text() == "sk-serverkey"
+
+
+def test_server_mode_editing_the_box_writes_the_api_key_setting(win):
+    # Editing via the box (Edit… -> Save, i.e. _save_key) writes the server's
+    # --api-key setting rather than the router key store.
+    assert win.mode_combo.currentData() == "server"
+    win.api_key_box._save_key("sk-frombox")
+    assert win._widgets["api-key"].value() == "sk-frombox"
+    assert win.current_profile().settings.get("api-key") == "sk-frombox"
 
 
 def test_scope_radio_flows_into_current_profile(win):
