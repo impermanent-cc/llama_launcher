@@ -16,7 +16,10 @@ from llama_launcher.core.spec import (
     Profile, Mount, Runtime, RouterMember, member_model_id, slugify,
 )
 from llama_launcher.core.router_preset import render_preset
-from llama_launcher.core.settings_catalog import CATALOG, member_catalog, router_catalog
+from llama_launcher.core.settings_catalog import (
+    CATALOG, member_catalog, router_catalog, for_engine,
+    KV_CACHE_TYPES, IK_EXTRA_KV_CACHE_TYPES,
+)
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.pathmap import host_to_container
 from llama_launcher.core.validation import (
@@ -51,6 +54,12 @@ from llama_launcher.ui.widgets.router_models_table import RouterModelsTable
 from llama_launcher.ui.widgets.status_banner import StatusBanner
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import router_api
+
+
+_ENGINE_DEFAULT_IMAGE = {
+    "llama.cpp": "ghcr.io/ggml-org/llama.cpp:server-cuda",
+    "ik_llama.cpp": "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
+}
 
 
 def _fmt_uptime(started_at: str | None) -> str:
@@ -251,6 +260,10 @@ class MainWindow(QMainWindow):
         self.image_edit = QLineEdit()
         self.model_edit = QLineEdit()
         self.binary_combo = NoWheelComboBox(); self.binary_combo.addItems(["podman", "docker"])
+        self.engine_combo = NoWheelComboBox()
+        self.engine_combo.addItem("llama.cpp", "llama.cpp")
+        self.engine_combo.addItem("ik_llama.cpp", "ik_llama.cpp")
+        self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         self.gpu_combo = NoWheelComboBox()
         for _gpu_label, _gpu_val in (
             ("CDI — --device nvidia.com/gpu=all (recommended)", "cdi"),
@@ -354,6 +367,7 @@ class MainWindow(QMainWindow):
         left_form.addRow("Bind address", self.bind_host_combo)
         left_form.addRow("Router members", members_widget)
 
+        left_form.addRow("Engine", self.engine_combo)
         left_form.addRow("Image", image_widget)
         left_form.addRow("Model", self._field_with_browse(self.model_edit))
         left_form.addRow("Runtime", self.binary_combo)
@@ -396,6 +410,10 @@ class MainWindow(QMainWindow):
             "Path to the .gguf model as seen INSIDE the container, e.g. "
             "/models/Qwen3-A3B-Q4.gguf (add a Folder that maps the host dir).")
         self.binary_combo.setToolTip("Container runtime used to launch the server.")
+        self.engine_combo.setToolTip(
+            "Which llama.cpp-family server to run. 'llama.cpp' = mainline "
+            "(ghcr.io/ggml-org/llama.cpp); 'ik_llama.cpp' = ikawrakow's fork with "
+            "extra MoE/quant flags (ghcr.io/ikawrakow/ik-llama-cpp).")
         self.gpu_combo.setToolTip(
             "GPU passthrough. CDI (nvidia.com/gpu=all) is recommended on modern "
             "NVIDIA + podman; Legacy uses --gpus all; None runs CPU-only.")
@@ -724,8 +742,9 @@ class MainWindow(QMainWindow):
         not be able to carry model-level settings; conversely --models-max on a
         single-model llama-server is rejected outright.
         """
-        return (router_catalog() if self.mode_combo.currentData() == "router"
+        base = (router_catalog() if self.mode_combo.currentData() == "router"
                 else member_catalog())
+        return for_engine(base, self.engine_combo.currentData() or "llama.cpp")
 
     def _apply_mode_to_settings_form(self) -> None:
         active = self.active_catalog()
@@ -762,6 +781,29 @@ class MainWindow(QMainWindow):
         self.refresh_preview()
         if is_router:
             self.refresh_router_panel_header()
+
+    def _apply_engine_enums(self) -> None:
+        """Extend/revert -ctk/-ctv enum choices for the current engine."""
+        engine = self.engine_combo.currentData() or "llama.cpp"
+        extra = IK_EXTRA_KV_CACHE_TYPES if engine == "ik_llama.cpp" else ()
+        for k in ("cache-type-k", "cache-type-v"):
+            w = self._widgets.get(k)
+            if w is not None:
+                w.set_enum_choices(tuple(KV_CACHE_TYPES) + tuple(extra))
+
+    def _maybe_seed_default_image(self, engine: str) -> None:
+        """Seed a sensible default image only when the field is empty or still
+        holds the OTHER engine's default; never clobber a user-typed value."""
+        cur = self.image_edit.text().strip()
+        if cur == "" or cur in set(_ENGINE_DEFAULT_IMAGE.values()):
+            self.image_edit.setText(_ENGINE_DEFAULT_IMAGE[engine])
+
+    def _on_engine_changed(self, _index=0) -> None:
+        engine = self.engine_combo.currentData() or "llama.cpp"
+        self._apply_engine_enums()
+        self._apply_mode_to_settings_form()   # show/hide the ik group by active_catalog
+        self._maybe_seed_default_image(engine)
+        self.refresh_preview()
 
     def _sync_load_mode_legacy(self) -> None:
         """Gray out --no-mmap/--mlock when load-mode is set (it wins in argv)."""
@@ -1033,6 +1075,11 @@ class MainWindow(QMainWindow):
         self.model_edit.setText(p.model)
         self.binary_combo.setCurrentText(p.runtime.binary)
         self.gpu_combo.setCurrentIndex(max(0, self.gpu_combo.findData(p.runtime.gpu_mode)))
+        self.engine_combo.blockSignals(True)
+        _eidx = self.engine_combo.findData(p.runtime.engine)
+        self.engine_combo.setCurrentIndex(_eidx if _eidx >= 0 else 0)
+        self.engine_combo.blockSignals(False)
+        self._apply_engine_enums()   # extend enums before values are set (no image seeding on load)
         self.mounts_panel.set_mounts(p.mounts)
         self.mmproj_edit.setText(p.mmproj or "")
         self.draft_model_edit.setText(p.draft_model or "")
@@ -1084,7 +1131,8 @@ class MainWindow(QMainWindow):
                             bind_host=self.bind_host_combo.currentText().strip()
                                       or "127.0.0.1",
                             detached=self.detached_check.isChecked(),
-                            router_key_mode=self.api_key_box._current_scope()),
+                            router_key_mode=self.api_key_box._current_scope(),
+                            engine=self.engine_combo.currentData() or "llama.cpp"),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
@@ -1730,26 +1778,30 @@ class MainWindow(QMainWindow):
 
     def detect_image(self):
         binary = self.binary_combo.currentText()
-        images = runtime.list_local_images(binary)
+        engine = self.engine_combo.currentData() or "llama.cpp"
+        images = runtime.list_local_images(binary, engine)
         if not images:
+            example = ("ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
+                       if engine == "ik_llama.cpp"
+                       else "ghcr.io/ggml-org/llama.cpp:server")
             QMessageBox.information(
                 self, "Detect image",
-                f"No local llama.cpp images found for '{binary}'.\n"
-                f"Pull one (e.g. {binary} pull ghcr.io/ggml-org/llama.cpp:server) "
-                f"or type the image reference yourself.")
+                f"No local {engine} images found for '{binary}'.\n"
+                f"Pull one (e.g. {binary} pull {example}) or type the image yourself.")
             return
         if len(images) == 1:
             self.image_edit.setText(images[0])
             return
         choice, ok = QInputDialog.getItem(
-            self, "Detect image", "Local llama.cpp images:", images, 0, False)
+            self, "Detect image", f"Local {engine} images:", images, 0, False)
         if ok and choice:
             self.image_edit.setText(choice)
 
     def _autofill_image_if_empty(self):
         if self.image_edit.text().strip():
             return
-        images = runtime.list_local_images(self.binary_combo.currentText())
+        images = runtime.list_local_images(
+            self.binary_combo.currentText(), self.engine_combo.currentData() or "llama.cpp")
         if len(images) == 1:
             self.image_edit.setText(images[0])
 

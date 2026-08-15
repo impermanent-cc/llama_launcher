@@ -91,3 +91,46 @@ def test_advanced_podman_settings_roundtrip(qtbot):
     preview = w.preview_text()
     assert "--cap-add SYS_NICE" in preview
     assert "--security-opt=label=disable" in preview
+
+
+def test_engine_roundtrips_through_profile(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    p = Profile(name="ik", runtime=Runtime(engine="ik_llama.cpp"))
+    w.load_profile(p)
+    assert w.engine_combo.currentData() == "ik_llama.cpp"
+    assert w.current_profile().runtime.engine == "ik_llama.cpp"
+
+
+def test_ik_flags_hidden_on_llama_cpp_engine(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.load_profile(Profile(name="m", runtime=Runtime(engine="llama.cpp")))
+    assert "run-time-repack" not in w.active_catalog()
+    w.load_profile(Profile(name="ik", runtime=Runtime(engine="ik_llama.cpp")))
+    assert "run-time-repack" in w.active_catalog()
+
+
+def test_switch_to_ik_seeds_default_image_when_empty(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.image_edit.setText("")
+    w.engine_combo.setCurrentIndex(w.engine_combo.findData("ik_llama.cpp"))
+    assert w.image_edit.text() == "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
+
+
+def test_switch_engine_does_not_clobber_user_image(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.image_edit.setText("myregistry.local/custom:tag")
+    w.engine_combo.setCurrentIndex(w.engine_combo.findData("ik_llama.cpp"))
+    assert w.image_edit.text() == "myregistry.local/custom:tag"
+
+
+def test_ik_cache_type_enum_gains_extras(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w.engine_combo.setCurrentIndex(w.engine_combo.findData("ik_llama.cpp"))
+    ctk = w._widgets["cache-type-k"]
+    ctk.set_value("q6_0")
+    assert ctk.value() == "q6_0"
