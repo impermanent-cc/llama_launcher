@@ -1192,6 +1192,12 @@ class MainWindow(QMainWindow):
     def refresh_router_panel_header(self) -> None:
         p = self.current_profile()
         if p.mode != "router":
+            # Clear relocated router state so a previous router's exposure
+            # banner, API key, and harness endpoint don't linger on the
+            # Configure/Monitor tabs after switching to an unrelated profile.
+            self._set_router_exposure("")
+            self.api_key_box.set_key("")
+            self.harness_box.harness_text.setPlainText("")
             return
         host = p.runtime.bind_host
         display_host = dial_host(host)

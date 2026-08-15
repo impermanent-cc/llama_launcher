@@ -477,6 +477,48 @@ def test_exposure_banner_shows_on_load_for_a_non_loopback_router(win):
     assert "0.0.0.0" in win.monitor_status.banner.text()
 
 
+def test_exposure_banner_clears_on_switch_to_a_loopback_server(win):
+    # Regression: refresh_router_panel_header used to early-return for a
+    # non-router profile WITHOUT clearing the relocated router state, so an
+    # exposed router's banner (plus its API key and harness endpoint) stayed
+    # on screen after switching to an unrelated, perfectly safe loopback
+    # server profile. That's a false "you are exposed" warning on the exact
+    # surface the spec calls security-critical.
+    _member_profile(store.default_base_dir())
+    _router_win(win, runtime=Runtime(bind_host="0.0.0.0"))
+    # Each tab's own visible flag only reflects reality while it's the
+    # current tab (QTabWidget hides the others), so check each banner's
+    # setVisible() state with its tab selected.
+    win.tabs.setCurrentIndex(0)     # Configure
+    assert win.configure_status.banner.isVisibleTo(win)
+    win.tabs.setCurrentIndex(1)     # Monitor
+    assert win.monitor_status.banner.isVisibleTo(win)
+    assert "0.0.0.0" in win.configure_status.banner.text()
+    assert "0.0.0.0" in win.monitor_status.banner.text()
+    win.api_key_box.reveal_key(True)
+    assert win.api_key_box.key_label.text().startswith("sk-")
+    assert "qwen" in win.harness_box.harness_text.toPlainText()
+
+    win.load_profile(Profile(name="Solo", image="img", model="/models/a.gguf",
+                             mounts=[Mount(host="/h", container="/models")],
+                             settings={"port": 8080}))
+
+    assert win.current_profile().mode == "server"
+    assert win.configure_status.banner.text() == ""
+    assert win.monitor_status.banner.text() == ""
+    win.tabs.setCurrentIndex(0)     # Configure
+    assert not win.configure_status.banner.isVisibleTo(win)
+    win.tabs.setCurrentIndex(1)     # Monitor
+    assert not win.monitor_status.banner.isVisibleTo(win)
+    # With no key set, "Reveal" shows the mask (there's nothing to reveal) --
+    # the point is that it's no longer the previous router's real "sk-..." key.
+    win.api_key_box.reveal_key(True)
+    assert not win.api_key_box.key_label.text().startswith("sk-")
+    assert win.api_key_box._api_key == ""
+    assert "qwen" not in win.harness_box.harness_text.toPlainText()
+    assert win.harness_box.harness_text.toPlainText() == ""
+
+
 def test_report_validation_does_not_invent_router_errors(win):
     _member_profile(store.default_base_dir())
     _router_win(win)
