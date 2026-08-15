@@ -20,7 +20,7 @@ def _write_moe_mtp_gguf(path):
     Path(path).write_bytes(blob)
 
 
-def test_model_caps_apply_tiers(qtbot, tmp_path):
+def test_moe_mtp_model_marks_dots_suggested(qtbot, tmp_path):
     _write_moe_mtp_gguf(tmp_path / "m.gguf")
     w = MainWindow()
     qtbot.addWidget(w)
@@ -29,15 +29,25 @@ def test_model_caps_apply_tiers(qtbot, tmp_path):
                 mounts=[Mount(host=str(tmp_path), container="/models", role="model", mode="ro")],
                 model="/models/m.gguf", settings={"port": 8080})
     w.load_profile(p)
-    assert w._widgets["spec-type"].property("relevance") == "recommended"   # MTP head present
-    assert w._widgets["n-cpu-moe"].property("relevance") == "recommended"   # MoE
-    assert w.mmproj_edit.property("relevance") == "na"                      # no vision sibling
-    assert w._widgets["swa-full"].property("relevance") == "na"             # no SWA
+    # in-file MTP head -> a concrete suggestion fires on spec-type, so its
+    # dot is suggested and mentions MTP in the click-apply reason.
+    spec_dot = w._widgets["spec-type"]._dot
+    assert spec_dot.text() == "●"
+    assert "MTP" in spec_dot.toolTip()
+    # MoE model -> n-cpu-moe is RECOMMENDED tier.
+    moe_dot = w._widgets["n-cpu-moe"]._dot
+    assert moe_dot.text() == "●"
+    assert "MoE" in moe_dot.toolTip()
+    # no vision sibling -> mmproj field dot is muted (N/A).
+    assert w._mmproj_dot.text() == "○"
+    assert "Not applicable" in w._mmproj_dot.toolTip()
+    # no SWA -> muted.
+    swa_dot = w._widgets["swa-full"]._dot
+    assert swa_dot.text() == "○"
     assert "MoE" in w.model_meta_label.text() and "MTP" in w.model_meta_label.text()
 
 
-def test_suggestion_chip_applies(qtbot, tmp_path):
-    from PySide6.QtWidgets import QPushButton
+def test_clicking_suggestion_dot_applies_it(qtbot, tmp_path):
     _write_moe_mtp_gguf(tmp_path / "m.gguf")
     w = MainWindow()
     qtbot.addWidget(w)
@@ -46,17 +56,29 @@ def test_suggestion_chip_applies(qtbot, tmp_path):
                 mounts=[Mount(host=str(tmp_path), container="/models", role="model", mode="ro")],
                 model="/models/m.gguf", settings={"port": 8080, "spec-type": "none"})
     w.load_profile(p)
-    chips = [b for b in w.suggestions_strip.findChildren(QPushButton)]
-    assert chips, "expected an MTP suggestion chip"
-    chips[0].click()
+    dot = w._widgets["spec-type"]._dot
+    assert dot.text() == "●"
+    dot.click()
     assert w._widgets["spec-type"].value() == "draft-mtp"   # in-file MTP suggestion applied
 
 
-def test_no_model_is_neutral(qtbot):
+def test_no_model_hides_dots(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    # default profile has no model -> every catalog widget is NEUTRAL, no chips
-    from PySide6.QtWidgets import QPushButton
-    assert all(w._widgets[k].property("relevance") in (None, "neutral")
-               for k in ("spec-type", "n-cpu-moe", "swa-full"))
-    assert w.suggestions_strip.findChildren(QPushButton) == []
+    # default profile has no model -> every catalog widget's dot is hidden
+    # (state "none": empty text, not just neutral styling).
+    for k in ("spec-type", "n-cpu-moe", "swa-full"):
+        assert w._widgets[k]._dot.text() == ""
+    assert w._mmproj_dot.text() == ""
+    assert w._draft_model_dot.text() == ""
+
+
+def test_tier_qss_and_chip_strip_are_gone(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    assert not hasattr(w, "suggestions_strip")
+    assert not hasattr(w, "family_combo")
+    assert not hasattr(w, "save_preset_btn")
+    from llama_launcher.ui.widgets import setting_widgets
+    assert not hasattr(setting_widgets, "TIER_QSS")
+    assert not hasattr(setting_widgets.SettingWidget, "set_relevance")

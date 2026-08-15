@@ -27,8 +27,6 @@ from llama_launcher.store.profiles import (
     load_config, save_config, profile_to_dict, resolve_member_pairs,
 )
 from llama_launcher.core.instances import Instance, build_instances
-from llama_launcher.core.presets import PRESETS, Preset, preset_suggestions
-from llama_launcher.store.presets import list_presets as list_user_presets, save_preset as save_user_preset
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
 from llama_launcher.services import benchmark, benchmark_store
 from llama_launcher.core import vram
@@ -37,9 +35,9 @@ from llama_launcher.core import report as report_mod
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.ui.dialogs.report_dialog import ReportDialog
 import posixpath
-from llama_launcher.core.capabilities import relevance, Tier, suggestions as compute_suggestions
+from llama_launcher.core.capabilities import describe_relevance, Tier, suggestions as compute_suggestions
 from llama_launcher.core.pathmap import container_to_host
-from llama_launcher.ui.widgets.setting_widgets import make_widget, TIER_QSS
+from llama_launcher.ui.widgets.setting_widgets import make_widget, SuggestionDot
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
@@ -361,8 +359,10 @@ class MainWindow(QMainWindow):
         self.mmproj_edit = QLineEdit(); self.mmproj_edit.textChanged.connect(self.refresh_preview)
         self.draft_model_edit = QLineEdit(); self.draft_model_edit.textChanged.connect(self.refresh_preview)
         self.raw_edit = QLineEdit(); self.raw_edit.textChanged.connect(self.refresh_preview)
-        left_form.addRow("mmproj", self._field_with_browse(self.mmproj_edit))
-        left_form.addRow("draft model", self._field_with_browse(self.draft_model_edit))
+        self._mmproj_dot = SuggestionDot(self)
+        self._draft_model_dot = SuggestionDot(self)
+        left_form.addRow("mmproj", self._field_with_browse(self.mmproj_edit, self._mmproj_dot))
+        left_form.addRow("draft model", self._field_with_browse(self.draft_model_edit, self._draft_model_dot))
         self.lora_panel = LoraPanel()
         self.lora_panel.changed.connect(self.refresh_preview)
         self.lora_section = CollapsibleSection("LoRA adapters", self.lora_panel, collapsed=True)
@@ -437,9 +437,7 @@ class MainWindow(QMainWindow):
             self._widgets["load-mode"].changed.connect(self._sync_load_mode_legacy)
         right_scroll.setWidget(right_inner)
         body.addWidget(right_scroll, 2)
-        self.setStyleSheet((self.styleSheet() or "") + TIER_QSS)
         self._last_caps = None
-        self._preset_family = None
         self._router_statuses: dict = {}
         self._spec_prev = None      # previous /metrics spec-decode counter read
         self._props = None          # cached /props for the current model load
@@ -508,29 +506,14 @@ class MainWindow(QMainWindow):
         self._active_instance = None      # Instance being monitored, or None -> current profile
         self.stats_dock.visibilityChanged.connect(self._on_stats_visibility)
 
-        # BOTTOM: suggest-family + command preview are config-only; wrap them in
-        # one container so they can be hidden on the Monitor/Router/Benchmark
-        # tabs (see _on_tab_changed). Launch/Stop/etc stay shared below.
-        from PySide6.QtWidgets import QHBoxLayout as _HBox
+        # BOTTOM: command preview is config-only; wrap it in one container so
+        # it can be hidden on the Monitor/Router/Benchmark tabs (see
+        # _on_tab_changed). Launch/Stop/etc stay shared below.
         self._config_bottom = QWidget()
         config_bottom_box = QVBoxLayout(self._config_bottom)
         config_bottom_box.setContentsMargins(0, 0, 0, 0)
         self.model_meta_label = QLabel("")
         config_bottom_box.addWidget(self.model_meta_label)
-        self.suggestions_strip = QWidget()
-        self._suggestions_layout = _HBox(self.suggestions_strip)
-        self._suggestions_layout.setContentsMargins(0, 0, 0, 0)
-        family_row = QHBoxLayout()
-        family_row.addWidget(QLabel("Suggest for family"))
-        self.family_combo = NoWheelComboBox()
-        self.family_combo.activated.connect(self._on_pick_family)
-        family_row.addWidget(self.family_combo, 1)
-        self.save_preset_btn = QPushButton("Save as preset…")
-        self.save_preset_btn.clicked.connect(self.on_save_preset)
-        family_row.addWidget(self.save_preset_btn)
-        config_bottom_box.addLayout(family_row)
-        self._reload_family_combo()
-        config_bottom_box.addWidget(self.suggestions_strip)
         self.model_edit.textChanged.connect(lambda _: self.apply_model_caps())
         self.mounts_panel.changed.connect(self.apply_model_caps)
         preview_row = QHBoxLayout()
@@ -983,11 +966,13 @@ class MainWindow(QMainWindow):
                 f"the router silently. Remove it or recreate the profile."))
         return issues
 
-    def _field_with_browse(self, line_edit: QLineEdit) -> QWidget:
+    def _field_with_browse(self, line_edit: QLineEdit, dot: QWidget | None = None) -> QWidget:
         container = QWidget()
         row = QHBoxLayout(container)
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(line_edit, 1)
+        if dot is not None:
+            row.addWidget(dot)
         btn = QPushButton("Browse…")
         btn.clicked.connect(lambda: self._browse_into(line_edit))
         row.addWidget(btn)
@@ -2204,11 +2189,6 @@ class MainWindow(QMainWindow):
         from PySide6.QtWidgets import QApplication
         QApplication.instance().quit()
 
-    def _set_field_relevance(self, edit, tier) -> None:
-        edit.setProperty("relevance", getattr(tier, "value", str(tier)))
-        edit.style().unpolish(edit)
-        edit.style().polish(edit)
-
     def apply_model_caps(self) -> None:
         p = self.current_profile()
         meta, size, caps = (None, None, None)
@@ -2216,74 +2196,55 @@ class MainWindow(QMainWindow):
             meta, size, caps = model_info.inspect_model(p.model, self.mounts_panel.mounts())
         self._last_caps = caps
         self.model_meta_label.setText(self._meta_caps_text(meta, size, caps))
-        tiers = relevance(caps) if caps else {}
+
+        described = describe_relevance(caps) if caps else {}
+        sugg_by_key, reason_by_key = self._suggestion_index(caps)   # concrete-value suggestions
+
         for key, widget in self._widgets.items():
-            widget.set_relevance(tiers.get(key, Tier.NEUTRAL))
-        self._set_field_relevance(self.mmproj_edit, tiers.get("mmproj", Tier.NEUTRAL))
-        self._set_field_relevance(self.draft_model_edit, tiers.get("draft_model", Tier.NEUTRAL))
-        self._rebuild_suggestions(caps)
+            self._apply_dot(widget, key, described, sugg_by_key, reason_by_key)
+        self._apply_field_dot(self._mmproj_dot, "mmproj", described, sugg_by_key, reason_by_key)
+        self._apply_field_dot(self._draft_model_dot, "draft_model", described, sugg_by_key, reason_by_key)
 
-    def _all_presets(self) -> list:
-        # User presets override curated ones of the same key.
-        merged = {p.key: p for p in PRESETS}
-        for p in list_user_presets(base_dir()):
-            merged[p.key] = p
-        return list(merged.values())
-
-    def _reload_family_combo(self) -> None:
-        self.family_combo.clear()
-        self.family_combo.addItem("(none)", None)
-        for preset in self._all_presets():
-            self.family_combo.addItem(preset.label, preset)
-
-    def _on_pick_family(self, _index) -> None:
-        self._preset_family = self.family_combo.currentData()
-        self._rebuild_suggestions(self._last_caps)
-
-    def on_save_preset(self) -> None:
-        active = self.active_catalog()
-        captured = {k: self._widgets[k].value()
-                    for k in active if self._widgets[k].is_set()}
-        captured.pop("port", None)                 # port is machine state, not a family flag
-        if not captured:
-            QMessageBox.information(
-                self, "Nothing to save",
-                "Set some options first — a preset captures the options you've set.")
-            return
-        name, ok = QInputDialog.getText(self, "Save as preset", "Preset name:")
-        if not ok or not name.strip():
-            return
-        preset = Preset(key=slugify(name), label=name.strip(),
-                        settings=captured, source="user")
-        save_user_preset(preset, base_dir())
-        self._reload_family_combo()
-        idx = self.family_combo.findText(preset.label)
-        if idx >= 0:
-            self.family_combo.setCurrentIndex(idx)
-            self._on_pick_family(idx)
-
-    def _rebuild_suggestions(self, caps) -> None:
-        while self._suggestions_layout.count():
-            item = self._suggestions_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-        sgs = []
-        if caps:
-            sgs += compute_suggestions(
+    def _suggestion_index(self, caps):
+        """key -> (Suggestion, reason). A multi-key suggestion indexes each key."""
+        sugg_by_key, reason_by_key = {}, {}
+        if not caps:
+            return sugg_by_key, reason_by_key
+        for sg in compute_suggestions(
                 caps, self.current_profile().settings,
                 mmproj_set=bool(self.mmproj_edit.text()),
-                draft_set=bool(self.draft_model_edit.text()),
-            )
-        if self._preset_family is not None:
-            active = self.active_catalog()
-            sgs += [s for s in preset_suggestions(self._preset_family)
-                    if all(k in active for k in s.settings)]
-        for sg in sgs:
-            btn = QPushButton("💡 " + sg.text)
-            btn.setFlat(True)
-            btn.clicked.connect(lambda _=False, s=sg: self._apply_suggestion(s))
-            self._suggestions_layout.addWidget(btn)
-        self._suggestions_layout.addStretch(1)
+                draft_set=bool(self.draft_model_edit.text())):
+            for k in list(sg.settings) + list(sg.fields):
+                sugg_by_key[k] = sg
+                reason_by_key[k] = sg.text
+        return sugg_by_key, reason_by_key
+
+    @staticmethod
+    def _dot_state_for(key, described, sugg_by_key, reason_by_key):
+        tier, reason = described.get(key, (Tier.NEUTRAL, ""))
+        state = {"recommended": "suggested", "tune": "suggested",
+                 "na": "muted"}.get(getattr(tier, "value", ""), "none")
+        return state, reason
+
+    def _apply_dot(self, widget, key, described, sugg_by_key, reason_by_key) -> None:
+        state, reason = self._dot_state_for(key, described, sugg_by_key, reason_by_key)
+        on_apply = None
+        if key in sugg_by_key:
+            state = "suggested"
+            reason = reason_by_key[key]
+            sg = sugg_by_key[key]
+            on_apply = lambda s=sg: self._apply_suggestion(s)
+        widget.set_suggestion(state, reason, on_apply)
+
+    def _apply_field_dot(self, dot, key, described, sugg_by_key, reason_by_key) -> None:
+        state, reason = self._dot_state_for(key, described, sugg_by_key, reason_by_key)
+        on_apply = None
+        if key in sugg_by_key:
+            state = "suggested"
+            reason = reason_by_key[key]
+            sg = sugg_by_key[key]
+            on_apply = lambda s=sg: self._apply_suggestion(s)
+        dot.set_state(state, reason, on_apply)
 
     def _resolve_sibling(self, filename) -> str | None:
         model = self.model_edit.text()
