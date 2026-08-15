@@ -1,6 +1,6 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QGridLayout, QCheckBox, QLineEdit
+    QWidget, QHBoxLayout, QGridLayout, QCheckBox, QLineEdit, QToolButton
 )
 
 from llama_launcher.core.settings_catalog import Setting
@@ -15,6 +15,41 @@ TIER_QSS = """
 *[relevance="tune"]        { background: rgba(120,140,170,0.12); border-radius: 3px; }
 *[relevance="na"]          { color: palette(mid); }
 """
+
+
+class SuggestionDot(QToolButton):
+    """Inline per-setting indicator: filled ● = suggested, hollow ○ = N/A.
+
+    When a concrete value suggestion exists, the dot is clickable and applies
+    it (on_apply); otherwise it is a passive indicator. Hover explains why.
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAutoRaise(True)
+        self._on_apply = None
+        self.clicked.connect(self._fire)
+        self.set_state("none")
+
+    def set_state(self, state: str, reason: str = "", on_apply=None) -> None:
+        self._on_apply = on_apply
+        self.setToolTip(reason)
+        if state == "suggested":
+            self.setText("●")
+            self.setStyleSheet("QToolButton { color: palette(highlight); border: none; }")
+            self.setVisible(True)
+        elif state == "muted":
+            self.setText("○")
+            self.setStyleSheet("QToolButton { color: palette(mid); border: none; }")
+            self.setVisible(True)
+        else:  # none
+            self.setText("")
+            self.setVisible(False)
+        self.setEnabled(on_apply is not None)
+
+    def _fire(self) -> None:
+        if self._on_apply is not None:
+            self._on_apply()
 
 
 class SettingWidget(QWidget):
@@ -108,6 +143,9 @@ class SettingWidget(QWidget):
         layout.addWidget(self._editor)
         layout.addStretch(1)
 
+        self._dot = SuggestionDot(self)
+        layout.addWidget(self._dot)
+
         if setting.danger:
             self.setStyleSheet("#dangerSetting { border: 1px solid red; }")
         self.setToolTip(tooltip)
@@ -180,6 +218,9 @@ class SettingWidget(QWidget):
             w.setProperty("relevance", val)
             w.style().unpolish(w)
             w.style().polish(w)
+
+    def set_suggestion(self, state: str, reason: str = "", on_apply=None) -> None:
+        self._dot.set_state(state, reason, on_apply)
 
 
 def make_widget(setting: Setting) -> SettingWidget:
