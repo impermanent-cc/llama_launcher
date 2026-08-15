@@ -21,6 +21,18 @@ def test_load_roundtrip_and_missing(tmp_path):
     assert store.load(tmp_path, "prof")[0]["rows"][0]["pp_tok_s"] == 100
 
 
+def test_clear_removes_history(tmp_path):
+    store.append(tmp_path, "prof", _run("t0", 100, 50))
+    assert store.load(tmp_path, "prof")          # non-empty
+    store.clear(tmp_path, "prof")
+    assert store.load(tmp_path, "prof") == []
+
+
+def test_clear_is_safe_when_no_history(tmp_path):
+    store.clear(tmp_path, "never-benched")       # must not raise
+    assert store.load(tmp_path, "never-benched") == []
+
+
 def test_delta_percent_and_size_mismatch():
     new = asdict(_run("n", 200, 60, size=512))
     old = asdict(_run("o", 100, 50, size=512))

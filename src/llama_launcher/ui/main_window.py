@@ -83,7 +83,7 @@ def build_monitor_data(target: dict) -> dict | None:
     """
     if not target.get("running"):
         return None
-    from llama_launcher.services.metrics import kv_usage_ratio
+    from llama_launcher.services.metrics import kv_ratio
     port, host, key = target["port"], target["host"], target["key"]
     model_scope, poll = target["model_scope"], target["poll"]
     name, binary = target["name"], target["binary"]
@@ -96,7 +96,7 @@ def build_monitor_data(target: dict) -> dict | None:
     return {
         "tok_s": m.get("llamacpp:predicted_tokens_seconds"),
         "prompt_tok_s": m.get("llamacpp:prompt_tokens_seconds"),
-        "kv_pct": kv_usage_ratio(slots),
+        "kv_pct": kv_ratio(m, slots),
         "speculating": any(s.get("speculative") for s in slots),
         "gpus": gpu.query_gpus(),
         "cpu": st.get("cpu_perc", ""),
@@ -473,6 +473,7 @@ class MainWindow(QMainWindow):
         self.benchmark_panel = BenchmarkPanel()
         self.benchmark_panel.benchmark_run_requested.connect(self._on_benchmark_run)
         self.benchmark_panel.benchmark_cancel_requested.connect(self._on_benchmark_cancel)
+        self.benchmark_panel.benchmark_clear_requested.connect(self._on_benchmark_clear)
         self.tabs.addTab(self.benchmark_panel, "Benchmark")
         self._configure_tab = configure_tab
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -1630,6 +1631,11 @@ class MainWindow(QMainWindow):
         if self._benchmark_worker is not None:
             self._benchmark_worker.cancel()
 
+    def _on_benchmark_clear(self) -> None:
+        """Wipe the saved benchmark history for the current profile and the view."""
+        benchmark_store.clear(default_base_dir(), self.current_profile().name)
+        self.benchmark_panel.reset()
+
     def _on_benchmark_finished(self, run) -> None:
         name = self._benchmark_profile_name or self.current_profile().name
         base = default_base_dir()
@@ -2117,7 +2123,7 @@ class MainWindow(QMainWindow):
         Returns a note (and makes no network call) when --metrics is off, so the
         report explains why throughput is missing instead of silently omitting it.
         """
-        from llama_launcher.services.metrics import kv_usage_ratio
+        from llama_launcher.services.metrics import kv_ratio
         port = p.settings.get("port", 8080)
         if not p.settings.get("metrics"):
             return ("(--metrics not enabled in this profile — turn it on and relaunch "
@@ -2146,7 +2152,7 @@ class MainWindow(QMainWindow):
         prompt = m.get("llamacpp:prompt_tokens_seconds")
         if prompt is not None:
             lines.append(f"prompt: {prompt:.2f} tok/s")
-        kv = kv_usage_ratio(slots)
+        kv = kv_ratio(m, slots)
         if kv is not None:
             lines.append(f"KV cache usage: {kv * 100:.0f}%")
         if m:

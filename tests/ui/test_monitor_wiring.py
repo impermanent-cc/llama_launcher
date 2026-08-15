@@ -127,6 +127,23 @@ def test_build_monitor_data_gathers_from_a_plain_target(monkeypatch):
     assert abs(d["kv_pct"] - 0.40) < 1e-9
 
 
+def test_build_monitor_data_prefers_kv_cache_metric(monkeypatch):
+    """KV% uses llama.cpp's kv_cache_usage_ratio gauge when present, not the
+    slots-derived prompt-token estimate (which reads 0 when idle)."""
+    monkeypatch.setattr(mw.metrics, "fetch_metrics",
+                        lambda *a, **k: {"llamacpp:kv_cache_usage_ratio": 0.83})
+    monkeypatch.setattr(mw.metrics, "fetch_slots",
+                        lambda *a, **k: [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.runtime, "stats", lambda name, b: {})
+    monkeypatch.setattr(mw.runtime, "started_at", lambda name, b: None)
+    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
+              "key": None, "model_scope": None, "poll": True,
+              "name": "llama-x", "binary": "podman"}
+    d = mw.build_monitor_data(target)
+    assert d["kv_pct"] == 0.83     # the gauge, not 0.40 from slots
+
+
 def test_build_monitor_data_returns_none_when_not_running(monkeypatch):
     """A not-running target does no I/O and returns None, so the worker emits
     nothing (an idle/stopped server isn't polled off-thread every second)."""

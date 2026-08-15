@@ -1,5 +1,5 @@
 import llama_launcher.services.metrics as met
-from llama_launcher.services.metrics import kv_usage_ratio
+from llama_launcher.services.metrics import kv_usage_ratio, kv_ratio
 
 
 def test_kv_usage_ratio():
@@ -10,6 +10,22 @@ def test_kv_usage_ratio():
 
 def test_kv_usage_ratio_empty():
     assert kv_usage_ratio([]) is None
+
+
+def test_kv_ratio_prefers_metric_over_slots():
+    # llama.cpp's own kv_cache_usage_ratio gauge reflects true cache occupancy;
+    # it must win over the slots-derived prompt-token estimate.
+    slots = [{"n_ctx": 100, "n_prompt_tokens_processed": 25}]   # would be 0.25
+    assert kv_ratio({"llamacpp:kv_cache_usage_ratio": 0.7}, slots) == 0.7
+
+
+def test_kv_ratio_falls_back_to_slots_when_metric_absent():
+    slots = [{"n_ctx": 100, "n_prompt_tokens_processed": 25}]
+    assert abs(kv_ratio({}, slots) - 0.25) < 1e-9
+
+
+def test_kv_ratio_none_when_both_absent():
+    assert kv_ratio({}, []) is None
 
 
 def test_fetch_metrics_parses(monkeypatch):

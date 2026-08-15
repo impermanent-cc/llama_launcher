@@ -60,9 +60,23 @@ def test_run_benchmark_sync_saves_one_run_and_updates_the_table(win, monkeypatch
 
     runs = benchmark_store.load(default_base_dir(), p.name)
     assert len(runs) == 1
-    assert win.benchmark_panel.bench_table.rowCount() == 2
+    # grouped: one model header row + the two metric rows
+    assert win.benchmark_panel.bench_table.rowCount() == 3
+    assert "a.gguf" in win.benchmark_panel.bench_table.item(0, 0).text()
     # the sizes/n_predict/warmup/repeats from cfg reached run_benchmark unchanged
     assert calls == [([128, 512], 64, 1, 3)]
+
+
+def test_clear_button_clears_store_and_table(win, monkeypatch):
+    p = _load_server_profile(win)
+    monkeypatch.setattr(benchmark, "run_benchmark", _fake_run_benchmark())
+    win._run_benchmark_sync({"sizes": [128, 512], "n_predict": 64, "warmup": 1, "repeats": 3})
+    assert benchmark_store.load(default_base_dir(), p.name)          # something saved
+
+    win.benchmark_panel.benchmark_clear_requested.emit()
+
+    assert benchmark_store.load(default_base_dir(), p.name) == []    # on-disk wiped
+    assert win.benchmark_panel.bench_table.rowCount() == 0           # view wiped
 
 
 def test_second_run_grows_history_and_shows_a_delta(win, monkeypatch):
@@ -86,7 +100,8 @@ def test_second_run_grows_history_and_shows_a_delta(win, monkeypatch):
     assert len(runs) == 2
     assert deltas[0] is None        # first run: nothing stored yet to diff against
     assert deltas[1] is not None    # second run: delta vs the first
-    assert win.benchmark_panel.bench_table.rowCount() == 2
+    # two grouped runs, each a header row + two metric rows
+    assert win.benchmark_panel.bench_table.rowCount() == 6
 
 
 def test_run_benchmark_sync_refuses_when_router_has_no_loaded_model(win, monkeypatch):
@@ -231,7 +246,8 @@ def test_history_loaded_on_server_launch_reset(win, monkeypatch):
 
     win.on_launch()
 
-    assert win.benchmark_panel.bench_history.count() >= 1
+    assert win.benchmark_panel.bench_table.rowCount() >= 1
+    assert "a.gguf" in win.benchmark_panel.bench_table.item(0, 0).text()
 
 
 def test_history_loaded_on_router_launch_reset(win, monkeypatch):
@@ -249,4 +265,4 @@ def test_history_loaded_on_router_launch_reset(win, monkeypatch):
 
     win.on_launch()
 
-    assert win.benchmark_panel.bench_history.count() >= 1
+    assert win.benchmark_panel.bench_table.rowCount() >= 1

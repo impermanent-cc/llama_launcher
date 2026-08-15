@@ -29,6 +29,11 @@ def append(base_dir, profile_name, run) -> list:
     return runs
 
 
+def clear(base_dir, profile_name) -> None:
+    """Delete this profile's on-disk benchmark history. Idempotent."""
+    history_path(base_dir, profile_name).unlink(missing_ok=True)
+
+
 def _pct(new, old):
     return None if not old else (new - old) / old * 100.0
 

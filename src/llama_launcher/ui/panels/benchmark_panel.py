@@ -1,23 +1,39 @@
-from PySide6.QtCore import Signal
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QFont
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QSpinBox, QTableWidget, QTableWidgetItem, QListWidget,
+    QLineEdit, QSpinBox, QTableWidget, QTableWidgetItem,
     QAbstractItemView,
 )
 
 _BENCH_TABLE_HEADERS = ["size", "prompt_n", "pp t/s", "gen t/s", "total s"]
 
+# Per-column explanations shown as header tooltips; the compact legend below the
+# table repeats the throughput ones inline so they're visible without hovering.
+_BENCH_HEADER_TIPS = {
+    "size": "Target prompt length in tokens (a filler prompt is padded to this).",
+    "prompt_n": "Actual number of prompt tokens sent to the server for this row.",
+    "pp t/s": "Prefill (prompt-processing) throughput — tokens/sec the model "
+              "ingests the prompt.",
+    "gen t/s": "Generation throughput — tokens/sec the model produces in the reply.",
+    "total s": "Total wall-clock seconds for this prompt size (prefill + generation).",
+}
+
+_BENCH_LEGEND = ("pp t/s = prefill (prompt-processing) throughput  ·  "
+                 "gen t/s = generation throughput  ·  total s = wall-clock per size")
+
 
 class BenchmarkPanel(QWidget):
     """Speed benchmark for the running server: its own tab.
 
-    Split out of MonitorPanel so the Monitor tab is just instances + logs; the
-    controls, results table and per-profile history live here. Wiring in
-    MainWindow (run/cancel handlers, availability, history) is unchanged -- only
-    the widget these methods live on moved.
+    Results are grouped per run: a header row labelled with the model and flags
+    that produced it sits above that run's metric rows, so past runs stay tied to
+    their model for A/B comparison (up to the store's cap). Clear wipes the
+    on-disk history for the current profile.
     """
     benchmark_run_requested = Signal(dict)
     benchmark_cancel_requested = Signal()
+    benchmark_clear_requested = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -51,6 +67,10 @@ class BenchmarkPanel(QWidget):
         self.bench_run_btn.setEnabled(False)
         self.bench_run_btn.clicked.connect(self._on_bench_run_clicked)
         bench_config.addWidget(self.bench_run_btn)
+        self.bench_clear_btn = QPushButton("Clear")
+        self.bench_clear_btn.setToolTip("Delete the saved benchmark history for this profile.")
+        self.bench_clear_btn.clicked.connect(self.benchmark_clear_requested)
+        bench_config.addWidget(self.bench_clear_btn)
         layout.addLayout(bench_config)
 
         self.bench_progress = QLabel("")
@@ -58,13 +78,14 @@ class BenchmarkPanel(QWidget):
 
         self.bench_table = QTableWidget(0, len(_BENCH_TABLE_HEADERS))
         self.bench_table.setHorizontalHeaderLabels(_BENCH_TABLE_HEADERS)
+        for c, name in enumerate(_BENCH_TABLE_HEADERS):
+            self.bench_table.horizontalHeaderItem(c).setToolTip(_BENCH_HEADER_TIPS[name])
         self.bench_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.bench_table, 1)
 
-        layout.addWidget(QLabel("History (most recent first):"))
-        self.bench_history = QListWidget()
-        self.bench_history.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        layout.addWidget(self.bench_history, 1)
+        self.bench_legend = QLabel(_BENCH_LEGEND)
+        self.bench_legend.setWordWrap(True)
+        layout.addWidget(self.bench_legend)
 
         self._bench_running = False
 
@@ -109,41 +130,66 @@ class BenchmarkPanel(QWidget):
         self.bench_progress.setText(text)
 
     def show_benchmark_run(self, run: dict, delta: dict | None) -> None:
-        rows = run.get("rows", [])
-        self.bench_table.setRowCount(len(rows))
-        for r, row in enumerate(rows):
+        """Append the delta summary vs the previous run to the progress line.
+
+        The results table itself is (re)painted by set_benchmark_history, which
+        MainWindow calls right after this with the full per-profile history.
+        """
+        if not delta:
+            return
+        # "shared" is a list of {"size","pp_pct","gen_pct"} -- one entry per
+        # target size present in both runs (see benchmark_store.delta).
+        parts = []
+        for entry in delta.get("shared") or []:
+            bits = []
+            pp = entry.get("pp_pct")
+            gen = entry.get("gen_pct")
+            if pp is not None:
+                bits.append(f"pp {pp:+.0f}%")
+            if gen is not None:
+                bits.append(f"gen {gen:+.0f}%")
+            if bits:
+                parts.append(f"{entry.get('size')}: " + " ".join(bits))
+        summary = "Δ " + " · ".join(parts) if parts else "Δ"
+        if delta.get("sizes_differ"):
+            summary += " (sizes differ)"
+        current = self.bench_progress.text()
+        self.bench_progress.setText(f"{current}  {summary}" if current else summary)
+
+    def _add_group_header(self, run: dict) -> None:
+        """Insert a spanned, styled header row identifying a run's model/config."""
+        row = self.bench_table.rowCount()
+        self.bench_table.insertRow(row)
+        label = self._snapshot_label(run.get("snapshot") or {})
+        ts = run.get("timestamp", "")
+        text = f"{ts}  ·  {label}" if label else str(ts)
+        item = QTableWidgetItem(text)
+        font = item.font()
+        font.setBold(True)
+        item.setFont(font)
+        item.setBackground(QBrush(QColor(0, 0, 0, 30)))
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)     # not selectable/editable
+        self.bench_table.setItem(row, 0, item)
+        self.bench_table.setSpan(row, 0, 1, len(_BENCH_TABLE_HEADERS))
+
+    def _add_metric_rows(self, run: dict) -> None:
+        for row in run.get("rows", []):
+            r = self.bench_table.rowCount()
+            self.bench_table.insertRow(r)
             values = [row.get("target_size"), row.get("prompt_n"), row.get("pp_tok_s"),
                       row.get("gen_tok_s"), row.get("total_s")]
             for c, val in enumerate(values):
                 self.bench_table.setItem(r, c, QTableWidgetItem("" if val is None else str(val)))
-        if delta:
-            # "shared" is a list of {"size","pp_pct","gen_pct"} -- one entry
-            # per target size present in both runs (see benchmark_store.delta).
-            parts = []
-            for entry in delta.get("shared") or []:
-                bits = []
-                pp = entry.get("pp_pct")
-                gen = entry.get("gen_pct")
-                if pp is not None:
-                    bits.append(f"pp {pp:+.0f}%")
-                if gen is not None:
-                    bits.append(f"gen {gen:+.0f}%")
-                if bits:
-                    parts.append(f"{entry.get('size')}: " + " ".join(bits))
-            summary = "Δ " + " · ".join(parts) if parts else "Δ"
-            if delta.get("sizes_differ"):
-                summary += " (sizes differ)"
-            current = self.bench_progress.text()
-            self.bench_progress.setText(f"{current}  {summary}" if current else summary)
 
     def set_benchmark_history(self, runs: list) -> None:
-        self.bench_history.clear()
+        """Repaint the table as one labelled group per stored run, newest first."""
+        self.bench_table.clearSpans()
+        self.bench_table.setRowCount(0)
         for run in sorted(runs, key=lambda r: r.get("timestamp") or "", reverse=True):
-            label = self._snapshot_label(run.get("snapshot") or {})
-            ts = run.get("timestamp", "")
-            self.bench_history.addItem(f"{ts}  {label}" if label else str(ts))
+            self._add_group_header(run)
+            self._add_metric_rows(run)
 
     def reset(self):
+        self.bench_table.clearSpans()
         self.bench_table.setRowCount(0)
-        self.bench_history.clear()
         self.bench_progress.setText("")

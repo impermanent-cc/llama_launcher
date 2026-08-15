@@ -260,9 +260,20 @@ def test_monitor_panel_has_no_benchmark_widgets(qtbot):
         assert not hasattr(panel, attr), attr
 
 
-def test_benchmark_panel_orders_controls_table_history(qtbot):
+def test_benchmark_panel_has_controls_table_and_clear(qtbot):
     from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
     panel = BenchmarkPanel(); qtbot.addWidget(panel)
     assert panel.bench_run_btn is not None
     assert panel.bench_table is not None
-    assert panel.bench_history is not None
+    assert panel.bench_clear_btn is not None
+    assert panel.bench_legend is not None
+    # the separate history list was folded into the grouped table
+    assert not hasattr(panel, "bench_history")
+
+
+def test_monitor_stats_legend_explains_gen_prompt_kv(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    t = p.stats_legend.text().lower()
+    assert "gen" in t and "prompt" in t and "kv" in t
+    assert "idle" in t          # explains why they can read 0 while running
