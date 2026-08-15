@@ -1,5 +1,6 @@
 from llama_launcher.core.props import PropsInfo
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+from llama_launcher.ui.widgets.info_button import InfoButton
 from llama_launcher.services.gpu import GpuStat
 
 
@@ -266,7 +267,9 @@ def test_benchmark_panel_has_controls_table_and_clear(qtbot):
     assert panel.bench_run_btn is not None
     assert panel.bench_table is not None
     assert panel.bench_clear_btn is not None
-    assert panel.bench_legend is not None
+    assert not hasattr(panel, "bench_legend")
+    # legend text now lives behind an on-demand InfoButton popover
+    assert panel.findChildren(InfoButton)
     # the separate history list was folded into the grouped table
     assert not hasattr(panel, "bench_history")
 
@@ -274,6 +277,10 @@ def test_benchmark_panel_has_controls_table_and_clear(qtbot):
 def test_monitor_stats_legend_explains_gen_prompt_kv(qtbot):
     p = MonitorPanel()
     qtbot.addWidget(p)
-    t = p.stats_legend.text().lower()
+    assert not hasattr(p, "stats_legend")
+    # legend text now lives on the summary tooltip + an InfoButton popover
+    t = p.summary.toolTip().lower()
     assert "gen" in t and "prompt" in t and "kv" in t
     assert "idle" in t          # explains why they can read 0 while running
+    btn = p.findChild(InfoButton)
+    assert btn is not None and btn.info_text.lower() == t

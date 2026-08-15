@@ -2,11 +2,12 @@ from collections import deque
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
     QTableWidget,
 )
 
 from llama_launcher.core.mtp_stats import parse_draft_stats, sparkline
+from llama_launcher.ui.widgets.info_button import InfoButton
 
 
 class MonitorPanel(QWidget):
@@ -34,16 +35,18 @@ class MonitorPanel(QWidget):
 
         self.summary = QLabel("No server running.")
         self.summary.setWordWrap(True)
-        layout.addWidget(self.summary)
         # Persistent one-line key for the throughput/KV figures, which otherwise
         # read as bare numbers. gen/prompt come from llama.cpp's per-request
         # gauges, so they legitimately show 0 on an idle server between requests.
-        self.stats_legend = QLabel(
-            "gen / prompt = generation / prefill tok/s of the last request "
-            "(0 when idle between requests)  ·  KV = KV-cache used")
-        self.stats_legend.setWordWrap(True)
-        self.summary.setToolTip(self.stats_legend.text())
-        layout.addWidget(self.stats_legend)
+        # Kept as a hover tooltip + on-demand InfoButton popover instead of an
+        # always-visible label, to avoid cluttering the tab with reminder text.
+        _legend = ("gen / prompt = generation / prefill tok/s of the last request "
+                   "(0 when idle between requests)  ·  KV = KV-cache used")
+        self.summary.setToolTip(_legend)
+        summary_row = QHBoxLayout()
+        summary_row.addWidget(self.summary, 1)
+        summary_row.addWidget(InfoButton(_legend))
+        layout.addLayout(summary_row)
         self.enable_metrics_btn = QPushButton("Enable --metrics & relaunch")
         self.enable_metrics_btn.setVisible(False)
         self.enable_metrics_btn.clicked.connect(self.enable_metrics_requested)

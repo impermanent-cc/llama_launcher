@@ -1,4 +1,5 @@
 from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
+from llama_launcher.ui.widgets.info_button import InfoButton
 
 
 def _run(ts="t0", model="qwen.gguf", size=512, extra=None):
@@ -84,7 +85,9 @@ def test_table_headers_have_tooltips(qtbot):
 def test_legend_explains_metrics(qtbot):
     p = BenchmarkPanel()
     qtbot.addWidget(p)
-    t = p.bench_legend.text().lower()
+    assert not hasattr(p, "bench_legend")
+    infos = p.findChildren(InfoButton)
+    t = " ".join(b.info_text.lower() for b in infos)
     assert "prefill" in t and "generation" in t
 
 

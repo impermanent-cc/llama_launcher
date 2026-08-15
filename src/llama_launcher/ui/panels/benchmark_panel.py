@@ -6,10 +6,13 @@ from PySide6.QtWidgets import (
     QAbstractItemView,
 )
 
+from llama_launcher.ui.widgets.info_button import InfoButton
+
 _BENCH_TABLE_HEADERS = ["size", "prompt_n", "pp t/s", "gen t/s", "total s"]
 
-# Per-column explanations shown as header tooltips; the compact legend below the
-# table repeats the throughput ones inline so they're visible without hovering.
+# Per-column explanations shown as header tooltips; the InfoButton popover next
+# to the table repeats the throughput ones inline so they're available without
+# hovering, without keeping the reminder text always on screen.
 _BENCH_HEADER_TIPS = {
     "size": "Target prompt length in tokens (a filler prompt is padded to this).",
     "prompt_n": "Actual number of prompt tokens sent to the server for this row.",
@@ -18,6 +21,10 @@ _BENCH_HEADER_TIPS = {
     "gen t/s": "Generation throughput — tokens/sec the model produces in the reply.",
     "total s": "Total wall-clock seconds for this prompt size (prefill + generation).",
 }
+
+_BENCH_INTRO = ("Benchmark the running server: POSTs filler prompts and reads "
+                 "llama.cpp timings for prompt-eval / generation tok/s. History is "
+                 "kept per profile so you can A/B a flag or model change.")
 
 _BENCH_LEGEND = ("pp t/s = prefill (prompt-processing) throughput  ·  "
                  "gen t/s = generation throughput  ·  total s = wall-clock per size")
@@ -39,12 +46,8 @@ class BenchmarkPanel(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
 
-        layout.addWidget(QLabel(
-            "Benchmark the running server: POSTs filler prompts and reads "
-            "llama.cpp timings for prompt-eval / generation tok/s. History is "
-            "kept per profile so you can A/B a flag or model change."))
-
         bench_config = QHBoxLayout()
+        bench_config.addWidget(InfoButton(_BENCH_INTRO))
         bench_config.addWidget(QLabel("Prompt sizes:"))
         self.bench_sizes = QLineEdit("128, 512, 2048")
         bench_config.addWidget(self.bench_sizes)
@@ -73,8 +76,11 @@ class BenchmarkPanel(QWidget):
         bench_config.addWidget(self.bench_clear_btn)
         layout.addLayout(bench_config)
 
+        progress_row = QHBoxLayout()
         self.bench_progress = QLabel("")
-        layout.addWidget(self.bench_progress)
+        progress_row.addWidget(self.bench_progress, 1)
+        progress_row.addWidget(InfoButton(_BENCH_LEGEND))
+        layout.addLayout(progress_row)
 
         self.bench_table = QTableWidget(0, len(_BENCH_TABLE_HEADERS))
         self.bench_table.setHorizontalHeaderLabels(_BENCH_TABLE_HEADERS)
@@ -82,10 +88,6 @@ class BenchmarkPanel(QWidget):
             self.bench_table.horizontalHeaderItem(c).setToolTip(_BENCH_HEADER_TIPS[name])
         self.bench_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.bench_table, 1)
-
-        self.bench_legend = QLabel(_BENCH_LEGEND)
-        self.bench_legend.setWordWrap(True)
-        layout.addWidget(self.bench_legend)
 
         self._bench_running = False
 
