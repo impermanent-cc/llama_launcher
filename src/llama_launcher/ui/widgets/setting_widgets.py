@@ -201,6 +201,20 @@ class SettingWidget(QWidget):
         else:
             self._editor.setText(str(v))
 
+    def set_enum_choices(self, choices) -> None:
+        """Replace an enum editor's items (engine-dependent value sets), keeping
+        the current selection if it survives, else the setting default. No-op
+        for non-enum widgets."""
+        if self.setting.type != "enum":
+            return
+        items = [str(c) for c in choices]
+        cur = self._editor.currentText()
+        self._editor.blockSignals(True)
+        self._editor.clear()
+        self._editor.addItems(items)
+        self._editor.setCurrentText(cur if cur in items else str(self.setting.default))
+        self._editor.blockSignals(False)
+
     def is_set(self) -> bool:
         return self.value() != self.setting.default
 
