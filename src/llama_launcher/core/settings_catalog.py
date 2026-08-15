@@ -18,9 +18,16 @@ class Setting:
     danger: bool = False
     option_help: tuple = ()   # multiselect only: ((option, help_text), ...)
     suggestions: tuple = ()   # int only: preset values offered in an editable combo
+    engine: str = "any"       # "any" | "ik_llama.cpp"  (which engine surfaces this flag)
 
 
 KV_CACHE_TYPES = ("f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1")
+
+# ik_llama.cpp-only KV-cache quant types layered onto -ctk/-ctv when the engine is
+# ik. Source-verified (common/common.cpp): only q6_0 and q8_KV are added beyond
+# mainline in the default build. NOTE the capital "KV" in q8_KV — ik's parser is
+# case-sensitive. The wider ik iq-quants need GGML_IQK_FA_ALL_QUANTS=ON images.
+IK_EXTRA_KV_CACHE_TYPES = ("q6_0", "q8_KV")
 
 _ALL = [
     # Model & Context
@@ -400,6 +407,31 @@ _ALL = [
             tooltip="Preserve the reasoning trace across the whole history rather than only "
                     "the last assistant message. Needs a template advertising "
                     "'supports_preserve_reasoning'."),
+
+    # ik_llama.cpp-only flags (engine-gated). Shown only when engine == ik and
+    # dropped from argv on a mainline launch (current_profile + command_builder).
+    Setting("run-time-repack", "--run-time-repack", "bool", False, "ik_llama.cpp", ("-rtr",),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Repack tensors kept in RAM to a row-interleaved "
+                    "layout at load time; can speed up CPU/hybrid inference but DISABLES "
+                    "mmap and raises load time and RAM. Off by default."),
+    Setting("no-fused-moe", "--no-fused-moe", "bool", False, "ik_llama.cpp", ("-no-fmoe",),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Disable fused MoE ops, which ik enables by default "
+                    "for a MoE speedup. Leave unchecked to keep fused MoE on."),
+    Setting("mla-use", "--mla-use", "enum", "auto", "ik_llama.cpp", ("-mla",),
+            enum=("auto", "0", "1", "2", "3"), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Multi-head Latent Attention for DeepSeek-style "
+                    "models. 'auto' leaves ik's default; 0 disables; 1/2/3 select MLA "
+                    "variants."),
+    Setting("attention-max-batch", "--attention-max-batch", "int", 0, "ik_llama.cpp", ("-amb",),
+            0, 65536, 64, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Cap the K*Q attention buffer (MiB) to bound memory "
+                    "on long contexts. 0 = no cap (ik default). ik raises values 1-127 to 128."),
+    Setting("smart-expert-reduction", "--smart-expert-reduction", "string", "", "ik_llama.cpp",
+            ("-ser",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Custom active-expert count for MoE models, form "
+                    "'Kmin,t' (e.g. '4,0.5'). Empty = leave at the model default."),
 ]
 
 CATALOG: dict = {s.key: s for s in _ALL}
@@ -433,3 +465,10 @@ def router_catalog() -> dict:
 def member_catalog() -> dict:
     """Settings shown on an ordinary (member/single-server) profile's form."""
     return {k: s for k, s in CATALOG.items() if k not in ROUTER_ONLY_KEYS}
+
+
+def for_engine(catalog: dict, engine: str) -> dict:
+    """Drop settings tagged for a different engine. 'any' settings always pass;
+    an engine-specific setting passes only when it matches `engine`."""
+    return {k: s for k, s in catalog.items()
+            if s.engine == "any" or s.engine == engine}

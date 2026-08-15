@@ -178,3 +178,40 @@ def test_load_mode_setting():
     # legacy bools retained for older images
     assert CATALOG["no-mmap"].type == "bool"
     assert CATALOG["mlock"].type == "bool"
+
+
+from llama_launcher.core.settings_catalog import (
+    CATALOG, member_catalog, for_engine, IK_EXTRA_KV_CACHE_TYPES,
+)
+
+_IK_KEYS = {"run-time-repack", "no-fused-moe", "mla-use",
+            "attention-max-batch", "smart-expert-reduction"}
+
+
+def test_ik_flags_exist_and_are_engine_tagged():
+    for k in _IK_KEYS:
+        assert k in CATALOG, k
+        assert CATALOG[k].engine == "ik_llama.cpp", k
+        assert CATALOG[k].group == "ik_llama.cpp", k
+
+
+def test_existing_settings_default_to_engine_any():
+    assert CATALOG["ctx-size"].engine == "any"
+
+
+def test_for_engine_drops_ik_flags_for_llama_cpp():
+    cat = for_engine(member_catalog(), "llama.cpp")
+    assert _IK_KEYS.isdisjoint(cat)
+    # a plain setting still present
+    assert "ctx-size" in cat
+
+
+def test_for_engine_keeps_ik_flags_for_ik():
+    cat = for_engine(member_catalog(), "ik_llama.cpp")
+    assert _IK_KEYS <= set(cat)
+
+
+def test_ik_extra_kv_cache_types_are_additive():
+    from llama_launcher.core.settings_catalog import KV_CACHE_TYPES
+    assert set(IK_EXTRA_KV_CACHE_TYPES).isdisjoint(KV_CACHE_TYPES)
+    assert "q6_0" in IK_EXTRA_KV_CACHE_TYPES
