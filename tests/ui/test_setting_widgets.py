@@ -122,3 +122,24 @@ def test_numa_off_sentinel_is_not_set(qtbot):
     assert w.is_set() is False        # equals default -> not stored/emitted
     w.set_value("distribute")
     assert w.is_set() is True
+
+
+def test_set_enum_choices_extends_and_reverts(qtbot):
+    w = make_widget(CATALOG["cache-type-k"])  # enum, default "f16"
+    qtbot.addWidget(w)
+    base = list(CATALOG["cache-type-k"].enum)
+
+    w.set_enum_choices(base + ["q6_0", "q8_KV"])
+    w.set_value("q6_0")
+    assert w.value() == "q6_0"
+
+    # Reverting to base drops the now-invalid selection back to the default.
+    w.set_enum_choices(base)
+    assert w.value() == "f16"
+
+
+def test_set_enum_choices_noop_on_non_enum(qtbot):
+    w = make_widget(CATALOG["ctx-size"])  # int
+    qtbot.addWidget(w)
+    w.set_enum_choices(["a", "b"])  # must not raise
+    assert w.value() == CATALOG["ctx-size"].default

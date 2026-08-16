@@ -62,3 +62,11 @@ def test_router_member_defaults():
 def test_runtime_defaults_to_attached():
     from llama_launcher.core.spec import Runtime
     assert Runtime().detached is False
+
+
+def test_runtime_engine_defaults_to_llama_cpp():
+    assert Runtime().engine == "llama.cpp"
+
+
+def test_runtime_engine_is_settable():
+    assert Runtime(engine="ik_llama.cpp").engine == "ik_llama.cpp"

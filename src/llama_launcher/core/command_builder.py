@@ -267,6 +267,11 @@ def _owned_server_pairs(profile: Profile, catalog: dict) -> list:
         # filtering existed can still carry one.
         if key in ROUTER_ONLY_KEYS:
             continue
+        # Engine-gated flags (ik_llama.cpp) must never reach a mainline launch.
+        # current_profile() filters the UI path; this mirrors it for the
+        # headless/CLI path, which feeds profile.settings straight from JSON.
+        if setting.engine != "any" and setting.engine != profile.runtime.engine:
+            continue
         if key in profile.settings:
             rendered = _render_setting(setting, profile.settings[key])
             if not rendered:                      # bool that is False -> emits nothing

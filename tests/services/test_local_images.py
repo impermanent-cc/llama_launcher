@@ -44,3 +44,26 @@ def test_list_local_images_uses_images_format(monkeypatch):
 def test_list_local_images_error_returns_empty(monkeypatch):
     monkeypatch.setattr(rt, "_run", lambda a: Fake(stdout="", rc=127))
     assert rt.list_local_images("podman") == []
+
+
+from llama_launcher.services.runtime import parse_images
+
+_MIXED = "\n".join([
+    "ghcr.io/ggml-org/llama.cpp:server-cuda",
+    "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
+    "<none>:<none>",
+    "docker.io/library/redis:7",
+])
+
+
+def test_parse_images_defaults_to_llama_cpp():
+    assert parse_images(_MIXED) == ["ghcr.io/ggml-org/llama.cpp:server-cuda"]
+
+
+def test_parse_images_ik_engine_keeps_ik_only():
+    assert parse_images(_MIXED, "ik_llama.cpp") == \
+        ["ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"]
+
+
+def test_parse_images_llama_engine_output_unchanged():
+    assert parse_images(_MIXED, "llama.cpp") == parse_images(_MIXED)

@@ -282,3 +282,24 @@ def test_legacy_mmap_mlock_still_emit_without_load_mode():
     assert "--no-mmap" in argv
     assert "--mlock" in argv
     assert "--load-mode" not in argv
+
+
+def _ik_profile(engine):
+    return Profile(
+        name="p", image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
+        runtime=Runtime(engine=engine),
+        mounts=[Mount(host="/m", container="/models", role="model")],
+        model="/models/x.gguf",
+        settings={"run-time-repack": True, "port": 8080},
+    )
+
+
+def test_ik_flag_emitted_when_engine_is_ik():
+    argv = build_command(_ik_profile("ik_llama.cpp"))
+    assert "--run-time-repack" in argv
+
+
+def test_ik_flag_never_emitted_on_llama_cpp_engine():
+    # Same settings dict, mainline engine (JSON-leftover scenario) -> dropped.
+    argv = build_command(_ik_profile("llama.cpp"))
+    assert "--run-time-repack" not in argv
