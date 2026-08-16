@@ -303,3 +303,46 @@ def test_ik_flag_never_emitted_on_llama_cpp_engine():
     # Same settings dict, mainline engine (JSON-leftover scenario) -> dropped.
     argv = build_command(_ik_profile("llama.cpp"))
     assert "--run-time-repack" not in argv
+
+
+def test_ik_kv_enum_value_dropped_on_mainline_engine():
+    # cache-type-k is engine="any", so the ik-flag engine skip doesn't cover it,
+    # but q6_0 is an ik-only KV-cache quant. A JSON-leftover mainline profile
+    # carrying it must not emit --cache-type-k q6_0 (mainline rejects q6_0).
+    argv = build_command(_srv(**{"cache-type-k": "q6_0", "cache-type-v": "q8_KV"}))
+    assert "--cache-type-k" not in argv
+    assert "--cache-type-v" not in argv
+    assert "q6_0" not in argv
+    assert "q8_KV" not in argv
+
+
+def test_ik_kv_enum_value_emitted_on_ik_engine():
+    # The drop is engine-scoped, not a blanket ban: on the ik engine the same
+    # value renders normally.
+    p = _ik_profile("ik_llama.cpp")
+    p.settings["cache-type-k"] = "q6_0"
+    argv = build_command(p)
+    assert argv[argv.index("--cache-type-k") + 1] == "q6_0"
+
+
+def test_mainline_kv_quant_still_emitted():
+    # A mainline KV quant (q8_0) is not ik-only and must keep emitting.
+    argv = build_command(_srv(**{"cache-type-k": "q8_0"}))
+    assert argv[argv.index("--cache-type-k") + 1] == "q8_0"
+
+
+def test_mla_use_auto_sentinel_not_emitted():
+    # mla-use default "auto" is a non-emit sentinel (ik wants an int 0-3);
+    # a JSON-leftover value of "auto" must not reach argv as --mla-use auto.
+    p = _ik_profile("ik_llama.cpp")
+    p.settings["mla-use"] = "auto"
+    argv = build_command(p)
+    assert "--mla-use" not in argv
+
+
+def test_mla_use_real_value_emitted():
+    # Only the sentinel is dropped; a real level still renders.
+    p = _ik_profile("ik_llama.cpp")
+    p.settings["mla-use"] = "2"
+    argv = build_command(p)
+    assert argv[argv.index("--mla-use") + 1] == "2"

@@ -1,7 +1,12 @@
 import re
 import shlex
 
-from .settings_catalog import CATALOG, ROUTER_ONLY_KEYS, router_catalog
+from .settings_catalog import (
+    CATALOG,
+    IK_EXTRA_KV_CACHE_TYPES,
+    ROUTER_ONLY_KEYS,
+    router_catalog,
+)
 from .spec import Profile, slugify
 
 
@@ -273,7 +278,25 @@ def _owned_server_pairs(profile: Profile, catalog: dict) -> list:
         if setting.engine != "any" and setting.engine != profile.runtime.engine:
             continue
         if key in profile.settings:
-            rendered = _render_setting(setting, profile.settings[key])
+            value = profile.settings[key]
+            # ik-only KV-cache quant VALUES (q6_0/q8_KV) layer onto the shared,
+            # engine="any" cache-type-k/-v settings, so the engine skip above
+            # doesn't catch them. The UI only offers these when the ik engine
+            # extends the enum; drop them here on a non-ik launch so a
+            # JSON-leftover value can't emit an argument mainline rejects.
+            if (key in ("cache-type-k", "cache-type-v")
+                    and value in IK_EXTRA_KV_CACHE_TYPES
+                    and profile.runtime.engine != "ik_llama.cpp"):
+                continue
+            # An enum value equal to its own default is a "leave it at the
+            # engine's default" sentinel (auto/off/model default). Re-emitting
+            # it is redundant at best and, for ik's --mla-use "auto", invalid
+            # (ik wants an int 0-3). The UI drops these via is_set(); mirror that
+            # on the headless path. Scoped to enums so numeric defaults that are
+            # legitimate values (e.g. sleep-idle-seconds -1) still emit.
+            if setting.type == "enum" and value == setting.default:
+                continue
+            rendered = _render_setting(setting, value)
             if not rendered:                      # bool that is False -> emits nothing
                 continue
             pairs.append((rendered[0], rendered[1] if len(rendered) > 1 else None))
