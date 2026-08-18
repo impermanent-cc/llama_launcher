@@ -11,6 +11,7 @@ from llama_launcher.store.profiles import profile_to_dict, load_config, save_con
 from llama_launcher.services import runtime, gpu, metrics
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.core import report as report_mod
+from llama_launcher.ui.dialogs.report_dialog import ReportDialog
 
 
 class ReportController:
@@ -24,14 +25,17 @@ class ReportController:
     CLASS level, and a direct self.<method>() call here would bypass that
     patch.
 
-    `base_dir` and `ReportDialog` are looked up via a deferred
-    `from llama_launcher.ui.main_window import ...` inside the methods that
-    use them (not imported at module scope here), because
-    tests/ui/test_report.py monkeypatches them as `mw.base_dir` /
-    `mw.ReportDialog` -- a rebind of the name on main_window's module
-    namespace. A fresh per-call import resolves that rebind; a module-scope
-    `from ... import base_dir` here would bind a stale copy that the
-    monkeypatch can't reach.
+    `base_dir` is looked up via a deferred
+    `from llama_launcher.ui.main_window import base_dir` inside the methods
+    that use it (not imported at module scope here), because
+    tests/ui/test_report.py monkeypatches it as `mw.base_dir` -- a rebind of
+    the name on main_window's module namespace. A fresh per-call import
+    resolves that rebind; a module-scope `from ... import base_dir` here
+    would bind a stale copy that the monkeypatch can't reach.
+
+    `ReportDialog` is imported at module scope from its canonical home
+    (`llama_launcher.ui.dialogs.report_dialog`); tests patch it via
+    `monkeypatch.setattr("llama_launcher.ui.controllers.report_controller.ReportDialog", ...)`.
     """
 
     def __init__(self, window):
@@ -143,7 +147,7 @@ class ReportController:
         return out
 
     def on_generate_report(self):
-        from llama_launcher.ui.main_window import base_dir, ReportDialog
+        from llama_launcher.ui.main_window import base_dir
         cfg = load_config(base_dir())
         initial = cfg.get("report_sections", {s: True for s in report_mod.REPORT_SECTIONS})
         dlg = ReportDialog(initial, self.window)

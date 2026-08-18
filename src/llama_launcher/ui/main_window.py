@@ -36,7 +36,6 @@ from llama_launcher.store.profiles import (
 # all these names resolve to the same module objects the controllers' own
 # imports use, so the patch still reaches the real call sites.
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
-from llama_launcher.ui.dialogs.report_dialog import ReportDialog
 from llama_launcher.ui.panels.configure_panel import ConfigurePanel
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
 from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
