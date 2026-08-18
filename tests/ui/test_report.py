@@ -18,7 +18,7 @@ def test_gather_report_data_redacts(qtbot, monkeypatch):
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
     monkeypatch.setattr(mw.runtime, "is_rootless", lambda b: False)
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="r", image="img", runtime=Runtime(binary="podman"),
+    w._configure_panel.load_profile(Profile(name="r", image="img", runtime=Runtime(binary="podman"),
                            mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
                            model="/models/m.gguf",
                            settings={"port": 8080, "api-key": "SEKRET"}))
@@ -33,7 +33,7 @@ def test_gather_report_data_redacts_logs(qtbot, monkeypatch):
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
     monkeypatch.setattr(mw.runtime, "is_rootless", lambda b: False)
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="rl", image="img", runtime=Runtime(binary="podman"),
+    w._configure_panel.load_profile(Profile(name="rl", image="img", runtime=Runtime(binary="podman"),
                            mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
                            model="/models/m.gguf",
                            settings={"port": 8080}))
@@ -58,7 +58,7 @@ def test_gather_report_data_includes_metrics(qtbot, monkeypatch):
         {"n_ctx": 100, "n_prompt_tokens_processed": 25},
     ])
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="m", image="img", runtime=Runtime(binary="podman"),
+    w._configure_panel.load_profile(Profile(name="m", image="img", runtime=Runtime(binary="podman"),
                            mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
                            model="/models/m.gguf",
                            settings={"port": 8080, "metrics": True}))
@@ -78,7 +78,7 @@ def test_gather_report_data_metrics_off_note(qtbot, monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_metrics",
                         lambda *a, **k: hits.__setitem__("n", hits["n"] + 1) or {})
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="m", image="img", runtime=Runtime(binary="podman"),
+    w._configure_panel.load_profile(Profile(name="m", image="img", runtime=Runtime(binary="podman"),
                            mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
                            model="/models/m.gguf", settings={"port": 8080}))
     data = w._report.gather_report_data()
@@ -118,7 +118,7 @@ def test_on_generate_report_auto_saves(qtbot, tmp_path, monkeypatch):
         def selected_sections(self): return {s: True for s in REPORT_SECTIONS}
     monkeypatch.setattr("llama_launcher.ui.controllers.report_controller.ReportDialog", _FakeDialog)
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="rpt", image="img", runtime=Runtime(binary="podman"),
+    w._configure_panel.load_profile(Profile(name="rpt", image="img", runtime=Runtime(binary="podman"),
                            mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
                            model="/models/m.gguf", settings={"port": 8080}))
     w._report.on_generate_report()
