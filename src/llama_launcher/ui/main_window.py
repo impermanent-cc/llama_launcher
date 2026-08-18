@@ -9,16 +9,15 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit,
-    QCheckBox, QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
+    QScrollArea, QLabel, QPushButton,
     QMessageBox, QInputDialog, QTabWidget, QDockWidget
 )
 
 from llama_launcher.core.spec import (
-    Profile, Mount, RouterMember, member_model_id, slugify,
+    Profile, RouterMember, member_model_id, slugify,
 )
 from llama_launcher.core.router_preset import render_preset
-from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.pathmap import host_to_container
 from llama_launcher.core.validation import (
     LOOPBACK_HOSTS, dial_host,
@@ -27,30 +26,21 @@ from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
     load_config,
 )
-from llama_launcher.core.instances import Instance
-# health, router_api, gpu and metrics are no longer called directly in this
-# file (that behavior moved to MonitorController/ReportController --
-# ui/controllers/monitor_controller.py, ui/controllers/report_controller.py)
+# health, router_api, gpu, metrics and model_info are no longer called
+# directly in this file (that behavior moved to MonitorController/
+# LaunchController/ReportController -- ui/controllers/monitor_controller.py,
+# ui/controllers/launch_controller.py, ui/controllers/report_controller.py)
 # but stay imported here too: the test suite monkeypatches them as
 # `mw.health.probe_health` / `llama_launcher.ui.main_window.router_api.*` /
-# `mw.gpu.query_gpus` / `mw.metrics.fetch_metrics`, and all these names
-# resolve to the same module objects the controllers' own imports use, so the
-# patch still reaches the real call sites.
+# `mw.gpu.query_gpus` / `mw.metrics.fetch_metrics` / `mw.model_info.*`, and
+# all these names resolve to the same module objects the controllers' own
+# imports use, so the patch still reaches the real call sites.
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
-from llama_launcher.core import vram
-from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.ui.dialogs.report_dialog import ReportDialog
-from llama_launcher.ui.widgets.setting_widgets import make_widget, SuggestionDot
-from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
-from llama_launcher.ui.panels.mounts_panel import MountsPanel
-from llama_launcher.ui.panels.lora_panel import LoraPanel
 from llama_launcher.ui.panels.configure_panel import ConfigurePanel
-from llama_launcher.ui.widgets.collapsible import CollapsibleSection
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
 from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
 from llama_launcher.ui.panels.stats_panel import StatsPanel
-from llama_launcher.ui.widgets.api_key_box import ApiKeyBox
-from llama_launcher.ui.widgets.harness_info_box import HarnessInfoBox
 from llama_launcher.ui.widgets.router_models_table import RouterModelsTable
 from llama_launcher.ui.widgets.status_banner import StatusBanner
 from llama_launcher.services import api_key as api_key_store
@@ -61,11 +51,11 @@ def base_dir():
     return default_base_dir()
 
 
-# StatsWorker/_MonitorGather/build_monitor_data/_fmt_uptime used to be defined
-# in this module; they now live in monitor_controller.py (moved along with the
-# status/instances/monitor/log-follower/stats/router-poll behavior that uses
-# them) but are re-exported here too, since the test suite still reaches them
-# as `llama_launcher.ui.main_window.StatsWorker` /
+# StatsWorker/build_monitor_data used to be defined in this module; they now
+# live in monitor_controller.py (moved along with the status/instances/
+# monitor/log-follower/stats/router-poll behavior that uses them) but are
+# re-exported here too, since the test suite still reaches them as
+# `llama_launcher.ui.main_window.StatsWorker` /
 # `llama_launcher.ui.main_window.build_monitor_data`.
 #
 # This import is placed after base_dir() (which monitor_controller.py imports
@@ -73,7 +63,7 @@ def base_dir():
 # import base_dir` calls) so that name is already bound on this module by the
 # time those calls resolve.
 from llama_launcher.ui.controllers.monitor_controller import (  # noqa: E402
-    MonitorController, StatsWorker, _MonitorGather, build_monitor_data, _fmt_uptime,
+    MonitorController, StatsWorker, build_monitor_data,
 )
 
 # _UpdateWorker used to be defined in this module; it now lives in
@@ -991,14 +981,19 @@ class MainWindow(QMainWindow):
         return self._monitor._stop_log_follower()
 
     def _stop_timers(self) -> None:
-        """Stop background timers so a torn-down window stops firing update_status
-        (and any pending update check). Idempotent — QTimer.stop() on a stopped
-        timer is a no-op. _update_timer exists only when update_check is enabled.
-        Also drains the stats worker via _stop_stats_worker() so a torn-down
-        window can't leave a StatsWorker QThread running.
+        """Stop background timers/workers so a torn-down window can't keep
+        firing update_status, keep polling stats, or leave a QThread running
+        past the window's lifetime. Idempotent — QTimer.stop() on a stopped
+        timer is a no-op, and each drain() below is itself a no-op when its
+        controller owns nothing currently running.
 
-        Also drains a running benchmark thread (see BenchmarkController.drain())
-        so a torn-down window can't leave that QThread running either.
+        self._status_timer (update_status polling) is the only timer left on
+        MainWindow, stopped directly here. Everything else -- the stats
+        worker and in-flight monitor gather (MonitorController.drain()), the
+        update-check timer and fetch/update QThreads (LaunchController.
+        drain()), and a running benchmark QThread (BenchmarkController.
+        drain()) -- is owned by its controller, so teardown is just a
+        sequence of drain() calls in controller-construction order.
         """
         self._status_timer.stop()
         self._monitor.drain()
@@ -1052,7 +1047,6 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _dot_state_for(key, described, sugg_by_key, reason_by_key):
-        from llama_launcher.ui.panels.configure_panel import ConfigurePanel
         return ConfigurePanel._dot_state_for(key, described, sugg_by_key, reason_by_key)
 
     def _apply_dot(self, widget, key, described, sugg_by_key, reason_by_key) -> None:
@@ -1069,5 +1063,4 @@ class MainWindow(QMainWindow):
 
     @staticmethod
     def _meta_caps_text(meta, size, caps) -> str:
-        from llama_launcher.ui.panels.configure_panel import ConfigurePanel
         return ConfigurePanel._meta_caps_text(meta, size, caps)
