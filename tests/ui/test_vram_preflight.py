@@ -22,8 +22,8 @@ def test_vram_check_warns_when_over(qtbot, monkeypatch):
     monkeypatch.setattr(mw.model_info, "file_size", lambda path: 20 * 1024**3)
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [_gpu(1024)])  # ~1 GiB free
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(_profile(131072))
-    msg = w.vram_check()
+    w._configure_panel.load_profile(_profile(131072))
+    msg = w._launch.vram_check()
     assert msg is not None and "VRAM" in msg
 
 
@@ -31,8 +31,8 @@ def test_vram_check_none_when_unknown(qtbot, monkeypatch):
     monkeypatch.setattr(mw.model_info, "read_gguf_meta", lambda path: None)
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(_profile(4096))
-    assert w.vram_check() is None
+    w._configure_panel.load_profile(_profile(4096))
+    assert w._launch.vram_check() is None
 
 
 def test_vram_check_sums_free_across_two_gpus(qtbot, monkeypatch):
@@ -47,8 +47,8 @@ def test_vram_check_sums_free_across_two_gpus(qtbot, monkeypatch):
     monkeypatch.setattr(mw.gpu, "query_gpus",
         lambda: [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(_profile(4096))               # default split-mode -> summed
-    assert w.vram_check() is None                # ~22 GiB free covers ~20 GiB
+    w._configure_panel.load_profile(_profile(4096))               # default split-mode -> summed
+    assert w._launch.vram_check() is None                # ~22 GiB free covers ~20 GiB
 
 
 def test_vram_check_split_none_uses_single_gpu(qtbot, monkeypatch):
@@ -63,8 +63,8 @@ def test_vram_check_split_none_uses_single_gpu(qtbot, monkeypatch):
     monkeypatch.setattr(mw.gpu, "query_gpus",
         lambda: [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(_profile(4096, **{"split-mode": "none"}))
-    msg = w.vram_check()
+    w._configure_panel.load_profile(_profile(4096, **{"split-mode": "none"}))
+    msg = w._launch.vram_check()
     assert msg is not None
     assert "across" not in msg                   # single-GPU budget, no breakdown
 
@@ -80,6 +80,6 @@ def test_vram_check_shows_per_gpu_breakdown(qtbot, monkeypatch):
     monkeypatch.setattr(mw.gpu, "query_gpus",
         lambda: [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(_profile(131072))
-    msg = w.vram_check()
+    w._configure_panel.load_profile(_profile(131072))
+    msg = w._launch.vram_check()
     assert msg is not None and "across 2 GPUs" in msg and "+" in msg

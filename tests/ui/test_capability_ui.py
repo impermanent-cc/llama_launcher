@@ -39,23 +39,23 @@ def test_moe_mtp_model_marks_dots_suggested(qtbot, tmp_path):
                 runtime=Runtime(binary="podman", gpu_mode="cdi"),
                 mounts=[Mount(host=str(tmp_path), container="/models", role="model", mode="ro")],
                 model="/models/m.gguf", settings={"port": 8080})
-    w.load_profile(p)
+    w._configure_panel.load_profile(p)
     # in-file MTP head -> a concrete suggestion fires on spec-type, so its
     # dot is suggested and mentions MTP in the click-apply reason.
-    spec_dot = w._widgets["spec-type"]._dot
+    spec_dot = w._configure_panel._widgets["spec-type"]._dot
     assert spec_dot.text() == "●"
     assert "MTP" in spec_dot.toolTip()
     # MoE model -> n-cpu-moe is RECOMMENDED tier.
-    moe_dot = w._widgets["n-cpu-moe"]._dot
+    moe_dot = w._configure_panel._widgets["n-cpu-moe"]._dot
     assert moe_dot.text() == "●"
     assert "MoE" in moe_dot.toolTip()
     # no vision sibling -> mmproj field dot is muted (N/A).
-    assert w._mmproj_dot.text() == "○"
-    assert "Not applicable" in w._mmproj_dot.toolTip()
+    assert w._configure_panel._mmproj_dot.text() == "○"
+    assert "Not applicable" in w._configure_panel._mmproj_dot.toolTip()
     # no SWA -> muted.
-    swa_dot = w._widgets["swa-full"]._dot
+    swa_dot = w._configure_panel._widgets["swa-full"]._dot
     assert swa_dot.text() == "○"
-    assert "MoE" in w.model_meta_label.text() and "MTP" in w.model_meta_label.text()
+    assert "MoE" in w._configure_panel.model_meta_label.text() and "MTP" in w._configure_panel.model_meta_label.text()
 
 
 def test_clicking_suggestion_dot_applies_it(qtbot, tmp_path):
@@ -66,11 +66,11 @@ def test_clicking_suggestion_dot_applies_it(qtbot, tmp_path):
                 runtime=Runtime(binary="podman", gpu_mode="cdi"),
                 mounts=[Mount(host=str(tmp_path), container="/models", role="model", mode="ro")],
                 model="/models/m.gguf", settings={"port": 8080, "spec-type": "none"})
-    w.load_profile(p)
-    dot = w._widgets["spec-type"]._dot
+    w._configure_panel.load_profile(p)
+    dot = w._configure_panel._widgets["spec-type"]._dot
     assert dot.text() == "●"
     dot.click()
-    assert w._widgets["spec-type"].value() == "draft-mtp"   # in-file MTP suggestion applied
+    assert w._configure_panel._widgets["spec-type"].value() == "draft-mtp"   # in-file MTP suggestion applied
 
 
 def test_mtp_sibling_suggestion_fans_out_to_both_dots(qtbot, tmp_path):
@@ -87,18 +87,18 @@ def test_mtp_sibling_suggestion_fans_out_to_both_dots(qtbot, tmp_path):
                 runtime=Runtime(binary="podman", gpu_mode="cdi"),
                 mounts=[Mount(host=str(tmp_path), container="/models", role="model", mode="ro")],
                 model="/models/m.gguf", settings={"port": 8080})
-    w.load_profile(p)
+    w._configure_panel.load_profile(p)
 
-    spec_dot = w._widgets["spec-type"]._dot
-    draft_dot = w._draft_model_dot
+    spec_dot = w._configure_panel._widgets["spec-type"]._dot
+    draft_dot = w._configure_panel._draft_model_dot
     assert spec_dot.text() == "●"
     assert draft_dot.text() == "●"
     assert "m-mtp.gguf" in spec_dot.toolTip()
     assert spec_dot.toolTip() == draft_dot.toolTip()   # same Suggestion.text
 
     draft_dot.click()   # clicking the OTHER key's dot applies the WHOLE suggestion
-    assert w._widgets["spec-type"].value() == "draft-mtp"
-    assert w.draft_model_edit.text() == "/models/m-mtp.gguf"
+    assert w._configure_panel._widgets["spec-type"].value() == "draft-mtp"
+    assert w._configure_panel.draft_model_edit.text() == "/models/m-mtp.gguf"
 
 
 def test_no_model_hides_dots(qtbot):
@@ -107,9 +107,9 @@ def test_no_model_hides_dots(qtbot):
     # default profile has no model -> every catalog widget's dot is hidden
     # (state "none": empty text, not just neutral styling).
     for k in ("spec-type", "n-cpu-moe", "swa-full"):
-        assert w._widgets[k]._dot.text() == ""
-    assert w._mmproj_dot.text() == ""
-    assert w._draft_model_dot.text() == ""
+        assert w._configure_panel._widgets[k]._dot.text() == ""
+    assert w._configure_panel._mmproj_dot.text() == ""
+    assert w._configure_panel._draft_model_dot.text() == ""
 
 
 def test_tier_qss_and_chip_strip_are_gone(qtbot):

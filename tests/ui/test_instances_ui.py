@@ -20,25 +20,25 @@ def _inst(name="llama-emb", profile="emb", port=8081, running=True, embeddings=T
 
 
 def test_monitored_profile_falls_back_to_current_when_none(win):
-    win.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
-    assert win._active_instance is None
-    assert win._monitored_profile().name == "Solo"
-    assert win._monitored_container_name() == win._container_name()
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    assert win._monitor._active_instance is None
+    assert win._monitor._monitored_profile().name == "Solo"
+    assert win._monitor._monitored_container_name() == win._container_name()
 
 
 def test_monitored_profile_resolves_active_instance(win):
     base = store.default_base_dir()
     store.save_profile(Profile(name="emb", image="img", settings={"port": 8081}), base)
-    win.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
-    win._active_instance = _inst()
-    assert win._monitored_profile().name == "emb"          # not the form's "Solo"
-    assert win._monitored_container_name() == "llama-emb"
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    win._monitor._active_instance = _inst()
+    assert win._monitor._monitored_profile().name == "emb"          # not the form's "Solo"
+    assert win._monitor._monitored_container_name() == "llama-emb"
 
 
 def test_instance_summary_embedding_row_is_ready(win, monkeypatch):
     monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
                         lambda *a, **k: "ready")
-    s = win.instance_summary(_inst(embeddings=True))
+    s = win._monitor.instance_summary(_inst(embeddings=True))
     assert s["health"] == "ready" and s["stat"] == "ready"
 
 
@@ -47,7 +47,7 @@ def test_instance_summary_gen_row_shows_tok_s(win, monkeypatch):
                         lambda *a, **k: "ready")
     monkeypatch.setattr("llama_launcher.ui.main_window.metrics.fetch_metrics",
                         lambda *a, **k: {"llamacpp:predicted_tokens_seconds": 64.0})
-    s = win.instance_summary(_inst(embeddings=False))
+    s = win._monitor.instance_summary(_inst(embeddings=False))
     assert s["stat"] == "64 tok/s"
 
 
@@ -61,45 +61,45 @@ def _two_containers(*_a, **_k):
 def test_tick_populates_two_instance_rows(win, monkeypatch):
     base = store.default_base_dir()
     store.save_profile(Profile(name="emb", image="img", settings={"port": 8081}), base)
-    win.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
     monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
                         _two_containers)
     monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
                         lambda *a, **k: "ready")
-    win._refresh_instances_list()
+    win._monitor._refresh_instances_list()
     assert win.monitor_panel.instances_table.rowCount() == 2
 
 
 def test_selecting_an_instance_sets_active_without_touching_form(win, monkeypatch):
     base = store.default_base_dir()
     store.save_profile(Profile(name="emb", image="img", settings={"port": 8081}), base)
-    win.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
     monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
                         _two_containers)
     monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
                         lambda *a, **k: "ready")
-    win._refresh_instances_list()
-    win._on_instance_selected("llama-emb")
-    assert win._active_instance is not None and win._active_instance.name == "llama-emb"
-    assert win.current_profile().name == "Solo"          # form untouched
-    assert win._monitored_profile().name == "emb"        # monitor retargeted
+    win._monitor._refresh_instances_list()
+    win._monitor._on_instance_selected("llama-emb")
+    assert win._monitor._active_instance is not None and win._monitor._active_instance.name == "llama-emb"
+    assert win._configure_panel.current_profile().name == "Solo"          # form untouched
+    assert win._monitor._monitored_profile().name == "emb"        # monitor retargeted
 
 
 def test_selecting_own_container_clears_active(win, monkeypatch):
-    win.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
     monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
                         _two_containers)
     monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
                         lambda *a, **k: "ready")
-    win._refresh_instances_list()
-    win._on_instance_selected("llama-solo")              # the form's own container
-    assert win._active_instance is None                  # falls back to current profile
+    win._monitor._refresh_instances_list()
+    win._monitor._on_instance_selected("llama-solo")              # the form's own container
+    assert win._monitor._active_instance is None                  # falls back to current profile
 
 
 def test_stop_instance_spawns_stop_argv(win, monkeypatch):
-    win.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
     spawned = []
     monkeypatch.setattr(win, "_spawn_async",
                         lambda argv, on_done=None, on_error=None: spawned.append(argv))
-    win._on_instance_stop("llama-emb")
+    win._monitor._on_instance_stop("llama-emb")
     assert spawned and spawned[0][:2] == ["podman", "stop"] and spawned[0][-1] == "llama-emb"

@@ -1,4 +1,5 @@
 import llama_launcher.ui.main_window as mw
+from llama_launcher.ui.controllers import report_controller
 from llama_launcher.ui.dialogs.report_dialog import ReportDialog
 from llama_launcher.core.report import REPORT_SECTIONS
 from llama_launcher.core.spec import Profile, Mount, Runtime
@@ -17,11 +18,11 @@ def test_gather_report_data_redacts(qtbot, monkeypatch):
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
     monkeypatch.setattr(mw.runtime, "is_rootless", lambda b: False)
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="r", image="img", runtime=Runtime(binary="podman"),
+    w._configure_panel.load_profile(Profile(name="r", image="img", runtime=Runtime(binary="podman"),
                            mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
                            model="/models/m.gguf",
                            settings={"port": 8080, "api-key": "SEKRET"}))
-    data = w.gather_report_data()
+    data = w._report.gather_report_data()
     assert "SEKRET" not in data["command"]      # redacted in the command string
     assert "image" in data and "runtime" in data
 
@@ -32,13 +33,13 @@ def test_gather_report_data_redacts_logs(qtbot, monkeypatch):
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
     monkeypatch.setattr(mw.runtime, "is_rootless", lambda b: False)
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="rl", image="img", runtime=Runtime(binary="podman"),
+    w._configure_panel.load_profile(Profile(name="rl", image="img", runtime=Runtime(binary="podman"),
                            mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
                            model="/models/m.gguf",
                            settings={"port": 8080}))
     # Inject a secret into the log view
     w.monitor_panel.log_view.setPlainText("server started\n--api-key SEKRET\nAuthorization: Bearer BEARTOKEN")
-    data = w.gather_report_data()
+    data = w._report.gather_report_data()
     assert "SEKRET" not in data["logs"], "api-key secret leaked from logs into report data"
     assert "BEARTOKEN" not in data["logs"], "bearer token leaked from logs into report data"
 
@@ -57,11 +58,11 @@ def test_gather_report_data_includes_metrics(qtbot, monkeypatch):
         {"n_ctx": 100, "n_prompt_tokens_processed": 25},
     ])
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="m", image="img", runtime=Runtime(binary="podman"),
+    w._configure_panel.load_profile(Profile(name="m", image="img", runtime=Runtime(binary="podman"),
                            mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
                            model="/models/m.gguf",
                            settings={"port": 8080, "metrics": True}))
-    data = w.gather_report_data()
+    data = w._report.gather_report_data()
     assert "metrics" in data
     assert "42" in data["metrics"]       # generation tok/s
     assert "25%" in data["metrics"]      # KV usage = 25 / 100
@@ -77,10 +78,10 @@ def test_gather_report_data_metrics_off_note(qtbot, monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_metrics",
                         lambda *a, **k: hits.__setitem__("n", hits["n"] + 1) or {})
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="m", image="img", runtime=Runtime(binary="podman"),
+    w._configure_panel.load_profile(Profile(name="m", image="img", runtime=Runtime(binary="podman"),
                            mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
                            model="/models/m.gguf", settings={"port": 8080}))
-    data = w.gather_report_data()
+    data = w._report.gather_report_data()
     assert "metrics" in data
     assert "--metrics" in data["metrics"]
     assert hits["n"] == 0
@@ -92,7 +93,7 @@ def test_save_report_writes_file_and_contains_timestamp(qtbot, tmp_path, monkeyp
     monkeypatch.setattr(mw, "base_dir", lambda: tmp_path)
     w = mw.MainWindow(); qtbot.addWidget(w)
     md = "# Llama Launcher diagnostic report\n\n_Generated: 20260101-120000_\n\nsome content"
-    saved = w._save_report(md)
+    saved = w._report._save_report(md)
     # File exists under reports/ dir
     import glob
     matches = list((tmp_path / "reports").glob("llama-launcher-report-*.md"))
@@ -108,19 +109,19 @@ def test_on_generate_report_auto_saves(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
     monkeypatch.setattr(mw.runtime, "is_rootless", lambda b: False)
     # Stub dialogs to avoid blocking
-    monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(report_controller.QMessageBox, "information", lambda *a, **k: None)
     # Stub ReportDialog to always return accepted with all sections enabled
     from llama_launcher.core.report import REPORT_SECTIONS
     class _FakeDialog:
         def __init__(self, *a, **k): pass
         def exec(self): return True
         def selected_sections(self): return {s: True for s in REPORT_SECTIONS}
-    monkeypatch.setattr(mw, "ReportDialog", _FakeDialog)
+    monkeypatch.setattr("llama_launcher.ui.controllers.report_controller.ReportDialog", _FakeDialog)
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="rpt", image="img", runtime=Runtime(binary="podman"),
+    w._configure_panel.load_profile(Profile(name="rpt", image="img", runtime=Runtime(binary="podman"),
                            mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
                            model="/models/m.gguf", settings={"port": 8080}))
-    w.on_generate_report()
+    w._report.on_generate_report()
     matches = list((tmp_path / "reports").glob("llama-launcher-report-*.md"))
     assert len(matches) == 1
     content = matches[0].read_text()

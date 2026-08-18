@@ -36,7 +36,6 @@ from llama_launcher.store.profiles import (
 # all these names resolve to the same module objects the controllers' own
 # imports use, so the patch still reaches the real call sites.
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
-from llama_launcher.ui.dialogs.report_dialog import ReportDialog
 from llama_launcher.ui.panels.configure_panel import ConfigurePanel
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
 from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
@@ -591,10 +590,6 @@ class MainWindow(QMainWindow):
     def configure_tab(self):
         return self._configure_panel.configure_tab
 
-    @property
-    def _configure_tab(self):
-        return self._configure_panel.configure_tab
-
     # -- ConfigurePanel behavior delegators ----------------------------------
     # These methods now live on self._configure_panel (Task 2 of the
     # main_window decomposition); MainWindow keeps a one-line forwarder for
@@ -631,11 +626,11 @@ class MainWindow(QMainWindow):
         # Entering the Configure tab must show a live key even for an edited-
         # but-unsaved router; refresh_router_panel_header() no-ops for
         # non-routers.
-        if self.tabs.currentWidget() is self._configure_tab:
+        if self.tabs.currentWidget() is self.configure_tab:
             self.refresh_router_panel_header()
         # Command preview / api-key / harness only make sense while configuring,
         # so hide the bottom strip on the Monitor/Benchmark tabs.
-        self._config_bottom.setVisible(self.tabs.currentWidget() is self._configure_tab)
+        self._config_bottom.setVisible(self.tabs.currentWidget() is self.configure_tab)
 
     # -- MonitorController delegators (status/instances/monitor/log/stats/
     # router-poll behavior now lives on self._monitor; see

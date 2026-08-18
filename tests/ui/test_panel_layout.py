@@ -29,6 +29,6 @@ def test_new_flags_and_speculative_group_present(qtbot):
                 "swa-full", "context-shift", "ctx-checkpoints",
                 "checkpoint-min-step", "dry-sequence-breaker", "numa",
                 "threads-http", "no-webui", "reasoning-format"]:
-        assert key in w._widgets, key
+        assert key in w._configure_panel._widgets, key
     titles = {b.title() for b in w.findChildren(QGroupBox)}
     assert "Speculative Decoding" in titles

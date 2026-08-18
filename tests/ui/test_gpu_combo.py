@@ -6,18 +6,18 @@ def test_gpu_dropdown_labels_map_to_canonical_values(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
     # labels are human-readable, but stored data stays canonical
-    datas = [w.gpu_combo.itemData(i) for i in range(w.gpu_combo.count())]
+    datas = [w._configure_panel.gpu_combo.itemData(i) for i in range(w._configure_panel.gpu_combo.count())]
     assert datas == ["cdi", "gpus-all", "none"]
-    labels = [w.gpu_combo.itemText(i) for i in range(w.gpu_combo.count())]
+    labels = [w._configure_panel.gpu_combo.itemText(i) for i in range(w._configure_panel.gpu_combo.count())]
     assert any("nvidia.com/gpu=all" in t for t in labels)
 
 
 def test_selecting_cdi_emits_device_flag(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w.gpu_combo.setCurrentIndex(0)  # CDI
-    assert "--device nvidia.com/gpu=all" in w.preview_text()
-    assert w.current_profile().runtime.gpu_mode == "cdi"
+    w._configure_panel.gpu_combo.setCurrentIndex(0)  # CDI
+    assert "--device nvidia.com/gpu=all" in w._configure_panel.preview_text()
+    assert w._configure_panel.current_profile().runtime.gpu_mode == "cdi"
 
 
 def test_load_profile_selects_gpu_by_value(qtbot):
@@ -26,7 +26,7 @@ def test_load_profile_selects_gpu_by_value(qtbot):
     p = Profile(name="g", image="img", runtime=Runtime(gpu_mode="gpus-all"),
                 mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
                 model="/models/m.gguf", settings={"port": 8080})
-    w.load_profile(p)
-    assert w.gpu_combo.currentData() == "gpus-all"
-    assert "--gpus all" in w.preview_text()
-    assert w.current_profile().runtime.gpu_mode == "gpus-all"
+    w._configure_panel.load_profile(p)
+    assert w._configure_panel.gpu_combo.currentData() == "gpus-all"
+    assert "--gpus all" in w._configure_panel.preview_text()
+    assert w._configure_panel.current_profile().runtime.gpu_mode == "gpus-all"

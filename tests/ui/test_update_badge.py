@@ -1,29 +1,30 @@
 from PySide6.QtWidgets import QPushButton
 
 import llama_launcher.ui.main_window as mw
+from llama_launcher.ui.controllers import launch_controller
 from llama_launcher.core.spec import Profile, Runtime
 
 
 def test_check_for_update_finds_newer(qtbot):
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="u", image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
+    w._configure_panel.load_profile(Profile(name="u", image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
                            runtime=Runtime(binary="podman"), settings={"port": 8080}))
-    newer = w.check_for_update(["server-cuda12-b9628", "server-cuda12-b9755", "buildcache-x"])
+    newer = w._launch.check_for_update(["server-cuda12-b9628", "server-cuda12-b9755", "buildcache-x"])
     assert newer == "server-cuda12-b9755"
 
 
 def test_check_for_update_none_when_current(qtbot):
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="u", image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9755",
+    w._configure_panel.load_profile(Profile(name="u", image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9755",
                            runtime=Runtime(binary="podman"), settings={"port": 8080}))
-    assert w.check_for_update(["server-cuda12-b9628", "server-cuda12-b9755"]) is None
+    assert w._launch.check_for_update(["server-cuda12-b9628", "server-cuda12-b9755"]) is None
 
 
 def test_update_badge_is_flat_button(qtbot):
     """update_badge must be a flat QPushButton."""
     w = mw.MainWindow(); qtbot.addWidget(w)
-    assert isinstance(w.update_badge, QPushButton)
-    assert w.update_badge.isFlat()
+    assert isinstance(w._configure_panel.update_badge, QPushButton)
+    assert w._configure_panel.update_badge.isFlat()
 
 
 def test_update_badge_shown_and_clickable_after_newer_build(qtbot, monkeypatch):
@@ -37,17 +38,17 @@ def test_update_badge_shown_and_clickable_after_newer_build(qtbot, monkeypatch):
     """
     monkeypatch.setattr(mw.registry, "fetch_latest",
                         lambda repo, prefix, timeout=10.0: "server-cuda12-b9999")
-    monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: None)
-    monkeypatch.setattr(mw._UpdateWorker, "start",
+    monkeypatch.setattr(launch_controller.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(launch_controller._UpdateWorker, "start",
                         lambda self: self.found.emit("server-cuda12-b9999"))
     w = mw.MainWindow(); qtbot.addWidget(w)
-    w.load_profile(Profile(name="u", image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
+    w._configure_panel.load_profile(Profile(name="u", image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
                            runtime=Runtime(binary="podman"), settings={"port": 8080}))
     # Simulate what the update worker slot does (badge uses bNNNN short form)
-    w.update_badge.setText("newer build b9999 available")
-    w.update_badge.setVisible(True)
-    assert not w.update_badge.isHidden()
-    assert "b9999" in w.update_badge.text()
+    w._configure_panel.update_badge.setText("newer build b9999 available")
+    w._configure_panel.update_badge.setVisible(True)
+    assert not w._configure_panel.update_badge.isHidden()
+    assert "b9999" in w._configure_panel.update_badge.text()
     # Clicking the badge should call on_fetch_latest which updates the image
-    w.update_badge.click()
-    assert w.image_edit.text() == "ghcr.io/ggml-org/llama.cpp:server-cuda12-b9999"
+    w._configure_panel.update_badge.click()
+    assert w._configure_panel.image_edit.text() == "ghcr.io/ggml-org/llama.cpp:server-cuda12-b9999"

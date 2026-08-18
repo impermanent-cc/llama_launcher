@@ -1,6 +1,8 @@
 import llama_launcher.ui.main_window as mw
 from llama_launcher.core.spec import Profile, Mount, Runtime
 from llama_launcher.core.props import PropsInfo
+from llama_launcher.ui.controllers.monitor_controller import MonitorController
+from llama_launcher.ui.panels.configure_panel import ConfigurePanel
 
 
 def _profile():
@@ -13,11 +15,18 @@ def test_on_stop_clears_log_follower_and_spawns_async_stop(qtbot, monkeypatch):
     """on_stop() kills the log follower immediately and spawns `podman stop`
     asynchronously (never blocking the UI thread) with the right argv."""
     spawned = {}
+    # NOTE: kept on mw.MainWindow (not repointed to LaunchController) --
+    # tests/ui/conftest.py's autouse _hermetic_ui_boundaries fixture ALSO
+    # class-patches mw.MainWindow._spawn_async (as a no-op) before this test
+    # body runs. A same-symbol override is required to win over it; patching
+    # LaunchController._spawn_async instead leaves the hermetic no-op in
+    # place on MainWindow, so self.window._spawn_async(...) never reaches
+    # LaunchController at all. Verified by reproduction -- see task-4 report.
     monkeypatch.setattr(mw.MainWindow, "_spawn_async",
                         lambda self, argv, on_done=None: spawned.setdefault("argv", argv))
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.load_profile(_profile())   # profile name "m" -> container llama-m
+    w._configure_panel.load_profile(_profile())   # profile name "m" -> container llama-m
 
     killed = []
 
@@ -25,9 +34,9 @@ def test_on_stop_clears_log_follower_and_spawns_async_stop(qtbot, monkeypatch):
         def kill(self):
             killed.append(True)
 
-    w._log_proc = _FakeProc()
-    w.on_stop()
-    assert w._log_proc is None
+    w._monitor._log_proc = _FakeProc()
+    w._launch.on_stop()
+    assert w._monitor._log_proc is None
     assert killed == [True]
     assert spawned["argv"] == ["podman", "stop", "-t", "10", "llama-m"]
 
@@ -42,8 +51,8 @@ def test_collect_monitor_data(qtbot, monkeypatch):
     monkeypatch.setattr(mw.runtime, "stats", lambda name, b: {"cpu_perc": "9%", "mem_usage": "1G / 16G"})
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.load_profile(_profile())
-    d = w.collect_monitor_data()
+    w._configure_panel.load_profile(_profile())
+    d = w._monitor.collect_monitor_data()
     assert d["tok_s"] == 50.0 and d["prompt_tok_s"] == 200.0
     assert abs(d["kv_pct"] - 0.40) < 1e-9
     assert d["metrics_on"] is True
@@ -60,16 +69,15 @@ def test_collect_monitor_data_reports_speculating(qtbot, monkeypatch):
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    assert w.collect_monitor_data()["speculating"] is True
+    assert w._monitor.collect_monitor_data()["speculating"] is True
 
 
 def _ready(monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
     monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
-    monkeypatch.setattr(mw.MainWindow, "collect_monitor_data", lambda self: {})
-    monkeypatch.setattr(mw.MainWindow, "_log_follower_active", lambda self: True)
-    monkeypatch.setattr(mw.MainWindow, "_update_spec_stats", lambda self, p: None)
+    monkeypatch.setattr(MonitorController, "_log_follower_active", lambda self: True)
+    monkeypatch.setattr(MonitorController, "_update_spec_stats", lambda self, p: None)
 
 
 def test_props_fetched_once_when_ready(qtbot, monkeypatch):
@@ -79,8 +87,8 @@ def test_props_fetched_once_when_ready(qtbot, monkeypatch):
                         lambda *a, **k: calls.append(1) or PropsInfo("b", 1, "a", 1, {}))
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.update_status()
-    w.update_status()
+    w._monitor.update_status()
+    w._monitor.update_status()
     assert len(calls) == 1                 # cached after first success
 
 
@@ -91,7 +99,7 @@ def test_props_not_fetched_while_loading(qtbot, monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_props", lambda *a, **k: calls.append(1))
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.update_status()
+    w._monitor.update_status()
     assert calls == []                     # only fetch once the model is ready
 
 
@@ -102,8 +110,8 @@ def test_failed_props_fetch_retries_next_poll(qtbot, monkeypatch):
                         lambda *a, **k: calls.append(1) or None)
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.update_status()
-    w.update_status()
+    w._monitor.update_status()
+    w._monitor.update_status()
     assert len(calls) == 2                 # None result is not cached; retries
 
 
@@ -161,8 +169,8 @@ def test_update_status_populates_monitor_target_off_ui_thread(qtbot, monkeypatch
     _ready(monkeypatch)
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.update_status()
-    assert w._monitor_target.get("running") is True
+    w._monitor.update_status()
+    assert w._monitor._monitor_target.get("running") is True
 
 
 def test_update_status_marks_target_not_running_when_stopped(qtbot, monkeypatch):
@@ -170,8 +178,8 @@ def test_update_status_marks_target_not_running_when_stopped(qtbot, monkeypatch)
     monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "stopped")
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.update_status()
-    assert w._monitor_target.get("running") is False
+    w._monitor.update_status()
+    assert w._monitor._monitor_target.get("running") is False
 
 
 def test_monitor_summary_gathered_off_thread_is_rendered(qtbot, monkeypatch):
@@ -186,10 +194,10 @@ def test_monitor_summary_gathered_off_thread_is_rendered(qtbot, monkeypatch):
     qtbot.addWidget(w)
     got = []
     w.monitor_panel.update_stats = lambda d: got.append(d)
-    w.update_status()                       # dispatch; _monitor_result still None
+    w._monitor.update_status()                       # dispatch; _monitor_result still None
     from PySide6.QtCore import QThreadPool
     QThreadPool.globalInstance().waitForDone(2000)
-    w.update_status()                       # renders the gathered result
+    w._monitor.update_status()                       # renders the gathered result
     assert got, "no monitor summary was rendered"
     assert "gpus" in got[-1] and "uptime" in got[-1]
 
@@ -205,11 +213,11 @@ def test_log_updates_are_coalesced_until_flush(qtbot):
     """
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w._enqueue_log("first line\n")
-    w._enqueue_log("second line\n")
+    w._monitor._enqueue_log("first line\n")
+    w._monitor._enqueue_log("second line\n")
     # Deferred: nothing on the widget yet -- coalesced, not written per chunk.
     assert w.monitor_panel.log_view.toPlainText() == ""
-    w._flush_log()
+    w._monitor._flush_log()
     text = w.monitor_panel.log_view.toPlainText()
     assert "first line" in text and "second line" in text
 
@@ -219,7 +227,7 @@ def test_flush_with_no_pending_is_a_noop(qtbot):
     blank lines every tick)."""
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w._flush_log()
+    w._monitor._flush_log()
     assert w.monitor_panel.log_view.toPlainText() == ""
 
 
@@ -230,11 +238,11 @@ def test_router_model_switch_refetches(qtbot, monkeypatch):
     # fetch_props() calls. Both are safe now that a torn-down window's timer is
     # stopped and can't fire update_status() into this test.
     _ready(monkeypatch)
-    monkeypatch.setattr(mw.MainWindow, "current_profile",
+    monkeypatch.setattr(ConfigurePanel, "current_profile",
                         lambda self: _router_profile())
-    monkeypatch.setattr(mw.MainWindow, "_router_host", lambda self, p: "127.0.0.1")
+    monkeypatch.setattr(MonitorController, "_router_host", lambda self, p: "127.0.0.1")
     ids = iter(["model-a", "model-a", "model-b"])
-    monkeypatch.setattr(mw.MainWindow, "_router_pollable_model",
+    monkeypatch.setattr(MonitorController, "_router_pollable_model",
                         lambda self: next(ids))
     calls = {"n": 0}
 
@@ -245,13 +253,13 @@ def test_router_model_switch_refetches(qtbot, monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_props", _fetch)
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.update_status()   # model-a -> fetch
-    assert w._props_model == "model-a"
+    w._monitor.update_status()   # model-a -> fetch
+    assert w._monitor._props_model == "model-a"
     assert calls["n"] == 1
-    w.update_status()   # model-a -> cached, no new fetch
+    w._monitor.update_status()   # model-a -> cached, no new fetch
     assert calls["n"] == 1
-    w.update_status()   # model-b -> re-fetch
-    assert w._props_model == "model-b"
+    w._monitor.update_status()   # model-b -> re-fetch
+    assert w._monitor._props_model == "model-b"
     assert calls["n"] == 2
 
 
