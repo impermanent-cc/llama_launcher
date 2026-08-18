@@ -988,14 +988,26 @@ class MainWindow(QMainWindow):
         controller owns nothing currently running.
 
         self._status_timer (update_status polling) is the only timer left on
-        MainWindow, stopped directly here. Everything else -- the stats
-        worker and in-flight monitor gather (MonitorController.drain()), the
-        update-check timer and fetch/update QThreads (LaunchController.
-        drain()), and a running benchmark QThread (BenchmarkController.
-        drain()) -- is owned by its controller, so teardown is just a
-        sequence of drain() calls in controller-construction order.
+        MainWindow, stopped directly here. The update-check singleShot timer
+        lives on LaunchController but is also stopped directly here, early --
+        ahead of MonitorController.drain(), which pumps the event loop and
+        could otherwise let it fire mid-teardown. Everything else -- the
+        stats worker and in-flight monitor gather (MonitorController.
+        drain()), the fetch/update QThreads (LaunchController.drain()), and a
+        running benchmark QThread (BenchmarkController.drain()) -- is owned
+        by its controller, so teardown is otherwise just a sequence of
+        drain() calls in controller-construction order.
         """
         self._status_timer.stop()
+        # Stop the update-check singleShot timer early, before drain() below
+        # pumps the event loop (MonitorController.drain()'s stats-worker wait
+        # loop calls QCoreApplication.processEvents()) -- otherwise the timer
+        # can fire mid-teardown and spawn an _UpdateWorker. LaunchController.
+        # drain() also stops it (idempotent), but this restores the original
+        # early-stop ordering.
+        _update_timer = getattr(self._launch, "_update_timer", None)
+        if _update_timer is not None:
+            _update_timer.stop()
         self._monitor.drain()
         self._launch.drain()
         self._benchmark.drain()

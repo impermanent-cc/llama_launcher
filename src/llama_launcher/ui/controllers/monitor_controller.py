@@ -176,7 +176,7 @@ class MonitorController:
 
     # -- teardown ------------------------------------------------------------
     def drain(self) -> None:
-        self._stop_stats_worker()
+        self.window._stop_stats_worker()
         # Let any in-flight monitor gather finish (bounded) so it isn't writing
         # to the window during teardown; the pool's threads outlive the window,
         # so there's nothing to abort even if this times out.
