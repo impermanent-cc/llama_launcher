@@ -8,13 +8,13 @@ _DRAFT_LINE = ("draft acceptance = 0.62008 ( 1797 accepted /  2898 generated), "
 def test_on_launch_resets_monitor(qtbot, monkeypatch):
     w = MainWindow()
     qtbot.addWidget(w)
-    monkeypatch.setattr(w, "_validate_or_warn", lambda: True)
-    monkeypatch.setattr(w, "vram_check", lambda: None)
+    monkeypatch.setattr(w._launch, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(w._launch, "vram_check", lambda: None)
     monkeypatch.setattr(mw.terminal, "launch", lambda argv: None)
     # seed monitor state, then launch
     w.monitor_panel.append_log(_DRAFT_LINE + "\n")
     assert not w.monitor_panel.mtp_label.isHidden()
-    w.on_launch()
+    w._launch.on_launch()
     assert w.monitor_panel.mtp_label.isHidden()
     assert w.monitor_panel.log_view.toPlainText() == ""
 
@@ -22,12 +22,12 @@ def test_on_launch_resets_monitor(qtbot, monkeypatch):
 def test_on_launch_sets_endpoints(qtbot, monkeypatch):
     w = MainWindow()
     qtbot.addWidget(w)
-    monkeypatch.setattr(w, "_validate_or_warn", lambda: True)
-    monkeypatch.setattr(w, "vram_check", lambda: None)
+    monkeypatch.setattr(w._launch, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(w._launch, "vram_check", lambda: None)
     monkeypatch.setattr(mw.terminal, "launch", lambda argv: None)
-    w._widgets["embeddings"].set_value(True)
-    w._widgets["port"].set_value(8080)
-    w.on_launch()
+    w._configure_panel._widgets["embeddings"].set_value(True)
+    w._configure_panel._widgets["port"].set_value(8080)
+    w._launch.on_launch()
     assert not w.monitor_panel.endpoints_label.isHidden()
     assert "/v1/embeddings" in w.monitor_panel.endpoints_label.text()
     assert "8080" in w.monitor_panel.endpoints_label.text()
