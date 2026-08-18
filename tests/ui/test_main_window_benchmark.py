@@ -128,7 +128,7 @@ def test_on_benchmark_failed_saves_nothing(win, monkeypatch):
 
     monkeypatch.setattr(benchmark, "run_benchmark", raising)
 
-    win._run_benchmark_sync({"sizes": [128], "n_predict": 64, "warmup": 1, "repeats": 1})
+    win._benchmark._run_benchmark_sync({"sizes": [128], "n_predict": 64, "warmup": 1, "repeats": 1})
 
     assert benchmark_store.load(default_base_dir(), p.name) == []
     assert "boom" in win.benchmark_panel.bench_progress.text()
