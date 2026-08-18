@@ -2,14 +2,16 @@ import pytest
 
 import llama_launcher.ui.main_window as mw
 from llama_launcher.core.spec import Profile, Mount, Runtime
+from llama_launcher.ui.controllers import launch_controller
+from llama_launcher.ui.controllers.monitor_controller import MonitorController
 
 
 @pytest.fixture(autouse=True)
 def _stub_dialogs(monkeypatch):
     # Modal dialogs would block forever in the headless/offscreen test run.
-    monkeypatch.setattr(mw.QMessageBox, "critical", lambda *a, **k: None)
-    monkeypatch.setattr(mw.QMessageBox, "warning", lambda *a, **k: None)
-    monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(launch_controller.QMessageBox, "critical", lambda *a, **k: None)
+    monkeypatch.setattr(launch_controller.QMessageBox, "warning", lambda *a, **k: None)
+    monkeypatch.setattr(launch_controller.QMessageBox, "information", lambda *a, **k: None)
 
 
 def _profile():
@@ -23,12 +25,13 @@ def test_save_and_reload_profile(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(mw, "base_dir", lambda: tmp_path)
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.load_profile(_profile())
+    w._configure_panel.load_profile(_profile())
     w.save_current_profile()
     # new window sees the saved profile in its dropdown
     w2 = mw.MainWindow()
     qtbot.addWidget(w2)
-    names = [w2.profile_combo.itemText(i) for i in range(w2.profile_combo.count())]
+    names = [w2._configure_panel.profile_combo.itemText(i)
+             for i in range(w2._configure_panel.profile_combo.count())]
     assert "Act" in names
 
 
@@ -37,12 +40,13 @@ def test_name_field_is_saved(qtbot, tmp_path, monkeypatch):
     monkeypatch.setattr(mw, "base_dir", lambda: tmp_path)
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.load_profile(_profile())            # name="Act"
-    w.name_edit.setText("Renamed Build")
+    w._configure_panel.load_profile(_profile())            # name="Act"
+    w._configure_panel.name_edit.setText("Renamed Build")
     w.save_current_profile()
     w2 = mw.MainWindow()
     qtbot.addWidget(w2)
-    names = [w2.profile_combo.itemText(i) for i in range(w2.profile_combo.count())]
+    names = [w2._configure_panel.profile_combo.itemText(i)
+             for i in range(w2._configure_panel.profile_combo.count())]
     assert "Renamed Build" in names
 
 
@@ -56,17 +60,17 @@ def test_on_launch_does_not_follow_logs_before_container_exists(qtbot, monkeypat
     monkeypatch.setattr(mw.runtime, "container_exists", lambda name, binary: False)
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.load_profile(_profile())
-    w.on_launch()
-    assert w._log_proc is None
+    w._configure_panel.load_profile(_profile())
+    w._launch.on_launch()
+    assert w._monitor._log_proc is None
 
 
 def test_start_log_follower_skips_when_container_absent(qtbot, monkeypatch):
     monkeypatch.setattr(mw.runtime, "container_exists", lambda name, binary: False)
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w._start_log_follower()
-    assert w._log_proc is None
+    w._monitor._start_log_follower()
+    assert w._monitor._log_proc is None
 
 
 def test_update_status_starts_follower_when_running(qtbot, monkeypatch):
@@ -75,14 +79,13 @@ def test_update_status_starts_follower_when_running(qtbot, monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
     monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
-    monkeypatch.setattr(mw.MainWindow, "collect_monitor_data", lambda self: {})
-    monkeypatch.setattr(mw.MainWindow, "_log_follower_active", lambda self: False)
+    monkeypatch.setattr(MonitorController, "_log_follower_active", lambda self: False)
     calls = []
-    monkeypatch.setattr(mw.MainWindow, "_start_log_follower", lambda self: calls.append(1))
+    monkeypatch.setattr(MonitorController, "_start_log_follower", lambda self: calls.append(1))
     w = mw.MainWindow()
     qtbot.addWidget(w)
     calls.clear()
-    w.update_status()
+    w._monitor.update_status()
     assert calls == [1]
 
 
@@ -91,14 +94,13 @@ def test_update_status_does_not_restart_active_follower(qtbot, monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
     monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
-    monkeypatch.setattr(mw.MainWindow, "collect_monitor_data", lambda self: {})
-    monkeypatch.setattr(mw.MainWindow, "_log_follower_active", lambda self: True)
+    monkeypatch.setattr(MonitorController, "_log_follower_active", lambda self: True)
     calls = []
-    monkeypatch.setattr(mw.MainWindow, "_start_log_follower", lambda self: calls.append(1))
+    monkeypatch.setattr(MonitorController, "_start_log_follower", lambda self: calls.append(1))
     w = mw.MainWindow()
     qtbot.addWidget(w)
     calls.clear()
-    w.update_status()
+    w._monitor.update_status()
     assert calls == []
 
 
@@ -110,8 +112,8 @@ def test_on_launch_invokes_terminal(qtbot, monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.load_profile(_profile())
-    w.on_launch()
+    w._configure_panel.load_profile(_profile())
+    w._launch.on_launch()
     assert captured["argv"][0] == "podman"
     assert "img:tag" in captured["argv"]
 
@@ -124,8 +126,8 @@ def test_on_launch_blocks_on_validation_error(qtbot, monkeypatch):
     w = mw.MainWindow()
     qtbot.addWidget(w)
     p = _profile(); p.model = ""  # invalid
-    w.load_profile(p)
-    w.on_launch()
+    w._configure_panel.load_profile(p)
+    w._launch.on_launch()
     assert called["launched"] is False
 
 
@@ -136,14 +138,14 @@ def test_fetch_latest_updates_image(qtbot, monkeypatch):
     # resulting info dialog to avoid a modal exec() in headless tests.
     monkeypatch.setattr(mw.registry, "fetch_latest",
                         lambda repo, prefix, timeout=10.0: "server-cuda12-b9999")
-    monkeypatch.setattr(mw.QMessageBox, "information", lambda *a, **k: None)
-    monkeypatch.setattr(mw._UpdateWorker, "start",
+    monkeypatch.setattr(launch_controller.QMessageBox, "information", lambda *a, **k: None)
+    monkeypatch.setattr(launch_controller._UpdateWorker, "start",
                         lambda self: self.found.emit("server-cuda12-b9999"))
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w.image_edit.setText("ghcr.io/ggml-org/llama.cpp:server-cuda12-b1")
-    w.on_fetch_latest()
-    assert w.image_edit.text() == "ghcr.io/ggml-org/llama.cpp:server-cuda12-b9999"
+    w._configure_panel.image_edit.setText("ghcr.io/ggml-org/llama.cpp:server-cuda12-b1")
+    w._launch.on_fetch_latest()
+    assert w._configure_panel.image_edit.text() == "ghcr.io/ggml-org/llama.cpp:server-cuda12-b9999"
 
 
 def test_quit_app_stops_status_timer(qtbot):
