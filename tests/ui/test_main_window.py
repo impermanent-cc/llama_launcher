@@ -16,17 +16,17 @@ def test_name_field_drives_profile_name_and_container(qtbot):
     """Typing in the Name field sets the profile name (and thus --name/container)."""
     w = MainWindow()
     qtbot.addWidget(w)
-    w.name_edit.setText("My Cool Model")
-    assert w.current_profile().name == "My Cool Model"
+    w._configure_panel.name_edit.setText("My Cool Model")
+    assert w._configure_panel.current_profile().name == "My Cool Model"
     assert w._container_name() == "llama-my-cool-model"
-    assert "--name llama-my-cool-model" in w.preview_text()
+    assert "--name llama-my-cool-model" in w._configure_panel.preview_text()
 
 
 def test_load_profile_populates_name_field(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w.load_profile(_profile())          # name="UI Test"
-    assert w.name_edit.text() == "UI Test"
+    w._configure_panel.load_profile(_profile())          # name="UI Test"
+    assert w._configure_panel.name_edit.text() == "UI Test"
 
 
 def test_window_constructs(qtbot):
@@ -34,15 +34,15 @@ def test_window_constructs(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
     # the settings grid built a widget for every catalog entry
-    assert set(w._widgets.keys()) == set(CATALOG.keys())
-    assert w.preview_text().startswith("podman run --rm")
+    assert set(w._configure_panel._widgets.keys()) == set(CATALOG.keys())
+    assert w._configure_panel.preview_text().startswith("podman run --rm")
 
 
 def test_load_profile_and_preview(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w.load_profile(_profile())
-    text = w.preview_text()
+    w._configure_panel.load_profile(_profile())
+    text = w._configure_panel.preview_text()
     assert text.startswith("podman run --rm --name llama-ui-test")
     assert "--temp 0.6" in text
     assert "--ctx-size 4096" in text
@@ -53,8 +53,8 @@ def test_roundtrip_profile(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
     p = _profile()
-    w.load_profile(p)
-    out = w.current_profile()
+    w._configure_panel.load_profile(p)
+    out = w._configure_panel.current_profile()
     assert out.model == "/models/m.gguf"
     assert out.settings.get("ctx-size") == 4096
     assert out.image == "img:tag"
@@ -65,8 +65,8 @@ def test_loras_roundtrip(qtbot):
     qtbot.addWidget(w)
     p = _profile()
     p.loras = [LoraRef(path="/models/lora.gguf", scale=0.5)]
-    w.load_profile(p)
-    out = w.current_profile()
+    w._configure_panel.load_profile(p)
+    out = w._configure_panel.current_profile()
     assert len(out.loras) == 1
     assert out.loras[0].path == "/models/lora.gguf"
     assert abs(out.loras[0].scale - 0.5) < 1e-6
@@ -84,11 +84,11 @@ def test_advanced_podman_settings_roundtrip(qtbot):
         extra_run_args="--cap-add SYS_NICE",
         selinux_label_disable=True,
     )
-    w.load_profile(p)
-    out = w.current_profile()
+    w._configure_panel.load_profile(p)
+    out = w._configure_panel.current_profile()
     assert out.runtime.extra_run_args == "--cap-add SYS_NICE"
     assert out.runtime.selinux_label_disable is True
-    preview = w.preview_text()
+    preview = w._configure_panel.preview_text()
     assert "--cap-add SYS_NICE" in preview
     assert "--security-opt=label=disable" in preview
 
@@ -97,40 +97,40 @@ def test_engine_roundtrips_through_profile(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
     p = Profile(name="ik", runtime=Runtime(engine="ik_llama.cpp"))
-    w.load_profile(p)
-    assert w.engine_combo.currentData() == "ik_llama.cpp"
-    assert w.current_profile().runtime.engine == "ik_llama.cpp"
+    w._configure_panel.load_profile(p)
+    assert w._configure_panel.engine_combo.currentData() == "ik_llama.cpp"
+    assert w._configure_panel.current_profile().runtime.engine == "ik_llama.cpp"
 
 
 def test_ik_flags_hidden_on_llama_cpp_engine(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w.load_profile(Profile(name="m", runtime=Runtime(engine="llama.cpp")))
-    assert "run-time-repack" not in w.active_catalog()
-    w.load_profile(Profile(name="ik", runtime=Runtime(engine="ik_llama.cpp")))
-    assert "run-time-repack" in w.active_catalog()
+    w._configure_panel.load_profile(Profile(name="m", runtime=Runtime(engine="llama.cpp")))
+    assert "run-time-repack" not in w._configure_panel.active_catalog()
+    w._configure_panel.load_profile(Profile(name="ik", runtime=Runtime(engine="ik_llama.cpp")))
+    assert "run-time-repack" in w._configure_panel.active_catalog()
 
 
 def test_switch_to_ik_seeds_default_image_when_empty(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w.image_edit.setText("")
-    w.engine_combo.setCurrentIndex(w.engine_combo.findData("ik_llama.cpp"))
-    assert w.image_edit.text() == "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
+    w._configure_panel.image_edit.setText("")
+    w._configure_panel.engine_combo.setCurrentIndex(w._configure_panel.engine_combo.findData("ik_llama.cpp"))
+    assert w._configure_panel.image_edit.text() == "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
 
 
 def test_switch_engine_does_not_clobber_user_image(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w.image_edit.setText("myregistry.local/custom:tag")
-    w.engine_combo.setCurrentIndex(w.engine_combo.findData("ik_llama.cpp"))
-    assert w.image_edit.text() == "myregistry.local/custom:tag"
+    w._configure_panel.image_edit.setText("myregistry.local/custom:tag")
+    w._configure_panel.engine_combo.setCurrentIndex(w._configure_panel.engine_combo.findData("ik_llama.cpp"))
+    assert w._configure_panel.image_edit.text() == "myregistry.local/custom:tag"
 
 
 def test_ik_cache_type_enum_gains_extras(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w.engine_combo.setCurrentIndex(w.engine_combo.findData("ik_llama.cpp"))
-    ctk = w._widgets["cache-type-k"]
+    w._configure_panel.engine_combo.setCurrentIndex(w._configure_panel.engine_combo.findData("ik_llama.cpp"))
+    ctk = w._configure_panel._widgets["cache-type-k"]
     ctk.set_value("q6_0")
     assert ctk.value() == "q6_0"

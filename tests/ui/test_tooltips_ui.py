@@ -19,13 +19,13 @@ def test_environment_fields_have_tooltips(win):
     for attr in ("image_edit", "model_edit", "binary_combo", "gpu_combo",
                  "mode_combo", "bind_host_combo", "mmproj_edit", "draft_model_edit",
                  "raw_edit", "extra_args_edit", "selinux_check"):
-        w = getattr(win, attr)
+        w = getattr(win._configure_panel, attr)
         assert w.toolTip().strip(), f"{attr} is missing a tooltip"
 
 
 def test_router_member_headers_have_tooltips(win):
-    hdrs = [win.members_list.horizontalHeaderItem(c)
-            for c in range(win.members_list.columnCount())]
+    hdrs = [win._configure_panel.members_list.horizontalHeaderItem(c)
+            for c in range(win._configure_panel.members_list.columnCount())]
     assert all(h is not None and h.toolTip().strip() for h in hdrs)
 
 
