@@ -16,18 +16,14 @@ from llama_launcher.core.spec import (
     Profile, Mount, Runtime, RouterMember, member_model_id, slugify,
 )
 from llama_launcher.core.router_preset import render_preset
-from llama_launcher.core.settings_catalog import (
-    CATALOG, member_catalog, router_catalog, for_engine,
-    KV_CACHE_TYPES, IK_EXTRA_KV_CACHE_TYPES,
-)
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.pathmap import host_to_container
 from llama_launcher.core.validation import (
-    validate, Issue, LOOPBACK_HOSTS, dial_host,
+    validate, LOOPBACK_HOSTS, dial_host,
 )
 from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
-    load_config, save_config, profile_to_dict, resolve_member_pairs,
+    load_config, save_config, profile_to_dict,
 )
 from llama_launcher.core.instances import Instance, build_instances
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
@@ -37,9 +33,6 @@ from llama_launcher.core.mtp_stats import spec_counters, spec_delta
 from llama_launcher.core import report as report_mod
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.ui.dialogs.report_dialog import ReportDialog
-import posixpath
-from llama_launcher.core.capabilities import describe_relevance, Tier, suggestions as compute_suggestions
-from llama_launcher.core.pathmap import container_to_host
 from llama_launcher.ui.widgets.setting_widgets import make_widget, SuggestionDot
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
@@ -55,12 +48,6 @@ from llama_launcher.ui.widgets.router_models_table import RouterModelsTable
 from llama_launcher.ui.widgets.status_banner import StatusBanner
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import router_api
-
-
-_ENGINE_DEFAULT_IMAGE = {
-    "llama.cpp": "ghcr.io/ggml-org/llama.cpp:server-cuda",
-    "ik_llama.cpp": "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
-}
 
 
 def _fmt_uptime(started_at: str | None) -> str:
@@ -240,7 +227,6 @@ class MainWindow(QMainWindow):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Llama Launcher")
-        self._profile = Profile(name="New Profile")
 
         central = QWidget()
         self.setCentralWidget(central)
@@ -248,7 +234,6 @@ class MainWindow(QMainWindow):
 
         self._configure_panel = ConfigurePanel(self)
 
-        self._last_caps = None
         self._router_statuses: dict = {}
         self._spec_prev = None      # previous /metrics spec-decode counter read
         self._props = None          # cached /props for the current model load
@@ -659,94 +644,37 @@ class MainWindow(QMainWindow):
     def _configure_tab(self):
         return self._configure_panel.configure_tab
 
+    # -- ConfigurePanel behavior delegators ----------------------------------
+    # These methods now live on self._configure_panel (Task 2 of the
+    # main_window decomposition); MainWindow keeps a one-line forwarder for
+    # each so both the test suite and MainWindow's own not-yet-moved code
+    # (which calls them as self.<method>()) keep working unchanged.
     def _profile_name(self) -> str:
-        """Current profile name from the Name field, falling back to a default
-        so the container name / preview are never empty."""
-        return self.name_edit.text().strip() or "New Profile"
+        return self._configure_panel._profile_name()
 
     def _container_name(self) -> str:
         return f"llama-{slugify(self._profile_name())}"
 
     def active_catalog(self) -> dict:
-        """The settings that apply to the mode currently selected in the form.
-
-        Router CLI args outrank every member's preset value, so a router must
-        not be able to carry model-level settings; conversely --models-max on a
-        single-model llama-server is rejected outright.
-        """
-        base = (router_catalog() if self.mode_combo.currentData() == "router"
-                else member_catalog())
-        return for_engine(base, self.engine_combo.currentData() or "llama.cpp")
+        return self._configure_panel.active_catalog()
 
     def _apply_mode_to_settings_form(self) -> None:
-        active = self.active_catalog()
-        for group, box in self._group_boxes.items():
-            box.setVisible(False)
-        for key, (form, widget) in self._setting_rows.items():
-            visible = key in active
-            index = form.getWidgetPosition(widget)[0]
-            if index >= 0:
-                form.setRowVisible(index, visible)
-            if visible:
-                self._group_boxes[CATALOG[key].group].setVisible(True)
+        return self._configure_panel._apply_mode_to_settings_form()
 
     def _on_mode_changed(self, _index=0) -> None:
-        is_router = self.mode_combo.currentData() == "router"
-        # Hide the whole "Router members" form row (its QFormLayout label too),
-        # not just the inner widgets -- otherwise an orphaned "Router members"
-        # label lingers on the server-mode form.
-        self._left_form.setRowVisible(self._members_row, is_router)
-        self._apply_mode_to_settings_form()
-        # A router has no model of its own; its members carry those fields.
-        for w in (self.model_edit, self.mmproj_edit, self.draft_model_edit):
-            w.setEnabled(not is_router)
-        self.lora_panel.setEnabled(not is_router)
-        self.detached_check.setVisible(not is_router)
-        # The reusable API key + harness block + status/exposure banner are
-        # ROUTER-only concepts (a single server uses its own --api-key field in
-        # the Settings column). Show them only in router mode.
-        self.api_key_box.setVisible(is_router)
-        self.harness_box.setVisible(is_router)
-        self.configure_status.setVisible(is_router)
-        self.monitor_status.setVisible(is_router)
-        self._sync_load_mode_legacy()
-        self.refresh_preview()
-        if is_router:
-            self.refresh_router_panel_header()
+        return self._configure_panel._on_mode_changed(_index)
 
     def _apply_engine_enums(self) -> None:
-        """Extend/revert -ctk/-ctv enum choices for the current engine."""
-        engine = self.engine_combo.currentData() or "llama.cpp"
-        extra = IK_EXTRA_KV_CACHE_TYPES if engine == "ik_llama.cpp" else ()
-        for k in ("cache-type-k", "cache-type-v"):
-            w = self._widgets.get(k)
-            if w is not None:
-                w.set_enum_choices(tuple(KV_CACHE_TYPES) + tuple(extra))
+        return self._configure_panel._apply_engine_enums()
 
     def _maybe_seed_default_image(self, engine: str) -> None:
-        """Seed a sensible default image only when the field is empty or still
-        holds the OTHER engine's default; never clobber a user-typed value."""
-        cur = self.image_edit.text().strip()
-        if cur == "" or cur in set(_ENGINE_DEFAULT_IMAGE.values()):
-            self.image_edit.setText(_ENGINE_DEFAULT_IMAGE[engine])
+        return self._configure_panel._maybe_seed_default_image(engine)
 
     def _on_engine_changed(self, _index=0) -> None:
-        engine = self.engine_combo.currentData() or "llama.cpp"
-        self._apply_engine_enums()
-        self._apply_mode_to_settings_form()   # show/hide the ik group by active_catalog
-        self._maybe_seed_default_image(engine)
-        self.refresh_preview()
+        return self._configure_panel._on_engine_changed(_index)
 
     def _sync_load_mode_legacy(self) -> None:
-        """Gray out --no-mmap/--mlock when load-mode is set (it wins in argv)."""
-        lm = self._widgets.get("load-mode")
-        if lm is None:
-            return
-        load_mode_active = lm.value() != CATALOG["load-mode"].default
-        for key in ("no-mmap", "mlock"):
-            w = self._widgets.get(key)
-            if w is not None:
-                w.setEnabled(not load_mode_active)
+        return self._configure_panel._sync_load_mode_legacy()
 
     def _on_tab_changed(self, _index: int) -> None:
         # Entering the Configure tab must show a live key even for an edited-
@@ -816,286 +744,62 @@ class MainWindow(QMainWindow):
         save_config(cfg, base_dir())
 
     def _add_member_item(self, member: RouterMember) -> None:
-        from PySide6.QtWidgets import QTableWidgetItem
-        row = self.members_list.rowCount()
-        # itemChanged fires per setItem; without this the handler reads a
-        # half-populated row and hits None cells.
-        blocked = self.members_list.blockSignals(True)
-        self.members_list.insertRow(row)
-
-        name = QTableWidgetItem(member.profile)
-        name.setFlags(name.flags() & ~Qt.ItemIsEditable)   # the profile is the identity
-        self.members_list.setItem(row, 0, name)
-
-        # Empty means "derive from the profile name"; show the derived value as a
-        # placeholder so the harness-facing id is never a mystery.
-        mid = QTableWidgetItem(member.model_id)
-        mid.setToolTip(f"Empty = {member_model_id(member)}")
-        self.members_list.setItem(row, 1, mid)
-
-        load = QTableWidgetItem()
-        load.setFlags((load.flags() | Qt.ItemIsUserCheckable) & ~Qt.ItemIsEditable)
-        load.setCheckState(Qt.Checked if member.load_on_startup else Qt.Unchecked)
-        self.members_list.setItem(row, 2, load)
-
-        self.members_list.setItem(row, 3, QTableWidgetItem(str(member.stop_timeout)))
-        self.members_list.blockSignals(blocked)
+        return self._configure_panel._add_member_item(member)
 
     def set_member_fields(self, row: int, model_id: str | None = None,
                           load_on_startup: bool | None = None,
                           stop_timeout: int | None = None) -> None:
-        """Programmatic equivalent of editing a member row (used by tests)."""
-        if model_id is not None:
-            self.members_list.item(row, 1).setText(model_id)
-        if load_on_startup is not None:
-            self.members_list.item(row, 2).setCheckState(
-                Qt.Checked if load_on_startup else Qt.Unchecked)
-        if stop_timeout is not None:
-            self.members_list.item(row, 3).setText(str(stop_timeout))
-        self.refresh_preview()
+        return self._configure_panel.set_member_fields(
+            row, model_id=model_id, load_on_startup=load_on_startup,
+            stop_timeout=stop_timeout)
 
     def _member_candidates(self) -> list[str]:
-        """Non-router profiles eligible to be added as router members.
-
-        Read fresh from disk so a profile saved this session shows up without a
-        restart. A router can't be a member, so router-mode profiles are
-        filtered out -- that filter also excludes the router being edited once
-        it's saved. We deliberately do NOT exclude by the Name field's current
-        text: the natural add-a-member flow (switch to server mode, save the new
-        model, switch back to router mode) leaves the new model's name in the
-        Name field, and excluding it hid the very member the user just made until
-        an app restart.
-        """
-        return [p.name for p in list_profiles(base_dir()) if p.mode != "router"]
+        return self._configure_panel._member_candidates()
 
     def _on_add_member(self) -> None:
-        names = self._member_candidates()
-        if not names:
-            QMessageBox.information(self, "No profiles",
-                                    "Save a model profile first; routers serve members.")
-            return
-        name, ok = QInputDialog.getItem(self, "Add member", "Profile:", names, 0, False)
-        if ok and name:
-            self._add_member_item(RouterMember(profile=name))
-            self.refresh_preview()
+        return self._configure_panel._on_add_member()
 
     def _on_remove_member(self) -> None:
-        for row in sorted({i.row() for i in self.members_list.selectedIndexes()},
-                          reverse=True):
-            self.members_list.removeRow(row)
-        self.refresh_preview()
+        return self._configure_panel._on_remove_member()
 
     def _has_unsaved_changes(self) -> bool:
-        # Stateless dirty check: the form is clean iff current_profile() round-trips
-        # equal to the stored profile of the same name (verified: dataclass equality,
-        # dict-order-independent). A never-saved profile counts as changed.
-        cur = self.current_profile()
-        saved = {p.name: p for p in list_profiles(base_dir())}.get(cur.name)
-        return saved is None or cur != saved
+        return self._configure_panel._has_unsaved_changes()
 
     def _on_edit_member(self) -> None:
-        row = self.members_list.currentRow()
-        if row < 0:
-            return
-        item = self.members_list.item(row, 0)   # column 0 = member profile name
-        if item is None:
-            return
-        name = item.text()
-        target = {p.name: p for p in list_profiles(base_dir())}.get(name)
-        if target is None:
-            QMessageBox.warning(
-                self, "Profile missing",
-                f"Profile '{name}' no longer exists — remove it from the router "
-                f"or recreate it.")
-            return
-        if self._has_unsaved_changes():
-            choice = QMessageBox.question(
-                self, "Unsaved changes",
-                f"You have unsaved changes to '{self.current_profile().name}'. "
-                f"Editing member '{name}' will load its profile and lose those changes.",
-                QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
-                QMessageBox.Cancel)
-            if choice == QMessageBox.Cancel:
-                return
-            if choice == QMessageBox.Save:
-                self.save_current_profile()
-        self.load_profile(target)
+        return self._configure_panel._on_edit_member()
 
     def members(self) -> list:
-        out = []
-        for row in range(self.members_list.rowCount()):
-            name = self.members_list.item(row, 0)
-            mid = self.members_list.item(row, 1)
-            load = self.members_list.item(row, 2)
-            timeout_item = self.members_list.item(row, 3)
-            if name is None:
-                continue          # row still being built
-            try:
-                timeout = int(((timeout_item.text() if timeout_item else "") or "10").strip())
-            except ValueError:
-                timeout = 10
-            out.append(RouterMember(
-                profile=name.text(),
-                model_id=((mid.text() if mid else "") or "").strip(),
-                load_on_startup=bool(load is not None and load.checkState() == Qt.Checked),
-                stop_timeout=timeout,
-            ))
-        return out
+        return self._configure_panel.members()
 
     def member_pairs(self) -> list:
-        """(RouterMember, member Profile) pairs for members whose profile exists."""
-        return resolve_member_pairs(self.members(), base_dir())
+        return self._configure_panel.member_pairs()
 
     def missing_member_profiles(self) -> list:
-        """Member profile names that no longer exist on disk.
-
-        Dropping these silently launched a router serving fewer models than the
-        list showed, and any harness pinned to the missing id got a 404 with
-        nothing in the GUI explaining why."""
-        by_name = {p.name: p for p in list_profiles(base_dir())}
-        return [m.profile for m in self.members() if m.profile not in by_name]
+        return self._configure_panel.missing_member_profiles()
 
     def router_issues(self) -> list:
-        """Validation issues for the current profile, router context included."""
-        p = self.current_profile()
-        key_present = bool(api_key_store.resolve_api_key(self.router_base_dir(), p)) \
-            if p.mode == "router" else False
-        issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
-                          members=self.member_pairs(), api_key_present=key_present)
-        for name in self.missing_member_profiles():
-            issues.append(Issue(
-                "error",
-                f"Member profile {name!r} no longer exists; it would be dropped from "
-                f"the router silently. Remove it or recreate the profile."))
-        return issues
+        return self._configure_panel.router_issues()
 
     def _field_with_browse(self, line_edit: QLineEdit, dot: QWidget | None = None) -> QWidget:
-        container = QWidget()
-        row = QHBoxLayout(container)
-        row.setContentsMargins(0, 0, 0, 0)
-        row.addWidget(line_edit, 1)
-        if dot is not None:
-            row.addWidget(dot)
-        btn = QPushButton("Browse…")
-        btn.clicked.connect(lambda: self._browse_into(line_edit))
-        row.addWidget(btn)
-        return container
+        return self._configure_panel._field_with_browse(line_edit, dot)
 
     def _browse_into(self, line_edit: QLineEdit) -> None:
-        start = os.path.expanduser("~")
-        for m in self.mounts_panel.mounts():
-            if m.host:
-                start = m.host
-                break
-        path, _ = QFileDialog.getOpenFileName(self, "Select file", start)
-        if not path:
-            return
-        container_path = host_to_container(path, self.mounts_panel.mounts())
-        if container_path is None:
-            QMessageBox.warning(
-                self, "File not in a mounted folder",
-                "The selected file is not inside any mounted folder.\n"
-                "Add a folder mount that contains it first, then pick it again.")
-            return
-        line_edit.setText(container_path)
+        return self._configure_panel._browse_into(line_edit)
 
     def load_profile(self, p: Profile) -> None:
-        self._stop_log_follower()
-        self._profile = p
-        self.name_edit.setText(p.name)
-        self.image_edit.setText(p.image)
-        self.model_edit.setText(p.model)
-        self.binary_combo.setCurrentText(p.runtime.binary)
-        self.gpu_combo.setCurrentIndex(max(0, self.gpu_combo.findData(p.runtime.gpu_mode)))
-        self.engine_combo.blockSignals(True)
-        _eidx = self.engine_combo.findData(p.runtime.engine)
-        self.engine_combo.setCurrentIndex(_eidx if _eidx >= 0 else 0)
-        self.engine_combo.blockSignals(False)
-        self._apply_engine_enums()   # extend enums before values are set (no image seeding on load)
-        self.mounts_panel.set_mounts(p.mounts)
-        self.mmproj_edit.setText(p.mmproj or "")
-        self.draft_model_edit.setText(p.draft_model or "")
-        self.lora_panel.set_loras(p.loras)
-        self.raw_edit.setText(p.raw_args)
-        self.extra_args_edit.setText(p.runtime.extra_run_args)
-        self.selinux_check.setChecked(p.runtime.selinux_label_disable)
-        self.detached_check.setChecked(p.runtime.detached)
-        for key, w in self._widgets.items():
-            w.set_value(w.setting.default)
-            if key in p.settings:
-                w.set_value(p.settings[key])
-        index = self.mode_combo.findData(p.mode)
-        self.mode_combo.setCurrentIndex(index if index >= 0 else 0)
-        self.bind_host_combo.setCurrentText(p.runtime.bind_host)
-        self._router_statuses = {}
-        self._spec_prev = None
-        self._props = None
-        self._props_model = None
-        self.members_list.setRowCount(0)
-        for member in p.members:
-            self._add_member_item(member)
-        self._on_mode_changed()
-        self.apply_model_caps()
-        self.refresh_preview()
-        # Reattach-after-restart is the common path: selecting a saved router
-        # must show its key, harness block and exposure banner immediately.
-        self.api_key_box.set_scope(p.runtime.router_key_mode)
-        self.refresh_router_panel_header()
+        return self._configure_panel.load_profile(p)
 
     def current_profile(self) -> Profile:
-        # Filtering lives here, in the UI, per the project's catalog contract --
-        # never in command_builder. A value left over from the other mode (or
-        # loaded from older profile JSON) must not reach argv.
-        active = self.active_catalog()
-        settings = {}
-        for key, w in self._widgets.items():
-            if key in active and w.is_set():
-                settings[key] = w.value()
-        # port is always stored
-        settings["port"] = self._widgets["port"].value()
-        return Profile(
-            name=self._profile_name(),
-            image=self.image_edit.text(),
-            runtime=Runtime(binary=self.binary_combo.currentText(),
-                            gpu_mode=self.gpu_combo.currentData(),
-                            selinux_label_disable=self.selinux_check.isChecked(),
-                            extra_run_args=self.extra_args_edit.text(),
-                            bind_host=self.bind_host_combo.currentText().strip()
-                                      or "127.0.0.1",
-                            detached=self.detached_check.isChecked(),
-                            router_key_mode=self.api_key_box._current_scope(),
-                            engine=self.engine_combo.currentData() or "llama.cpp"),
-            mounts=self.mounts_panel.mounts(),
-            model=self.model_edit.text(),
-            mmproj=self.mmproj_edit.text() or None,
-            draft_model=self.draft_model_edit.text() or None,
-            loras=self.lora_panel.loras(),
-            settings=settings,
-            raw_args=self.raw_edit.text(),
-            mode=self.mode_combo.currentData() or "server",
-            members=self.members(),
-        )
+        return self._configure_panel.current_profile()
 
     def build_current_command(self, p: Profile | None = None) -> list:
-        """argv for the current profile, including the router mount.
-
-        Every path that renders a command (preview, Export .sh, the diagnostic
-        report, launch) must go through here: build_command() omits the
-        -v <dir>:/router:ro mount unless it is told the host directory, and a
-        router command without that mount cannot start -- its --models-preset
-        and --api-key-file paths would not exist inside the container.
-        """
-        p = p or self.current_profile()
-        if p.mode != "router":
-            return build_command(p, detach=p.runtime.detached)
-        return build_command(
-            p, router_host_dir=str(api_key_store.router_dir(self.router_base_dir(), p.name)))
+        return self._configure_panel.build_current_command(p)
 
     def preview_text(self) -> str:
-        return " ".join(self.build_current_command())
+        return self._configure_panel.preview_text()
 
     def refresh_preview(self) -> None:
-        self.preview.setPlainText(self.preview_text())
+        return self._configure_panel.refresh_preview()
 
     def _reload_profile_list(self):
         self.profile_combo.clear()
@@ -1110,7 +814,7 @@ class MainWindow(QMainWindow):
 
     def save_current_profile(self):
         p = self.current_profile()       # name comes from the Name field
-        self._profile = p
+        self._configure_panel._profile = p
         save_profile(p, base_dir())
         self._reload_profile_list()
         self.profile_combo.setCurrentText(p.name)
@@ -2222,105 +1926,29 @@ class MainWindow(QMainWindow):
         QApplication.instance().quit()
 
     def apply_model_caps(self) -> None:
-        p = self.current_profile()
-        meta, size, caps = (None, None, None)
-        if p.model:
-            meta, size, caps = model_info.inspect_model(p.model, self.mounts_panel.mounts())
-        self._last_caps = caps
-        self.model_meta_label.setText(self._meta_caps_text(meta, size, caps))
-
-        described = describe_relevance(caps) if caps else {}
-        sugg_by_key, reason_by_key = self._suggestion_index(caps)   # concrete-value suggestions
-
-        for key, widget in self._widgets.items():
-            self._apply_dot(widget, key, described, sugg_by_key, reason_by_key)
-        self._apply_field_dot(self._mmproj_dot, "mmproj", described, sugg_by_key, reason_by_key)
-        self._apply_field_dot(self._draft_model_dot, "draft_model", described, sugg_by_key, reason_by_key)
+        return self._configure_panel.apply_model_caps()
 
     def _suggestion_index(self, caps):
-        """key -> (Suggestion, reason). A multi-key suggestion indexes each key."""
-        sugg_by_key, reason_by_key = {}, {}
-        if not caps:
-            return sugg_by_key, reason_by_key
-        for sg in compute_suggestions(
-                caps, self.current_profile().settings,
-                mmproj_set=bool(self.mmproj_edit.text()),
-                draft_set=bool(self.draft_model_edit.text())):
-            for k in list(sg.settings) + list(sg.fields):
-                sugg_by_key[k] = sg
-                reason_by_key[k] = sg.text
-        return sugg_by_key, reason_by_key
+        return self._configure_panel._suggestion_index(caps)
 
     @staticmethod
     def _dot_state_for(key, described, sugg_by_key, reason_by_key):
-        tier, reason = described.get(key, (Tier.NEUTRAL, ""))
-        state = {"recommended": "suggested", "tune": "suggested",
-                 "na": "muted"}.get(getattr(tier, "value", ""), "none")
-        return state, reason
+        from llama_launcher.ui.panels.configure_panel import ConfigurePanel
+        return ConfigurePanel._dot_state_for(key, described, sugg_by_key, reason_by_key)
 
     def _apply_dot(self, widget, key, described, sugg_by_key, reason_by_key) -> None:
-        state, reason = self._dot_state_for(key, described, sugg_by_key, reason_by_key)
-        on_apply = None
-        if key in sugg_by_key:
-            state = "suggested"
-            reason = reason_by_key[key]
-            sg = sugg_by_key[key]
-            on_apply = lambda s=sg: self._apply_suggestion(s)
-        widget.set_suggestion(state, reason, on_apply)
+        return self._configure_panel._apply_dot(widget, key, described, sugg_by_key, reason_by_key)
 
     def _apply_field_dot(self, dot, key, described, sugg_by_key, reason_by_key) -> None:
-        state, reason = self._dot_state_for(key, described, sugg_by_key, reason_by_key)
-        on_apply = None
-        if key in sugg_by_key:
-            state = "suggested"
-            reason = reason_by_key[key]
-            sg = sugg_by_key[key]
-            on_apply = lambda s=sg: self._apply_suggestion(s)
-        dot.set_state(state, reason, on_apply)
+        return self._configure_panel._apply_field_dot(dot, key, described, sugg_by_key, reason_by_key)
 
     def _resolve_sibling(self, filename) -> str | None:
-        model = self.model_edit.text()
-        mounts = self.mounts_panel.mounts()
-        for d in (posixpath.dirname(model), posixpath.dirname(posixpath.dirname(model))):
-            container = posixpath.join(d, filename)
-            host = container_to_host(container, mounts)
-            if host and os.path.exists(host):
-                return container
-        return None
+        return self._configure_panel._resolve_sibling(filename)
 
     def _apply_suggestion(self, sg) -> None:
-        for key, val in sg.settings.items():
-            if key in self._widgets:
-                self._widgets[key].set_value(val)
-        for field, filename in sg.fields.items():
-            container = self._resolve_sibling(filename)
-            if container is None:
-                continue
-            if field == "mmproj":
-                self.mmproj_edit.setText(container)
-            elif field == "draft_model":
-                self.draft_model_edit.setText(container)
-        self.refresh_preview()
-        self.apply_model_caps()
+        return self._configure_panel._apply_suggestion(sg)
 
     @staticmethod
     def _meta_caps_text(meta, size, caps) -> str:
-        bits = []
-        if size:
-            bits.append(f"{size / 1024**3:.1f} GiB")
-        if meta and meta.quant:
-            bits.append(meta.quant)
-        if meta and meta.size_label:
-            bits.append(meta.size_label)
-        if caps:
-            if caps.is_moe:
-                bits.append(f"MoE {caps.expert_count}")
-            if caps.has_mtp:
-                bits.append("MTP" + (" (file)" if caps.mtp_sibling else ""))
-            if caps.has_vision:
-                bits.append("vision")
-            if caps.has_swa:
-                bits.append("SWA")
-            if caps.ctx_train:
-                bits.append(f"{caps.ctx_train // 1024}K ctx")
-        return "  ·  ".join(bits)
+        from llama_launcher.ui.panels.configure_panel import ConfigurePanel
+        return ConfigurePanel._meta_caps_text(meta, size, caps)
