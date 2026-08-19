@@ -215,40 +215,54 @@ def test_update_stats_omits_indicator_when_not_speculating(qtbot):
     assert "spec ●" not in panel.summary.text()
 
 
-def test_set_instances_renders_rows_and_selects(qtbot):
-    from llama_launcher.ui.panels.monitor_panel import MonitorPanel
-    panel = MonitorPanel(); qtbot.addWidget(panel)
-    rows = [
+def _rows():
+    return [
         {"name": "llama-a", "profile": "a", "port": 8080, "running": True,
-         "health": "ready", "stat": "64 tok/s"},
+         "health": "ready", "stat": "10 tok/s", "tok_s": 10.0, "kv_pct": 0.2,
+         "embeddings": False, "reranking": False, "mode": "server"},
         {"name": "llama-b", "profile": "b", "port": 8081, "running": True,
-         "health": "ready", "stat": "ready"},
+         "health": "ready", "stat": "ready", "tok_s": None, "kv_pct": None,
+         "embeddings": True, "reranking": False, "mode": "server"},
     ]
-    panel.set_instances(rows, selected_name="llama-b")
-    assert panel.instances_table.rowCount() == 2
-    assert panel.selected_instance_name() == "llama-b"
 
 
-def test_instance_row_click_emits_selected(qtbot):
-    from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+def test_set_instance_cards_builds_and_selects(qtbot):
     panel = MonitorPanel(); qtbot.addWidget(panel)
-    panel.set_instances([{"name": "llama-a", "profile": "a", "port": 8080,
-                          "running": True, "health": "ready", "stat": ""}], None)
-    got = []
-    panel.instance_selected.connect(got.append)
-    panel._emit_selected_for_row(0)            # what a row click calls
+    panel.set_instance_cards({"rows": _rows(), "selected_name": "llama-b"})
+    assert panel.card_names() == ["llama-a", "llama-b"]
+    assert panel.selected_card_name() == "llama-b"
+    assert "10 tok/s" in panel.card("llama-a").headline_text()
+    assert panel.card("llama-b").headline_text() == "ready"
+
+
+def test_set_instance_cards_updates_in_place_when_membership_stable(qtbot):
+    panel = MonitorPanel(); qtbot.addWidget(panel)
+    panel.set_instance_cards({"rows": _rows(), "selected_name": None})
+    first = panel.card("llama-a")
+    panel.set_instance_cards({"rows": _rows(), "selected_name": None})  # same names
+    assert panel.card("llama-a") is first          # widget reused, not rebuilt
+
+
+def test_set_instance_cards_rebuilds_on_membership_change(qtbot):
+    panel = MonitorPanel(); qtbot.addWidget(panel)
+    panel.set_instance_cards({"rows": _rows(), "selected_name": None})
+    panel.set_instance_cards({"rows": _rows()[:1], "selected_name": None})  # llama-b gone
+    assert panel.card_names() == ["llama-a"]
+
+
+def test_card_stop_button_emits_instance_stop_requested(qtbot):
+    panel = MonitorPanel(); qtbot.addWidget(panel)
+    panel.set_instance_cards({"rows": _rows(), "selected_name": None})
+    got = []; panel.instance_stop_requested.connect(got.append)
+    panel.card("llama-a").stop_button().click()
     assert got == ["llama-a"]
 
 
-def test_instance_stop_button_emits(qtbot):
-    from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+def test_card_click_emits_instance_selected(qtbot):
     panel = MonitorPanel(); qtbot.addWidget(panel)
-    panel.set_instances([{"name": "llama-a", "profile": "a", "port": 8080,
-                          "running": True, "health": "ready", "stat": ""}], None)
-    got = []
-    panel.instance_stop_requested.connect(got.append)
-    btn = panel.instances_table.cellWidget(0, 4)   # column 4 is the Stop button
-    btn.click()
+    panel.set_instance_cards({"rows": _rows(), "selected_name": None})
+    got = []; panel.instance_selected.connect(got.append)
+    panel.card("llama-a").selected.emit("llama-a")   # simulate a card click
     assert got == ["llama-a"]
 
 

@@ -78,23 +78,23 @@ def _instance_api_key_from(inst, by_name: dict, router_base_dir: str) -> str | N
 
 
 def _instance_summary_data(inst, by_name: dict, router_base_dir: str) -> dict:
-    """Per-row health + headline stat for one instance (pure; blocking I/O).
-
-    An embedding/rerank server has no tok/s, so it reports "ready"; a generation
-    server reports its last predicted-tokens/sec from /metrics. Uses the profiles
-    snapshot for key resolution instead of re-scanning disk per row."""
+    """Per-row health + headline stat + structured tok_s/kv_pct for one instance
+    (pure; blocking I/O). An embedding/rerank server has no tok/s (headline "ready");
+    a generation server reports predicted-tokens/sec + KV% from /metrics + /slots.
+    Uses the profiles snapshot for key resolution instead of a per-row disk scan."""
     if not inst.running or inst.port is None:
-        return {"health": "down", "stat": ""}
+        return {"health": "down", "stat": "", "tok_s": None, "kv_pct": None}
     hstatus = health.probe_health(inst.port, host=inst.host)
     if inst.embeddings or inst.reranking:
         stat = "ready" if hstatus == "ready" else ""
-    else:
-        tok = metrics.fetch_metrics(
-            inst.port, host=inst.host,
-            api_key=_instance_api_key_from(inst, by_name, router_base_dir),
-        ).get("llamacpp:predicted_tokens_seconds")
-        stat = f"{tok:.0f} tok/s" if tok else ("ready" if hstatus == "ready" else "")
-    return {"health": hstatus, "stat": stat}
+        return {"health": hstatus, "stat": stat, "tok_s": None, "kv_pct": None}
+    key = _instance_api_key_from(inst, by_name, router_base_dir)
+    m = metrics.fetch_metrics(inst.port, host=inst.host, api_key=key)
+    slots = metrics.fetch_slots(inst.port, host=inst.host, api_key=key)
+    tok = m.get("llamacpp:predicted_tokens_seconds")
+    kv = metrics.kv_ratio(m, slots)
+    stat = f"{tok:.0f} tok/s" if tok else ("ready" if hstatus == "ready" else "")
+    return {"health": hstatus, "stat": stat, "tok_s": tok, "kv_pct": kv}
 
 
 def build_instances_data(target: dict) -> dict:
@@ -116,7 +116,9 @@ def build_instances_data(target: dict) -> dict:
         summ = _instance_summary_data(inst, by_name, target["router_base_dir"])
         rows.append({"name": inst.name, "profile": inst.profile, "port": inst.port,
                      "running": inst.running, "health": summ["health"],
-                     "stat": summ["stat"]})
+                     "stat": summ["stat"], "tok_s": summ["tok_s"],
+                     "kv_pct": summ["kv_pct"], "embeddings": inst.embeddings,
+                     "reranking": inst.reranking, "mode": inst.mode})
     return {"instances": instances, "rows": rows}
 
 
@@ -553,8 +555,8 @@ class MonitorController:
                 and self._active_instance.name not in {i.name for i in self._instances}):
             self._active_instance = None
             self._start_log_follower()
-        self.window.monitor_panel.set_instances(
-            result["rows"], self._monitored_container_name())
+        self.window.monitor_panel.set_instance_cards(
+            {"rows": result["rows"], "selected_name": self._monitored_container_name()})
 
     def _on_instance_selected(self, name: str) -> None:
         inst = next((i for i in self._instances if i.name == name), None)
