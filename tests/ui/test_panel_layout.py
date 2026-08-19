@@ -12,6 +12,24 @@ def test_mounts_host_container_columns_stretch(qtbot):
     assert hdr.sectionResizeMode(1) == QHeaderView.Stretch   # Container
 
 
+def test_mounts_table_has_a_multi_row_floor(qtbot):
+    # Folders must keep 2-4 rows visible, not collapse to ~1 when the Environment
+    # form is crowded (regression: native-launch rows squeezed it to one row).
+    p = MountsPanel()
+    qtbot.addWidget(p)
+    assert p.table.minimumHeight() >= 140
+
+
+def test_cards_strip_fits_a_full_card(qtbot):
+    # One row of StatCards must show at full height (title/health/tok-s/KV), not
+    # clip when the log view claims the vertical space.
+    from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+    from llama_launcher.ui.widgets.stat_card import StatCard
+    mp = MonitorPanel()
+    qtbot.addWidget(mp)
+    assert mp._cards_scroll.minimumHeight() >= StatCard("x").sizeHint().height()
+
+
 def test_lora_path_column_stretches(qtbot):
     p = LoraPanel()
     qtbot.addWidget(p)

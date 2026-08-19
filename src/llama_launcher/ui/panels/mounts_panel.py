@@ -40,6 +40,9 @@ class MountsPanel(QWidget):
         hdr.setSectionResizeMode(1, QHeaderView.Stretch)            # Container
         for _c in (2, 3, 4, 5):                                     # compact controls
             hdr.setSectionResizeMode(_c, QHeaderView.ResizeToContents)
+        # Floor the table so it can't be squeezed to ~1 row when the Environment
+        # form is crowded -- keep 2-4 folder rows visible (header + ~4 rows).
+        self.table.setMinimumHeight(148)
         layout.addWidget(self.table)
         row = QHBoxLayout()
         add = QPushButton("+ Add folder")
