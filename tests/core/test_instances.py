@@ -61,3 +61,16 @@ def test_running_first_then_by_name():
     profiles = [_prof("a", 8080), _prof("b", 8081), _prof("c", 8082)]
     names = [i.name for i in build_instances(containers, profiles)]
     assert names == ["llama-a", "llama-c", "llama-b"]   # running (a,c) before stopped (b)
+
+
+def test_container_rows_default_to_container_kind():
+    containers = [{"name": "llama-c", "running": True, "profile": "c", "mode": "server"}]
+    (inst,) = build_instances(containers, [_prof("c", 8080)])
+    assert inst.kind == "container" and inst.pid is None
+
+
+def test_native_row_carries_kind_and_pid():
+    rows = [{"name": "llama-n", "running": True, "profile": "n", "mode": "server",
+             "kind": "native", "pid": 4242}]
+    (inst,) = build_instances(rows, [_prof("n", 8080)])
+    assert inst.kind == "native" and inst.pid == 4242

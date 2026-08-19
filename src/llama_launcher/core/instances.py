@@ -21,6 +21,8 @@ class Instance:
     reranking: bool
     stop_timeout: int = DEFAULT_STOP_TIMEOUT
     binary: str = "podman"
+    kind: str = "container"
+    pid: int | None = None
 
 
 def build_instances(containers: list[dict], profiles: list[Profile],
@@ -45,6 +47,7 @@ def build_instances(containers: list[dict], profiles: list[Profile],
         out.append(Instance(
             name=c["name"], profile=c.get("profile", ""), mode=c.get("mode", "server"),
             running=bool(c.get("running")), port=port, host=host,
-            embeddings=emb, reranking=rer, stop_timeout=stop_to, binary=bin_))
+            embeddings=emb, reranking=rer, stop_timeout=stop_to, binary=bin_,
+            kind=c.get("kind", "container"), pid=c.get("pid")))
     out.sort(key=lambda i: (not i.running, i.name))   # running first, then by name
     return out
