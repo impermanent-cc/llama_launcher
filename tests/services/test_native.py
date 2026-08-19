@@ -56,3 +56,43 @@ def _self_pid():
 def _self_exe():
     import sys
     return sys.executable
+
+
+import signal
+import subprocess
+import time
+
+
+def test_launch_native_spawns_and_registers(tmp_path, monkeypatch):
+    from llama_launcher.core.spec import Profile, Runtime
+    # Point build_command at a real, harmless long-lived process instead of a
+    # llama-server: patch it to return a `sleep` argv so the smoke is hermetic.
+    monkeypatch.setattr(native, "build_command",
+                        lambda p, **k: ["sleep", "30"])
+    p = Profile(name="Gen", runtime=Runtime(launch_mode="native",
+                native_binary="sleep", bind_host="127.0.0.1"),
+                settings={"port": 8080})
+    res = native.launch_native(p, tmp_path, now_iso="2026-08-19T00:00:00")
+    try:
+        assert res.ok and res.pid and res.name == "llama-gen"
+        entries = native.read_entries(tmp_path)
+        assert entries and entries[0]["pid"] == res.pid
+        assert native.native_log_path(tmp_path, "Gen").exists()
+    finally:
+        native.stop_native(res.pid, signal.SIGKILL)
+
+
+def test_stop_native_swallows_missing_pid():
+    native.stop_native(999999, signal.SIGTERM)  # must not raise
+
+
+def test_remove_native_deletes_registry_and_log(tmp_path):
+    entry = {"pid": 1, "profile": "Gen", "port": 8080, "host": "127.0.0.1",
+             "started_at": "t", "binary": "x",
+             "log": str(native.native_log_path(tmp_path, "Gen"))}
+    native.write_entry(tmp_path, entry)
+    native.native_log_path(tmp_path, "Gen").parent.mkdir(parents=True, exist_ok=True)
+    native.native_log_path(tmp_path, "Gen").write_text("log")
+    native.remove_native("llama-gen", tmp_path)
+    assert native.read_entries(tmp_path) == []
+    assert not native.native_log_path(tmp_path, "Gen").exists()

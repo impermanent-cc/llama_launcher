@@ -4,8 +4,12 @@ call. Row shape mirrors runtime.list_launcher_containers so build_instances can
 merge native + container instances into one Instance list."""
 import json
 import os
+import signal
+import subprocess
+from dataclasses import dataclass
 from pathlib import Path
 
+from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.spec import slugify
 
 
@@ -70,3 +74,54 @@ def list_native_instances(base_dir: Path) -> list[dict]:
             except OSError:
                 pass
     return rows
+
+
+@dataclass
+class NativeResult:
+    ok: bool
+    name: str
+    host: str
+    port: int
+    pid: int | None = None
+    error: str | None = None
+
+
+def native_log_path(base_dir, profile_name: str) -> Path:
+    return registry_dir(base_dir) / f"{slugify(profile_name)}.log"
+
+
+def launch_native(profile, base_dir, now_iso: str) -> NativeResult:
+    name = native_name(profile.name)
+    host = profile.runtime.bind_host
+    port = profile.settings.get("port", 8080)
+    argv = build_command(profile)
+    d = registry_dir(base_dir)
+    d.mkdir(parents=True, exist_ok=True)
+    log = native_log_path(base_dir, profile.name)
+    try:
+        logf = open(log, "w")
+        proc = subprocess.Popen(argv, stdout=logf, stderr=subprocess.STDOUT,
+                                start_new_session=True)
+    except OSError as exc:
+        return NativeResult(False, name, host, port, None, str(exc))
+    write_entry(base_dir, {"pid": proc.pid, "profile": profile.name, "port": port,
+                           "host": host, "started_at": now_iso,
+                           "binary": profile.runtime.native_binary, "log": str(log)})
+    return NativeResult(True, name, host, port, proc.pid, None)
+
+
+def stop_native(pid: int, sig: int) -> None:
+    try:
+        os.kill(pid, sig)
+    except (ProcessLookupError, PermissionError):
+        pass
+
+
+def remove_native(name: str, base_dir) -> None:
+    slug = name[len("llama-"):] if name.startswith("llama-") else name
+    for path in (registry_dir(base_dir) / f"{slug}.json",
+                 registry_dir(base_dir) / f"{slug}.log"):
+        try:
+            path.unlink(missing_ok=True)
+        except OSError:
+            pass
