@@ -296,6 +296,37 @@ def test_router_model_switch_refetches(qtbot, monkeypatch):
     assert calls["n"] == 2
 
 
+def test_on_launch_native_spawns_process_not_container(qtbot, monkeypatch):
+    from llama_launcher.services import native as native_svc
+    from llama_launcher.services.native import NativeResult
+    calls = {}
+    monkeypatch.setattr(native_svc, "launch_native",
+                        lambda p, base, now_iso: calls.setdefault(
+                            "res", NativeResult(True, "llama-nat", "127.0.0.1", 8080, 4242)))
+    # Fail the test loudly if the container path is taken instead.
+    monkeypatch.setattr(LaunchController, "_spawn_async",
+                        lambda self, *a, **k: calls.setdefault("container", True))
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    p = _profile()
+    p.runtime.launch_mode = "native"
+    p.runtime.native_binary = "/opt/bin/llama-server"
+    w._configure_panel.load_profile(p)
+    # NOTE (deviation from task-8-brief.md): ConfigurePanel does not yet
+    # round-trip Runtime.launch_mode/native_binary through load_profile() /
+    # current_profile() -- that widget wiring is Task 11's scope and has not
+    # landed in this worktree (only Tasks 1-7 are merged ahead of this one).
+    # current_profile() is the actual interface on_launch() consumes, so
+    # patch it directly to return our native profile rather than relying on
+    # a UI round-trip that doesn't exist yet.
+    monkeypatch.setattr(w._configure_panel, "current_profile", lambda: p)
+    # bypass VRAM/validation dialogs
+    monkeypatch.setattr(w._launch, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(w._launch, "vram_check", lambda: "")
+    w._launch.on_launch()
+    assert "res" in calls and "container" not in calls
+
+
 def _router_profile():
     from llama_launcher.core.spec import Profile, Runtime
     return Profile(name="r", image="img", mode="router", runtime=Runtime())
