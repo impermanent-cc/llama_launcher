@@ -60,7 +60,7 @@ def validate(profile: Profile, running_ports: tuple = (),
             issues.append(Issue("error",
                 f"Native binary not found or not executable: {nb}"))
 
-    if not binary_found:
+    if not is_native and not binary_found:
         issues.append(Issue("error",
                             f"Runtime '{profile.runtime.binary}' not found on PATH."))
 

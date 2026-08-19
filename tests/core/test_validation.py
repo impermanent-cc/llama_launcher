@@ -397,3 +397,21 @@ def test_native_router_is_refused():
                 runtime=Runtime(launch_mode="native", native_binary="/bin/sh"))
     msgs = [i.message.lower() for i in validate(p)]
     assert any("router" in m and "native" in m for m in msgs)
+
+
+def test_native_profile_not_blocked_by_missing_container_runtime():
+    # Runtime.binary defaults to "podman" for every profile regardless of
+    # launch_mode; a native user (no podman installed) must not be blocked by
+    # a check about a runtime the native path never uses.
+    p = Profile(name="n", model="/m.gguf",
+                runtime=Runtime(launch_mode="native", native_binary="/opt/bin/llama-server",
+                                bind_host="127.0.0.1"))
+    errors = [i for i in validate(p, binary_found=False, native_binary_ok=True)
+              if i.level == "error"]
+    assert errors == []
+
+
+def test_container_profile_still_blocked_by_missing_runtime():
+    p = _ok_profile()
+    errs = [i for i in validate(p, binary_found=False) if i.level == "error"]
+    assert any("not found on path" in m.message.lower() for m in errs)
