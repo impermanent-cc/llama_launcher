@@ -368,6 +368,33 @@ def test_on_launch_native_refuses_when_already_running(qtbot, monkeypatch):
     assert errors, "_report_launch_error should have fired to refuse the launch"
 
 
+def test_on_launch_foreground_reports_when_no_terminal(qtbot, monkeypatch):
+    """A foreground container launch on a box with no installed terminal (e.g.
+    konsole absent on GNOME) must surface a clear error, not crash on_launch
+    with an unhandled FileNotFoundError."""
+    from llama_launcher.services import terminal as term_mod
+
+    def _raise(*a, **k):
+        raise term_mod.NoTerminalError("no terminal emulator found")
+    monkeypatch.setattr(term_mod, "launch", _raise)
+
+    p = _profile()  # container, server, detached=False -> foreground terminal path
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._configure_panel.load_profile(p)
+    monkeypatch.setattr(w._configure_panel, "current_profile", lambda: p)
+    monkeypatch.setattr(w._launch, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(w._launch, "vram_check", lambda: "")
+
+    errors = []
+    monkeypatch.setattr(w._launch, "_report_launch_error",
+                        lambda *a, **k: errors.append((a, k)))
+
+    w._launch.on_launch()  # must not raise
+
+    assert errors, "_report_launch_error should fire when no terminal is available"
+
+
 def _router_profile():
     from llama_launcher.core.spec import Profile, Runtime
     return Profile(name="r", image="img", mode="router", runtime=Runtime())

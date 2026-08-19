@@ -187,7 +187,14 @@ class LaunchController:
                         e, show_dialog=True)))
         else:
             argv = build_command(p)
-            terminal.launch(argv)
+            # A `terminal` config value overrides detection; otherwise auto-detect
+            # an installed terminal (konsole on KDE, ptyxis/gnome-terminal on GNOME,
+            # ...). A missing terminal raises instead of crashing the launch.
+            template = load_config(default_base_dir()).get("terminal")
+            try:
+                terminal.launch(argv, template=template)
+            except terminal.NoTerminalError as exc:
+                self._report_launch_error(str(exc), show_dialog=True)
         # Don't attach the log follower here: the container is created
         # asynchronously and doesn't exist yet. update_status() starts the
         # follower once it is actually running (podman logs replays from the
