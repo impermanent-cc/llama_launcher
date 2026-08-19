@@ -67,6 +67,7 @@ def test_build_instances_data_scans_profiles_once_and_builds_rows(monkeypatch):
     monkeypatch.setattr(mc.health, "probe_health", lambda *a, **k: "ready")
     monkeypatch.setattr(mc.metrics, "fetch_metrics",
                         lambda *a, **k: {"llamacpp:predicted_tokens_seconds": 42.0})
+    monkeypatch.setattr(mc.metrics, "fetch_slots", lambda *a, **k: [])
     target = {"binary": "podman", "base_dir": "/b", "router_base_dir": "/r"}
     data = mc.build_instances_data(target)
     rows = {r["name"]: r for r in data["rows"]}
