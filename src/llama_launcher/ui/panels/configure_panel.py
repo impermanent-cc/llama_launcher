@@ -22,7 +22,7 @@ from llama_launcher.core.spec import (
 )
 from llama_launcher.core.validation import validate, Issue
 from llama_launcher.services import api_key as api_key_store
-from llama_launcher.services import model_info, runtime
+from llama_launcher.services import model_info, runtime, native
 from llama_launcher.store.profiles import list_profiles, resolve_member_pairs
 from llama_launcher.ui.widgets.setting_widgets import make_widget, SuggestionDot
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox, NoWheelSpinBox
@@ -583,7 +583,8 @@ class ConfigurePanel(QWidget):
         key_present = bool(api_key_store.resolve_api_key(self.window.router_base_dir(), p)) \
             if p.mode == "router" else False
         issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
-                          members=self.member_pairs(), api_key_present=key_present)
+                          members=self.member_pairs(), api_key_present=key_present,
+                          native_binary_ok=native.native_binary_ok_for(p))
         for name in self.missing_member_profiles():
             issues.append(Issue(
                 "error",

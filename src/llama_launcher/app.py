@@ -7,6 +7,7 @@ from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.validation import dial_host, validate
 from llama_launcher.services import headless
 from llama_launcher.services import api_key as api_key_store
+from llama_launcher.services.native import native_binary_ok_for
 from llama_launcher.services.runtime import binary_available
 from llama_launcher.services.terminal import DEFAULT_TEMPLATE, build_terminal_argv
 from llama_launcher.store.profiles import (
@@ -32,7 +33,8 @@ def _resolve_and_gate(action, profile_name, base_dir):
     members = resolve_member_pairs(p.members, base_dir)
     errs = [i for i in validate(p, binary_found=binary_available(p.runtime.binary),
                                 members=members,
-                                api_key_present=api_key_present) if i.level == "error"]
+                                api_key_present=api_key_present,
+                                native_binary_ok=native_binary_ok_for(p)) if i.level == "error"]
     if errs:
         return None, 2, "; ".join(i.message for i in errs)
     return p, None, None
@@ -62,7 +64,8 @@ def dry_run(profile_name: str | None = None, base_dir=None) -> int:
 
     p = profiles[profile_name]
 
-    issues = validate(p, binary_found=binary_available(p.runtime.binary))
+    issues = validate(p, binary_found=binary_available(p.runtime.binary),
+                     native_binary_ok=native_binary_ok_for(p))
 
     inner = build_command(p)
     template = load_config(base_dir).get("terminal", DEFAULT_TEMPLATE)

@@ -2,6 +2,7 @@ import signal
 import subprocess
 from pathlib import Path
 
+from llama_launcher.core.spec import Profile, Runtime
 from llama_launcher.services import native
 
 
@@ -114,3 +115,43 @@ def test_proc_stats_reports_for_self():
     assert st is not None
     assert st["mem_usage"].endswith(" MiB")
     assert st["cpu_perc"].endswith("%")
+
+
+def test_native_binary_available_false_for_missing_path():
+    assert native.native_binary_available("/no/such/llama-server") is False
+
+
+def test_native_binary_available_false_for_empty_path():
+    assert native.native_binary_available("") is False
+
+
+def test_native_binary_available_false_for_non_executable_file(tmp_path):
+    f = tmp_path / "llama-server"
+    f.write_text("#!/bin/sh\n")
+    f.chmod(0o644)
+    assert native.native_binary_available(str(f)) is False
+
+
+def test_native_binary_available_true_for_executable_file(tmp_path):
+    f = tmp_path / "llama-server"
+    f.write_text("#!/bin/sh\n")
+    f.chmod(0o755)
+    assert native.native_binary_available(str(f)) is True
+
+
+def test_native_binary_ok_for_ignores_container_profiles():
+    p = Profile(name="c", runtime=Runtime(launch_mode="container", native_binary=""))
+    assert native.native_binary_ok_for(p) is True
+
+
+def test_native_binary_ok_for_stats_native_profile(tmp_path):
+    missing = Profile(name="n", runtime=Runtime(launch_mode="native",
+                       native_binary="/no/such/llama-server"))
+    assert native.native_binary_ok_for(missing) is False
+
+    exe = tmp_path / "llama-server"
+    exe.write_text("#!/bin/sh\n")
+    exe.chmod(0o755)
+    present = Profile(name="n", runtime=Runtime(launch_mode="native",
+                       native_binary=str(exe)))
+    assert native.native_binary_ok_for(present) is True

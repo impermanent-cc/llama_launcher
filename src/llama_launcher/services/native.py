@@ -22,6 +22,22 @@ def native_name(profile_name: str) -> str:
     return f"llama-{slugify(profile_name)}"
 
 
+def native_binary_available(path: str) -> bool:
+    """True iff `path` is a file the launcher can exec directly. Callers pass
+    this into core.validation.validate(native_binary_ok=...) -- core stays
+    I/O-free, so the filesystem stat happens here instead."""
+    return bool(path) and os.path.isfile(path) and os.access(path, os.X_OK)
+
+
+def native_binary_ok_for(profile) -> bool:
+    """The `native_binary_ok` kwarg validate() wants for `profile`: True for
+    a container profile (the check doesn't apply), else a real stat of
+    `profile.runtime.native_binary`."""
+    if profile.runtime.launch_mode != "native":
+        return True
+    return native_binary_available(profile.runtime.native_binary)
+
+
 def _entry_path(base_dir: Path, profile_name: str) -> Path:
     return registry_dir(base_dir) / f"{slugify(profile_name)}.json"
 

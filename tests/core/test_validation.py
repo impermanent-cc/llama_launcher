@@ -370,3 +370,30 @@ def test_rtr_warns_and_mentions_mmap_override():
 def test_no_rtr_no_warning():
     p = _ok_server(settings={})
     assert not any("run-time-repack" in m for m in _msgs(p))
+
+
+def test_native_requires_existing_executable_binary():
+    # core is I/O-free (tests/core/test_purity.py forbids `import os` here), so
+    # the missing/non-executable filesystem check lives in
+    # services.native.native_binary_available and is passed in as
+    # `native_binary_ok`; a real stat of this path is covered separately in
+    # tests/services/test_native.py.
+    p = Profile(name="n", model="/m.gguf",
+                runtime=Runtime(launch_mode="native", native_binary="/no/such/llama-server"))
+    msgs = [i.message for i in validate(p, native_binary_ok=False)]
+    assert any("binary" in m.lower() for m in msgs)
+
+
+def test_native_binary_present_and_executable_passes():
+    p = Profile(name="n", model="/m.gguf",
+                runtime=Runtime(launch_mode="native", native_binary="/opt/bin/llama-server",
+                                bind_host="127.0.0.1"))
+    errors = [i for i in validate(p, native_binary_ok=True) if i.level == "error"]
+    assert errors == []
+
+
+def test_native_router_is_refused():
+    p = Profile(name="n", mode="router",
+                runtime=Runtime(launch_mode="native", native_binary="/bin/sh"))
+    msgs = [i.message.lower() for i in validate(p)]
+    assert any("router" in m and "native" in m for m in msgs)
