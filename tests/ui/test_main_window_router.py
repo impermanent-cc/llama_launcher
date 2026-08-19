@@ -87,7 +87,7 @@ def test_router_launch_uses_detached_command(win, monkeypatch, tmp_path):
         if on_done is not None:
             pending.append(on_done)
 
-    monkeypatch.setattr(win, "_spawn_async", fake_spawn)
+    monkeypatch.setattr(win._launch, "_spawn_async", fake_spawn)
     win._launch.on_launch()
 
     # Only the removal has been spawned so far; the run must be waiting on it.
@@ -138,7 +138,7 @@ def test_detached_server_launch_uses_spawn_chain_not_terminal(win, monkeypatch):
         if on_error is not None:
             errbacks.append(on_error)
 
-    monkeypatch.setattr(win, "_spawn_async", fake_spawn)
+    monkeypatch.setattr(win._launch, "_spawn_async", fake_spawn)
     win._launch.on_launch()
 
     # No terminal window in detached mode.
@@ -171,7 +171,7 @@ def test_attached_server_launch_still_uses_terminal(win, monkeypatch):
     monkeypatch.setattr(win._launch, "_validate_or_warn", lambda: True)
     monkeypatch.setattr(win._launch, "vram_check", lambda: None)
     spawned = []
-    monkeypatch.setattr(win, "_spawn_async",
+    monkeypatch.setattr(win._launch, "_spawn_async",
                         lambda argv, on_done=None, on_error=None: spawned.append(argv))
     called = {}
     monkeypatch.setattr("llama_launcher.ui.main_window.terminal.launch",
@@ -230,7 +230,7 @@ def test_detached_server_launch_error_pops_a_dialog(win, monkeypatch):
         if on_done is not None:
             on_done()
 
-    monkeypatch.setattr(win, "_spawn_async", fake_spawn)
+    monkeypatch.setattr(win._launch, "_spawn_async", fake_spawn)
     dialogs = []
     monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.critical",
                         lambda *a, **k: dialogs.append(a))
@@ -263,7 +263,7 @@ def test_router_launch_error_does_not_pop_a_dialog(win, monkeypatch):
         if on_done is not None:
             on_done()
 
-    monkeypatch.setattr(win, "_spawn_async", fake_spawn)
+    monkeypatch.setattr(win._launch, "_spawn_async", fake_spawn)
     dialogs = []
     monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.critical",
                         lambda *a, **k: dialogs.append(a))
@@ -297,7 +297,7 @@ def test_detached_server_error_dialog_survives_a_later_mode_switch(win, monkeypa
         if on_done is not None:
             on_done()
 
-    monkeypatch.setattr(win, "_spawn_async", fake_spawn)
+    monkeypatch.setattr(win._launch, "_spawn_async", fake_spawn)
     dialogs = []
     monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.critical",
                         lambda *a, **k: dialogs.append(a))
@@ -336,7 +336,7 @@ def test_router_error_dialog_stays_off_after_a_later_mode_switch(win, monkeypatc
         if on_done is not None:
             on_done()
 
-    monkeypatch.setattr(win, "_spawn_async", fake_spawn)
+    monkeypatch.setattr(win._launch, "_spawn_async", fake_spawn)
     dialogs = []
     monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.critical",
                         lambda *a, **k: dialogs.append(a))
@@ -534,7 +534,7 @@ def test_relaunch_does_not_force_kill_a_running_router(win, monkeypatch):
     monkeypatch.setattr("llama_launcher.ui.main_window.runtime.container_state",
                         lambda name, binary: "running")
     spawned = []
-    monkeypatch.setattr(win, "_spawn_async",
+    monkeypatch.setattr(win._launch, "_spawn_async",
                         lambda argv, on_done=None: spawned.append(argv))
     # A live headless host may have a 100GB model resident and requests in
     # flight; Launch must not tear it down without asking.

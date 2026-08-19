@@ -260,7 +260,7 @@ def test_history_loaded_on_router_launch_reset(win, monkeypatch):
     benchmark_store.append(base, p.name, _canned_run())
     monkeypatch.setattr(win._launch, "_validate_or_warn", lambda: True)
     monkeypatch.setattr(win._launch, "vram_check", lambda: None)
-    monkeypatch.setattr(win, "_spawn_async", lambda argv, on_done=None, on_error=None: None)
+    monkeypatch.setattr(win._launch, "_spawn_async", lambda argv, on_done=None, on_error=None: None)
     monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "exited")
 
     win._launch.on_launch()
