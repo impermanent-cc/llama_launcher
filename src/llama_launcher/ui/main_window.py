@@ -100,7 +100,6 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
         root = QVBoxLayout(central)
 
-        self._configure_panel = ConfigurePanel(self)
         # Owns status/instances/monitor/log-follower/stats/router-poll behavior
         # (see monitor_controller.py) and the state it reads/writes between
         # ticks. Built here -- before any widget/signal wiring below -- so
@@ -122,12 +121,17 @@ class MainWindow(QMainWindow):
         # consistency with the other controllers, ahead of the report/export/
         # web-ui button .connect() calls below (ConfigurePanel).
         self._report = ReportController(self)
+        # ConfigurePanel's own __init__ wires its lifecycle/report/fetch
+        # buttons straight to self.window._launch.<m> / self.window._report.<m>
+        # (Task 6 repoint off the MainWindow facade), so it must be built AFTER
+        # all four controllers above exist as instance attributes.
+        self._configure_panel = ConfigurePanel(self)
 
         # Tabs
         self.tabs = QTabWidget()
         self.tabs.addTab(self._configure_panel.configure_tab, "Configure")
         self.monitor_panel = MonitorPanel()
-        self.monitor_panel.enable_metrics_requested.connect(self._on_enable_metrics)
+        self.monitor_panel.enable_metrics_requested.connect(self._launch._on_enable_metrics)
         self.monitor_panel.instance_selected.connect(self._monitor._on_instance_selected)
         self.monitor_panel.instance_stop_requested.connect(self._monitor._on_instance_stop)
         self.monitor_panel.instance_remove_requested.connect(self._monitor._on_instance_remove)
@@ -178,11 +182,12 @@ class MainWindow(QMainWindow):
         # BOTTOM: command preview is config-only; wrap it in one container so
         # it can be hidden on the Monitor/Router/Benchmark tabs (see
         # _on_tab_changed). Launch/Stop/etc stay shared below.
-        root.addWidget(self._config_bottom)
+        root.addWidget(self._configure_panel._config_bottom)
         buttons = QHBoxLayout()
-        for b in (self.launch_btn, self.stop_btn, self.restart_btn, self.web_ui_btn):
+        for b in (self._configure_panel.launch_btn, self._configure_panel.stop_btn,
+                  self._configure_panel.restart_btn, self._configure_panel.web_ui_btn):
             buttons.addWidget(b)
-        buttons.addWidget(self.detached_check)
+        buttons.addWidget(self._configure_panel.detached_check)
         root.addLayout(buttons)
 
         # profile bar (added to the top of root via insertLayout)
@@ -192,9 +197,10 @@ class MainWindow(QMainWindow):
         self.stats_toggle_btn.setToolTip("Show/hide the live stats panel (Ctrl+Shift+S)")
         self.status_label = QLabel("● stopped")
         bar.addWidget(QLabel("Name"))
-        bar.addWidget(self.name_edit, 1)
-        bar.addWidget(self.profile_combo, 1)
-        for b in (self.save_btn, self.save_as_btn, self.delete_btn, self.report_btn,
+        bar.addWidget(self._configure_panel.name_edit, 1)
+        bar.addWidget(self._configure_panel.profile_combo, 1)
+        for b in (self._configure_panel.save_btn, self._configure_panel.save_as_btn,
+                  self._configure_panel.delete_btn, self._configure_panel.report_btn,
                   self.stats_toggle_btn):
             bar.addWidget(b)
         bar.addWidget(self.status_label)
@@ -219,9 +225,9 @@ class MainWindow(QMainWindow):
         # and startup loads no profile, so currentIndexChanged never fires --
         # without this, the router-only member widgets (created visible) show on
         # the default server-mode form until the user flips the mode combo.
-        self._on_mode_changed()
+        self._configure_panel._on_mode_changed()
 
-        self.refresh_preview()
+        self._configure_panel.refresh_preview()
 
         _stats_cfg = load_config(base_dir())
         if _stats_cfg.get("stats_open", False):
@@ -254,8 +260,8 @@ class MainWindow(QMainWindow):
             self.tray.setToolTip("Llama Launcher")
             menu = QMenu()
             menu.addAction("Show", self.showNormal)
-            menu.addAction("Launch", self.on_launch)
-            menu.addAction("Stop", self.on_stop)
+            menu.addAction("Launch", self._launch.on_launch)
+            menu.addAction("Stop", self._launch.on_stop)
             menu.addSeparator()
             menu.addAction("Quit", self.quit_app)
             self.tray.setContextMenu(menu)
@@ -263,12 +269,12 @@ class MainWindow(QMainWindow):
         else:
             self.tray = None
 
-        self.lora_panel.set_browse_resolver(
-            lambda h: host_to_container(h, self.mounts_panel.mounts())
+        self._configure_panel.lora_panel.set_browse_resolver(
+            lambda h: host_to_container(h, self._configure_panel.mounts_panel.mounts())
         )
 
         # Auto-insert the local image when there's exactly one and none is set yet.
-        self._autofill_image_if_empty()
+        self._launch._autofill_image_if_empty()
 
         from PySide6.QtCore import QTimer
         self._status_timer = QTimer(self)
@@ -599,7 +605,7 @@ class MainWindow(QMainWindow):
         return self._configure_panel._profile_name()
 
     def _container_name(self) -> str:
-        return f"llama-{slugify(self._profile_name())}"
+        return f"llama-{slugify(self._configure_panel._profile_name())}"
 
     def active_catalog(self) -> dict:
         return self._configure_panel.active_catalog()
@@ -626,11 +632,12 @@ class MainWindow(QMainWindow):
         # Entering the Configure tab must show a live key even for an edited-
         # but-unsaved router; refresh_router_panel_header() no-ops for
         # non-routers.
-        if self.tabs.currentWidget() is self.configure_tab:
+        if self.tabs.currentWidget() is self._configure_panel.configure_tab:
             self.refresh_router_panel_header()
         # Command preview / api-key / harness only make sense while configuring,
         # so hide the bottom strip on the Monitor/Benchmark tabs.
-        self._config_bottom.setVisible(self.tabs.currentWidget() is self.configure_tab)
+        self._configure_panel._config_bottom.setVisible(
+            self.tabs.currentWidget() is self._configure_panel.configure_tab)
 
     # -- MonitorController delegators (status/instances/monitor/log/stats/
     # router-poll behavior now lives on self._monitor; see
@@ -709,32 +716,32 @@ class MainWindow(QMainWindow):
         return self._configure_panel.refresh_preview()
 
     def _reload_profile_list(self):
-        self.profile_combo.clear()
+        self._configure_panel.profile_combo.clear()
         self._profiles = {p.name: p for p in list_profiles(base_dir())}
-        self.profile_combo.addItems(list(self._profiles.keys()))
+        self._configure_panel.profile_combo.addItems(list(self._profiles.keys()))
 
     def _on_pick_profile(self, _index):
-        self._stop_log_follower()
-        name = self.profile_combo.currentText()
+        self._monitor._stop_log_follower()
+        name = self._configure_panel.profile_combo.currentText()
         if name in self._profiles:
-            self.load_profile(self._profiles[name])
+            self._configure_panel.load_profile(self._profiles[name])
 
     def save_current_profile(self):
-        p = self.current_profile()       # name comes from the Name field
+        p = self._configure_panel.current_profile()       # name comes from the Name field
         self._configure_panel._profile = p
         save_profile(p, base_dir())
         self._reload_profile_list()
-        self.profile_combo.setCurrentText(p.name)
+        self._configure_panel.profile_combo.setCurrentText(p.name)
 
     def save_as_profile(self):
         name, ok = QInputDialog.getText(self, "Save As", "Profile name:",
-                                        text=self._profile_name())
+                                        text=self._configure_panel._profile_name())
         if ok and name:
-            self.name_edit.setText(name)
+            self._configure_panel.name_edit.setText(name)
             self.save_current_profile()
 
     def delete_current_profile(self):
-        name = self.profile_combo.currentText()
+        name = self._configure_panel.profile_combo.currentText()
         if name:
             delete_profile(name, base_dir())
             self._reload_profile_list()
@@ -743,15 +750,15 @@ class MainWindow(QMainWindow):
         return base_dir()
 
     def router_api_key(self) -> str:
-        p = self.current_profile()
+        p = self._configure_panel.current_profile()
         return (api_key_store.resolve_api_key(self.router_base_dir(), p)
                 or api_key_store.ensure_api_key(self.router_base_dir(), p.name))
 
     def prepare_router_files(self) -> tuple:
         """Write models.ini + api-key for the current router. Returns (dir, warnings)."""
-        name = self._profile_name()
-        result = render_preset(self.member_pairs())
-        api_key_store.prepare_launch_key(self.router_base_dir(), self.current_profile())
+        name = self._configure_panel._profile_name()
+        result = render_preset(self._configure_panel.member_pairs())
+        api_key_store.prepare_launch_key(self.router_base_dir(), self._configure_panel.current_profile())
         api_key_store.write_preset(self.router_base_dir(), name, result.text)
         return str(api_key_store.router_dir(self.router_base_dir(), name)), result.warnings
 
@@ -766,7 +773,7 @@ class MainWindow(QMainWindow):
         if scope == "global":
             api_key_store.write_global_key(base, value)
         else:
-            api_key_store.set_profile_key(base, self._profile_name(), value)
+            api_key_store.set_profile_key(base, self._configure_panel._profile_name(), value)
         self.refresh_router_panel_header()
         self._notify_key_change_needs_relaunch()
 
@@ -775,7 +782,7 @@ class MainWindow(QMainWindow):
         change here only takes effect on the NEXT launch. Without this, a user
         who copies the newly-shown key into their harness while the router is
         still up gets a bare 401 with nothing in the GUI explaining why."""
-        p = self.current_profile()
+        p = self._configure_panel.current_profile()
         if runtime.container_state(self._container_name(),
                                    p.runtime.binary) == "running":
             QMessageBox.information(
@@ -784,26 +791,26 @@ class MainWindow(QMainWindow):
                 "take effect.")
 
     def _set_router_connected(self, connected: bool) -> None:
-        self.configure_status.set_connected(connected)
+        self._configure_panel.configure_status.set_connected(connected)
         self.monitor_status.set_connected(connected)
 
     def _set_router_error(self, text: str) -> None:
-        self.configure_status.set_error(text)
+        self._configure_panel.configure_status.set_error(text)
         self.monitor_status.set_error(text)
 
     def _set_router_exposure(self, text: str) -> None:
-        self.configure_status.set_exposure_warning(text)
+        self._configure_panel.configure_status.set_exposure_warning(text)
         self.monitor_status.set_exposure_warning(text)
 
     def refresh_router_panel_header(self) -> None:
-        p = self.current_profile()
+        p = self._configure_panel.current_profile()
         if p.mode != "router":
             # Clear relocated router state so a previous router's exposure
             # banner, API key, and harness endpoint don't linger on the
             # Configure/Monitor tabs after switching to an unrelated profile.
             self._set_router_exposure("")
-            self.api_key_box.set_key("")
-            self.harness_box.harness_text.setPlainText("")
+            self._configure_panel.api_key_box.set_key("")
+            self._configure_panel.harness_box.harness_text.setPlainText("")
             return
         host = p.runtime.bind_host
         display_host = dial_host(host)
@@ -813,8 +820,8 @@ class MainWindow(QMainWindow):
         # idempotent and is the only side effect on this path.
         key = (api_key_store.resolve_api_key(self.router_base_dir(), p)
                or api_key_store.ensure_api_key(self.router_base_dir(), p.name))
-        self.api_key_box.set_key(key)
-        self.harness_box.set_endpoint(
+        self._configure_panel.api_key_box.set_key(key)
+        self._configure_panel.harness_box.set_endpoint(
             f"http://{display_host}:{port}",
             [member_model_id(m) for m in p.members])
         self._set_router_exposure(
@@ -1030,7 +1037,7 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event):
         if getattr(self, "_really_quit", False) or not self._minimize_to_tray:
-            self._stop_log_follower()
+            self._monitor._stop_log_follower()
             self._stop_timers()
             event.accept()
             from PySide6.QtWidgets import QApplication
@@ -1041,7 +1048,7 @@ class MainWindow(QMainWindow):
 
     def quit_app(self):
         self._really_quit = True
-        self._stop_log_follower()
+        self._monitor._stop_log_follower()
         self._stop_timers()
         from PySide6.QtWidgets import QApplication
         QApplication.instance().quit()
