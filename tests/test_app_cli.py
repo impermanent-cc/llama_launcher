@@ -188,6 +188,33 @@ def test_launch_native_profile_refused_by_cli(monkeypatch, capsys):
     assert "gui-only" in capsys.readouterr().err.lower()
 
 
+def test_stop_native_profile_refused_by_cli(monkeypatch, capsys):
+    native = _server("s")
+    native.runtime.launch_mode = "native"
+    native.runtime.native_binary = "/opt/bin/llama-server"
+    _profiles(monkeypatch, [native], last="s")
+    monkeypatch.setattr(app, "binary_available", lambda b: True)
+    monkeypatch.setattr(app, "validate", lambda p, **kw: [])
+    # must not touch the container stop path
+    monkeypatch.setattr(app.headless, "stop_router",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("container path taken")))
+    assert app.main(["--stop", "--profile", "s"]) == 1
+    assert "gui-only" in capsys.readouterr().err.lower()
+
+
+def test_health_native_profile_refused_by_cli(monkeypatch, capsys):
+    native = _server("s")
+    native.runtime.launch_mode = "native"
+    native.runtime.native_binary = "/opt/bin/llama-server"
+    _profiles(monkeypatch, [native], last="s")
+    monkeypatch.setattr(app, "binary_available", lambda b: True)
+    monkeypatch.setattr(app, "validate", lambda p, **kw: [])
+    monkeypatch.setattr(app.headless, "router_status",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("container path taken")))
+    assert app.main(["--health", "--profile", "s"]) == 1
+    assert "gui-only" in capsys.readouterr().err.lower()
+
+
 def test_stop_success_exit_0(monkeypatch, capsys):
     _ready_router(monkeypatch)
     monkeypatch.setattr(app.headless, "stop_router", lambda p, binary, timeout=10: True)

@@ -121,10 +121,17 @@ def _do_launch(p, base_dir, wait, as_json=False):
                  text_err=f"'{p.name}' started but not ready after {int(wait)}s")
 
 
+_NATIVE_CLI_MSG = "native launch is GUI-only in this version"
+
+
 def _do_stop(p, base_dir, as_json=False):
     name = headless._container_name(p)
     host = p.runtime.bind_host
     port = p.settings.get("port", 8080)
+    if p.runtime.launch_mode == "native":
+        return _emit(as_json, "stop", 1, name=name, host=host, port=port,
+                     error=_NATIVE_CLI_MSG,
+                     text_err=f"'{p.name}' is a native profile; {_NATIVE_CLI_MSG}")
     if headless.stop_router(p, p.runtime.binary, timeout=p.runtime.stop_timeout):
         return _emit(as_json, "stop", 0, status="stopped", name=name,
                      host=host, port=port,
@@ -138,6 +145,12 @@ _HEALTH_EXIT = {"running": 0, "loading": 3}
 
 
 def _do_health(p, base_dir, as_json=False):
+    if p.runtime.launch_mode == "native":
+        return _emit(as_json, "health", 1,
+                     status="unknown", name=headless._container_name(p),
+                     host=p.runtime.bind_host, port=p.settings.get("port", 8080),
+                     error=_NATIVE_CLI_MSG,
+                     text_err=f"'{p.name}' is a native profile; {_NATIVE_CLI_MSG}")
     status = headless.router_status(p, p.runtime.binary)
     display = "ready" if status == "running" else status
     return _emit(as_json, "health", _HEALTH_EXIT.get(status, 4),

@@ -319,6 +319,41 @@ def test_native_instance_stop_sends_sigterm_then_schedules_kill(win, monkeypatch
     assert scheduled["v"] == (4242, 7)
 
 
+def test_sigkill_if_alive_kills_when_still_our_process(monkeypatch):
+    import signal
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    monkeypatch.setattr(mc.native, "read_entries",
+                        lambda base: [{"pid": 4242, "binary": "/opt/llama-server"}])
+    monkeypatch.setattr(mc.native, "is_alive", lambda pid, binary: True)
+    killed = []
+    monkeypatch.setattr(mc.native, "stop_native", lambda pid, sig: killed.append((pid, sig)))
+    mc._sigkill_if_alive(4242)
+    assert killed == [(4242, signal.SIGKILL)]
+
+
+def test_sigkill_if_alive_skips_when_registry_entry_gone(monkeypatch):
+    # A running native process is never pruned, so a missing entry => already dead.
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    monkeypatch.setattr(mc.native, "read_entries", lambda base: [])
+    monkeypatch.setattr(mc.native, "is_alive", lambda pid, binary: True)  # unreached
+    killed = []
+    monkeypatch.setattr(mc.native, "stop_native", lambda pid, sig: killed.append((pid, sig)))
+    mc._sigkill_if_alive(4242)
+    assert killed == []
+
+
+def test_sigkill_if_alive_skips_when_pid_recycled(monkeypatch):
+    # Entry exists but the pid no longer references our binary (OS recycled it).
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    monkeypatch.setattr(mc.native, "read_entries",
+                        lambda base: [{"pid": 4242, "binary": "/opt/llama-server"}])
+    monkeypatch.setattr(mc.native, "is_alive", lambda pid, binary: False)
+    killed = []
+    monkeypatch.setattr(mc.native, "stop_native", lambda pid, sig: killed.append((pid, sig)))
+    mc._sigkill_if_alive(4242)
+    assert killed == []
+
+
 def test_native_instance_remove_calls_native(win, monkeypatch):
     from llama_launcher.ui.controllers import monitor_controller as mc
     win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
