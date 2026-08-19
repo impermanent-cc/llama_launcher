@@ -1,3 +1,5 @@
+import signal
+import subprocess
 from pathlib import Path
 
 from llama_launcher.services import native
@@ -25,7 +27,7 @@ def test_is_alive_false_for_missing_pid(tmp_path):
 
 
 def test_is_alive_true_for_self():
-    import sys, signal
+    import sys
     # Spawn a child launched by ABSOLUTE path so its cmdline argv[0] == sys.executable,
     # matching how launch_native spawns a server by absolute native_binary path.
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
@@ -38,7 +40,7 @@ def test_is_alive_true_for_self():
 
 
 def test_list_native_instances_shape_and_prune(tmp_path):
-    import sys, signal
+    import sys
     # Spawn a child launched by ABSOLUTE path so its cmdline argv[0] matches the binary.
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
@@ -62,11 +64,6 @@ def test_list_native_instances_shape_and_prune(tmp_path):
         proc.wait()
 
 
-import signal
-import subprocess
-import time
-
-
 def test_launch_native_spawns_and_registers(tmp_path, monkeypatch):
     from llama_launcher.core.spec import Profile, Runtime
     # Point build_command at a real, harmless long-lived process instead of a
@@ -83,7 +80,8 @@ def test_launch_native_spawns_and_registers(tmp_path, monkeypatch):
         assert entries and entries[0]["pid"] == res.pid
         assert native.native_log_path(tmp_path, "Gen").exists()
     finally:
-        native.stop_native(res.pid, signal.SIGKILL)
+        if res.pid:
+            native.stop_native(res.pid, signal.SIGKILL)
 
 
 def test_stop_native_swallows_missing_pid():

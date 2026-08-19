@@ -99,9 +99,9 @@ def launch_native(profile, base_dir, now_iso: str) -> NativeResult:
     d.mkdir(parents=True, exist_ok=True)
     log = native_log_path(base_dir, profile.name)
     try:
-        logf = open(log, "w")
-        proc = subprocess.Popen(argv, stdout=logf, stderr=subprocess.STDOUT,
-                                start_new_session=True)
+        with open(log, "w") as logf:
+            proc = subprocess.Popen(argv, stdout=logf, stderr=subprocess.STDOUT,
+                                    start_new_session=True)
     except OSError as exc:
         return NativeResult(False, name, host, port, None, str(exc))
     write_entry(base_dir, {"pid": proc.pid, "profile": profile.name, "port": port,
