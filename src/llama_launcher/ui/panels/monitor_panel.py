@@ -33,7 +33,11 @@ class MonitorPanel(QWidget):
         self._cards_scroll = QScrollArea()
         self._cards_scroll.setWidgetResizable(True)
         self._cards_scroll.setWidget(cards_holder)
-        self._cards_scroll.setMaximumHeight(170)
+        # Floor + cap the cards strip so one row of StatCards always shows at full
+        # height (a card is ~116px; leave room for a horizontal scrollbar) instead
+        # of collapsing when the log view claims the vertical space.
+        self._cards_scroll.setMinimumHeight(150)
+        self._cards_scroll.setMaximumHeight(175)
         layout.insertWidget(0, self._cards_scroll)
 
         self.summary = QLabel("No server running.")
