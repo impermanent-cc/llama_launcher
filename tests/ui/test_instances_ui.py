@@ -159,10 +159,10 @@ def test_instances_rows_rendered_off_thread(win, monkeypatch):
     monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
                         lambda *a, **k: "ready")
     win._monitor._refresh_instances_list()                 # tick 1: dispatch only
-    assert win.monitor_panel.instances_table.rowCount() == 0
+    assert len(win.monitor_panel.card_names()) == 0
     QThreadPool.globalInstance().waitForDone(2000)
     win._monitor._refresh_instances_list()                 # tick 2: renders gathered rows
-    assert win.monitor_panel.instances_table.rowCount() == 2
+    assert win.monitor_panel.card_names() == ["llama-emb", "llama-solo"]
 
 
 def test_active_instance_cleared_when_its_container_vanishes(win, monkeypatch):

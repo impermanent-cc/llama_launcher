@@ -3,11 +3,12 @@ from collections import deque
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
-    QTableWidget,
+    QScrollArea,
 )
 
 from llama_launcher.core.mtp_stats import parse_draft_stats, sparkline
 from llama_launcher.ui.widgets.info_button import InfoButton
+from llama_launcher.ui.widgets.stat_card import StatCard
 
 
 class MonitorPanel(QWidget):
@@ -20,18 +21,20 @@ class MonitorPanel(QWidget):
         super().__init__(parent)
         layout = QVBoxLayout(self)
 
-        # Create instances table
-        from PySide6.QtWidgets import QHeaderView
-        self.instances_table = QTableWidget(0, 5)
-        self.instances_table.setHorizontalHeaderLabels(["Profile", "Port", "Health", "Stat", ""])
-        self.instances_table.verticalHeader().setVisible(False)
-        self.instances_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        # Cap so an empty/short instances list doesn't dominate the tab; it
-        # holds ~5 rows before scrolling, leaving the log and stats in view.
-        self.instances_table.setMaximumHeight(160)
-        self.instances_table.cellClicked.connect(lambda r, _c: self._emit_selected_for_row(r))
-        self._instance_names: list[str] = []
-        layout.insertWidget(0, self.instances_table)
+        # Cards row: one StatCard per running instance, side-by-side in a
+        # horizontal scroll area so an empty/short list doesn't dominate the tab.
+        self._cards: dict[str, StatCard] = {}
+        self._selected_name: str | None = None
+        self._cards_row = QHBoxLayout()
+        self._cards_row.setSpacing(8)
+        self._cards_row.addStretch(1)                 # keep cards left-packed
+        cards_holder = QWidget()
+        cards_holder.setLayout(self._cards_row)
+        self._cards_scroll = QScrollArea()
+        self._cards_scroll.setWidgetResizable(True)
+        self._cards_scroll.setWidget(cards_holder)
+        self._cards_scroll.setMaximumHeight(170)
+        layout.insertWidget(0, self._cards_scroll)
 
         self.summary = QLabel("No server running.")
         self.summary.setWordWrap(True)
@@ -200,45 +203,37 @@ class MonitorPanel(QWidget):
         self.info_label.setText("")
         self.info_label.setVisible(False)
 
-    def set_instances(self, rows, selected_name=None) -> None:
-        from PySide6.QtWidgets import QTableWidgetItem, QPushButton
-        self._instance_names = [r["name"] for r in rows]
-        self.instances_table.setRowCount(len(rows))
-        for i, r in enumerate(rows):
-            self.instances_table.setItem(i, 0, QTableWidgetItem(r["profile"]))
-            self.instances_table.setItem(i, 1, QTableWidgetItem(str(r["port"] or "")))
-            dot = "●" if r["health"] == "ready" else ("◐" if r["running"] else "○")
-            self.instances_table.setItem(i, 2, QTableWidgetItem(f"{dot} {r['health']}"))
-            self.instances_table.setItem(i, 3, QTableWidgetItem(r["stat"]))
-            # Running -> Stop (■); stopped/dead -> Remove (✕) so a down container
-            # can be cleared from the list (podman rm) instead of lingering with
-            # no available action.
-            if r["running"]:
-                btn = QPushButton("■")
-                btn.setToolTip("Stop this server")
-                btn.clicked.connect(
-                    lambda _=False, n=r["name"]: self.instance_stop_requested.emit(n))
-            else:
-                btn = QPushButton("✕")
-                btn.setToolTip("Remove this stopped container from the list")
-                btn.clicked.connect(
-                    lambda _=False, n=r["name"]: self.instance_remove_requested.emit(n))
-            self.instances_table.setCellWidget(i, 4, btn)
-        if selected_name in self._instance_names:
-            self.instances_table.selectRow(self._instance_names.index(selected_name))
+    def set_instance_cards(self, data: dict) -> None:
+        rows = data.get("rows", [])
+        self._selected_name = data.get("selected_name")
+        names = [r["name"] for r in rows]
+        if list(self._cards.keys()) != names:      # membership changed -> rebuild
+            for card in self._cards.values():
+                card.setParent(None)
+                card.deleteLater()
+            self._cards.clear()
+            for name in names:
+                card = StatCard(name)
+                card.selected.connect(self.instance_selected)
+                card.stop_requested.connect(self.instance_stop_requested)
+                self._cards[name] = card
+                self._cards_row.insertWidget(self._cards_row.count() - 1, card)  # before the stretch
+        for r in rows:                              # update in place every tick
+            card = self._cards[r["name"]]
+            card.update_row(r)
+            card.set_selected(r["name"] == self._selected_name)
 
-    def selected_instance_name(self):
-        items = self.instances_table.selectionModel().selectedRows()
-        if not items:
-            return None
-        return self._instance_names[items[0].row()]
+    def card_names(self) -> list[str]:
+        return list(self._cards.keys())
 
-    def _emit_selected_for_row(self, row) -> None:
-        if 0 <= row < len(self._instance_names):
-            self.instance_selected.emit(self._instance_names[row])
+    def card(self, name: str):
+        return self._cards.get(name)
+
+    def selected_card_name(self) -> str | None:
+        return self._selected_name if self._selected_name in self._cards else None
 
     def add_below_log(self, widget) -> None:
         self.layout().addWidget(widget)
 
     def add_status_banner(self, banner) -> None:
-        self.layout().insertWidget(0, banner)   # above the instances table
+        self.layout().insertWidget(0, banner)   # above the cards row

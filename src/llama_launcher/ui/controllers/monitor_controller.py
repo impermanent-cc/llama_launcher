@@ -555,8 +555,8 @@ class MonitorController:
                 and self._active_instance.name not in {i.name for i in self._instances}):
             self._active_instance = None
             self._start_log_follower()
-        self.window.monitor_panel.set_instances(
-            result["rows"], self._monitored_container_name())
+        self.window.monitor_panel.set_instance_cards(
+            {"rows": result["rows"], "selected_name": self._monitored_container_name()})
 
     def _on_instance_selected(self, name: str) -> None:
         inst = next((i for i in self._instances if i.name == name), None)
