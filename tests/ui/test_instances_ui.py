@@ -221,3 +221,60 @@ def test_stop_instance_spawns_stop_argv(win, monkeypatch):
                         lambda argv, on_done=None, on_error=None: spawned.append(argv))
     win._monitor._on_instance_stop("llama-emb")
     assert spawned and spawned[0][:2] == ["podman", "stop"] and spawned[0][-1] == "llama-emb"
+
+
+def test_stop_instance_uses_instance_stop_timeout(win, monkeypatch):
+    """A card ■ Stop resolves the container's own grace period from the built
+    instance, so each instance honors its profile's stop_timeout."""
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    win._monitor._instances = [Instance(
+        name="llama-slow", profile="slow", mode="server", running=True,
+        port=8081, host="127.0.0.1", embeddings=False, reranking=False, stop_timeout=40)]
+    spawned = []
+    monkeypatch.setattr(win._launch, "_spawn_async",
+                        lambda argv, on_done=None, on_error=None: spawned.append(argv))
+    win._monitor._on_instance_stop("llama-slow")
+    assert spawned[0] == ["podman", "stop", "-t", "40", "llama-slow"]
+
+
+def test_stop_instance_uses_instance_binary(win, monkeypatch):
+    """The card ■ Stop controls the container with ITS profile's binary, not
+    whatever binary the currently-loaded form profile happens to use."""
+    win._configure_panel.load_profile(
+        Profile(name="Solo", image="img", runtime=Runtime(binary="podman"), settings={"port": 8080}))
+    win._monitor._instances = [Instance(
+        name="llama-dock", profile="dock", mode="server", running=True,
+        port=8081, host="127.0.0.1", embeddings=False, reranking=False,
+        stop_timeout=10, binary="docker")]
+    spawned = []
+    monkeypatch.setattr(win._launch, "_spawn_async",
+                        lambda argv, on_done=None, on_error=None: spawned.append(argv))
+    win._monitor._on_instance_stop("llama-dock")
+    assert spawned[0][0] == "docker"
+
+
+def test_remove_instance_uses_instance_binary(win, monkeypatch):
+    """The card ■ Remove uses the stopped container's own binary, not the form's."""
+    win._configure_panel.load_profile(
+        Profile(name="Solo", image="img", runtime=Runtime(binary="podman"), settings={"port": 8080}))
+    win._monitor._instances = [Instance(
+        name="llama-dock", profile="dock", mode="server", running=False,
+        port=None, host="127.0.0.1", embeddings=False, reranking=False,
+        stop_timeout=10, binary="docker")]
+    spawned = []
+    monkeypatch.setattr(win._launch, "_spawn_async",
+                        lambda argv, on_done=None, on_error=None: spawned.append(argv))
+    win._monitor._on_instance_remove("llama-dock")
+    assert spawned[0][0] == "docker" and spawned[0][-1] == "llama-dock"
+
+
+def test_stop_unknown_instance_falls_back_to_default_timeout(win, monkeypatch):
+    """If the name isn't in the built instances (transient list gap), stop still
+    works with the 10s default rather than crashing."""
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    win._monitor._instances = []
+    spawned = []
+    monkeypatch.setattr(win._launch, "_spawn_async",
+                        lambda argv, on_done=None, on_error=None: spawned.append(argv))
+    win._monitor._on_instance_stop("llama-ghost")
+    assert spawned[0] == ["podman", "stop", "-t", "10", "llama-ghost"]

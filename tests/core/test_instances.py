@@ -26,6 +26,32 @@ def test_unmatched_container_has_no_port():
     assert inst.port is None and inst.host == "127.0.0.1" and inst.embeddings is False
 
 
+def test_carries_stop_timeout_from_profile():
+    containers = [{"name": "llama-slow", "running": True, "profile": "slow", "mode": "server"}]
+    profiles = [Profile(name="slow", runtime=Runtime(stop_timeout=60), settings={"port": 8080})]
+    (inst,) = build_instances(containers, profiles)
+    assert inst.stop_timeout == 60
+
+
+def test_carries_binary_from_profile():
+    containers = [{"name": "llama-d", "running": True, "profile": "d", "mode": "server"}]
+    profiles = [Profile(name="d", runtime=Runtime(binary="docker"), settings={"port": 8080})]
+    (inst,) = build_instances(containers, profiles, "podman")
+    assert inst.binary == "docker"   # the profile's binary, not the listing default
+
+
+def test_unmatched_container_uses_listing_binary():
+    containers = [{"name": "llama-gone", "running": False, "profile": "gone", "mode": "server"}]
+    (inst,) = build_instances(containers, [], "docker")
+    assert inst.binary == "docker"   # falls back to the binary that listed it
+
+
+def test_unmatched_container_defaults_stop_timeout():
+    containers = [{"name": "llama-gone", "running": False, "profile": "gone", "mode": "server"}]
+    inst, = build_instances(containers, [])
+    assert inst.stop_timeout == 10
+
+
 def test_running_first_then_by_name():
     containers = [
         {"name": "llama-b", "running": False, "profile": "b", "mode": "server"},

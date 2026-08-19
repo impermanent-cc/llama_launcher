@@ -17,13 +17,15 @@ from llama_launcher.core.settings_catalog import (
     CATALOG, member_catalog, router_catalog, for_engine,
     KV_CACHE_TYPES, IK_EXTRA_KV_CACHE_TYPES,
 )
-from llama_launcher.core.spec import Profile, Runtime, RouterMember, member_model_id
+from llama_launcher.core.spec import (
+    DEFAULT_STOP_TIMEOUT, Profile, Runtime, RouterMember, member_model_id,
+)
 from llama_launcher.core.validation import validate, Issue
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import model_info, runtime
 from llama_launcher.store.profiles import list_profiles, resolve_member_pairs
 from llama_launcher.ui.widgets.setting_widgets import make_widget, SuggestionDot
-from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
+from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox, NoWheelSpinBox
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
 from llama_launcher.ui.widgets.collapsible import CollapsibleSection
@@ -117,6 +119,19 @@ class ConfigurePanel(QWidget):
         self.bind_host_combo.addItems(["127.0.0.1", "0.0.0.0"])
         self.bind_host_combo.currentTextChanged.connect(self.refresh_preview)
 
+        # `podman stop -t` grace period for the Stop button. Large MoE models can
+        # need more than podman's 10s default to unload cleanly before SIGKILL.
+        self.stop_timeout_spin = NoWheelSpinBox()
+        self.stop_timeout_spin.setRange(1, 300)
+        self.stop_timeout_spin.setValue(DEFAULT_STOP_TIMEOUT)
+        self.stop_timeout_spin.setSuffix(" s")
+        self.stop_timeout_spin.setToolTip(
+            "Grace period after Stop before the container is force-killed "
+            "(SIGTERM → wait → SIGKILL). Raise it if a large model needs longer "
+            "to unload cleanly.\n\nApplies to this profile's own container — in "
+            "router mode that's the router container; each router member's kill "
+            "delay is the per-row 'Stop timeout (s)' in the Router members table.")
+
         # A table, not a list: model id / load-on-startup / stop-timeout are all
         # per-member settings the spec requires to be editable, and inline
         # editing keeps them reachable without a modal dialog (which would hang
@@ -169,6 +184,7 @@ class ConfigurePanel(QWidget):
 
         left_form.addRow("Mode", self.mode_combo)
         left_form.addRow("Bind address", self.bind_host_combo)
+        left_form.addRow("Stop grace period", self.stop_timeout_spin)
         left_form.addRow("Router members", members_widget)
 
         left_form.addRow("Engine", self.engine_combo)
@@ -633,6 +649,7 @@ class ConfigurePanel(QWidget):
         index = self.mode_combo.findData(p.mode)
         self.mode_combo.setCurrentIndex(index if index >= 0 else 0)
         self.bind_host_combo.setCurrentText(p.runtime.bind_host)
+        self.stop_timeout_spin.setValue(p.runtime.stop_timeout)
         self.window._monitor._router_statuses = {}
         self.window._monitor._spec_prev = None
         self.window._monitor._props = None
@@ -670,7 +687,8 @@ class ConfigurePanel(QWidget):
                                       or "127.0.0.1",
                             detached=self.detached_check.isChecked(),
                             router_key_mode=self.api_key_box._current_scope(),
-                            engine=self.engine_combo.currentData() or "llama.cpp"),
+                            engine=self.engine_combo.currentData() or "llama.cpp",
+                            stop_timeout=self.stop_timeout_spin.value()),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
