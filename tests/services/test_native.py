@@ -98,3 +98,19 @@ def test_remove_native_deletes_registry_and_log(tmp_path):
     native.remove_native("llama-gen", tmp_path)
     assert native.read_entries(tmp_path) == []
     assert not native.native_log_path(tmp_path, "Gen").exists()
+
+
+def test_logs_argv():
+    assert native.logs_argv("/x/gen.log") == ["tail", "-n", "200", "-f", "/x/gen.log"]
+
+
+def test_proc_stats_none_for_missing_pid():
+    assert native.proc_stats(999999, interval=0.0) is None
+
+
+def test_proc_stats_reports_for_self():
+    import os
+    st = native.proc_stats(os.getpid(), interval=0.0)
+    assert st is not None
+    assert st["mem_usage"].endswith(" MiB")
+    assert st["cpu_perc"].endswith("%")

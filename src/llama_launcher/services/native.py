@@ -6,6 +6,7 @@ import json
 import os
 import signal
 import subprocess
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -125,3 +126,47 @@ def remove_native(name: str, base_dir) -> None:
             path.unlink(missing_ok=True)
         except OSError:
             pass
+
+
+_CLK_TCK = os.sysconf("SC_CLK_TCK")
+
+
+def _read_jiffies(pid: int) -> int | None:
+    try:
+        with open(f"/proc/{pid}/stat", "r") as fh:
+            fields = fh.read().split()
+        # utime, stime are fields 14, 15 (1-indexed); index 13, 14 here.
+        return int(fields[13]) + int(fields[14])
+    except (FileNotFoundError, ProcessLookupError, IndexError, ValueError):
+        return None
+
+
+def _read_rss_bytes(pid: int) -> int | None:
+    try:
+        with open(f"/proc/{pid}/status", "r") as fh:
+            for line in fh:
+                if line.startswith("VmRSS:"):
+                    return int(line.split()[1]) * 1024  # kB -> bytes
+    except (FileNotFoundError, ProcessLookupError, ValueError):
+        return None
+    return None
+
+
+def proc_stats(pid: int, interval: float = 0.1) -> dict | None:
+    start = _read_jiffies(pid)
+    if start is None:
+        return None
+    if interval > 0:
+        time.sleep(interval)
+    end = _read_jiffies(pid)
+    rss = _read_rss_bytes(pid)
+    if end is None or rss is None:
+        return None
+    cpu = 0.0
+    if interval > 0:
+        cpu = max(0.0, (end - start) / (interval * _CLK_TCK) * 100.0)
+    return {"cpu_perc": f"{cpu:.0f}%", "mem_usage": f"{rss / (1024 * 1024):.0f} MiB"}
+
+
+def logs_argv(logpath: str) -> list[str]:
+    return ["tail", "-n", "200", "-f", logpath]
