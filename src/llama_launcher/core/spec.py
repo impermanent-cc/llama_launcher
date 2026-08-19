@@ -1,6 +1,11 @@
 import re
 from dataclasses import dataclass, field
 
+# Seconds a container gets to shut down (SIGTERM) before it is force-killed
+# (SIGKILL) — podman's own `stop -t` default. Single source for every layer's
+# stop-grace default so they can't drift apart.
+DEFAULT_STOP_TIMEOUT = 10
+
 
 @dataclass
 class Mount:
@@ -32,7 +37,7 @@ class RouterMember:
     # Kill-delay after an unload is requested: seconds llama.cpp waits before
     # forcing this model's process down. NOT an idle timer — idle unloading is
     # the server-wide `--sleep-idle-seconds` setting, a separate concept.
-    stop_timeout: int = 10
+    stop_timeout: int = DEFAULT_STOP_TIMEOUT
 
 
 @dataclass
@@ -45,6 +50,7 @@ class Runtime:
     detached: bool = False        # GUI server launch: no terminal, Monitor-driven
     router_key_mode: str = "global"  # "global" (shared key) | "own" (per-profile key)
     engine: str = "llama.cpp"     # "llama.cpp" | "ik_llama.cpp"
+    stop_timeout: int = DEFAULT_STOP_TIMEOUT  # `podman stop -t` grace before SIGKILL
 
 
 @dataclass

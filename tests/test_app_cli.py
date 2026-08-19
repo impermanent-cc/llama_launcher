@@ -179,15 +179,30 @@ def test_launch_warnings_go_to_stderr(monkeypatch, capsys):
 
 def test_stop_success_exit_0(monkeypatch, capsys):
     _ready_router(monkeypatch)
-    monkeypatch.setattr(app.headless, "stop_router", lambda p, binary: True)
+    monkeypatch.setattr(app.headless, "stop_router", lambda p, binary, timeout=10: True)
     assert app.main(["--stop", "--profile", "r"]) == 0
     assert "stopped" in capsys.readouterr().out
 
 
 def test_stop_failure_exit_1(monkeypatch):
     _ready_router(monkeypatch)
-    monkeypatch.setattr(app.headless, "stop_router", lambda p, binary: False)
+    monkeypatch.setattr(app.headless, "stop_router", lambda p, binary, timeout=10: False)
     assert app.main(["--stop", "--profile", "r"]) == 1
+
+
+def test_stop_honors_profile_stop_timeout(monkeypatch):
+    """The CLI --stop threads the profile's configurable grace period into the
+    container teardown, matching the GUI Stop button."""
+    slow = Profile(name="r", image="img", mode="router",
+                   runtime=Runtime(stop_timeout=50))
+    _profiles(monkeypatch, [slow], last="r")
+    monkeypatch.setattr(app, "binary_available", lambda b: True)
+    monkeypatch.setattr(app, "validate", lambda p, **kw: [])
+    seen = {}
+    monkeypatch.setattr(app.headless, "stop_router",
+                        lambda p, binary, timeout=10: seen.setdefault("timeout", timeout) or True)
+    app.main(["--stop", "--profile", "r"])
+    assert seen["timeout"] == 50
 
 
 def test_health_ready_exit_0(monkeypatch, capsys):
@@ -298,7 +313,7 @@ def test_json_launch_wait_ready(monkeypatch, capsys):
 
 def test_json_stop_success(monkeypatch, capsys):
     _ready_router(monkeypatch)
-    monkeypatch.setattr(app.headless, "stop_router", lambda p, binary: True)
+    monkeypatch.setattr(app.headless, "stop_router", lambda p, binary, timeout=10: True)
     assert app.main(["--stop", "--profile", "r", "--json"]) == 0
     cap = capsys.readouterr()
     obj = json.loads(cap.out)
@@ -308,7 +323,7 @@ def test_json_stop_success(monkeypatch, capsys):
 
 def test_json_stop_failure(monkeypatch, capsys):
     _ready_router(monkeypatch)
-    monkeypatch.setattr(app.headless, "stop_router", lambda p, binary: False)
+    monkeypatch.setattr(app.headless, "stop_router", lambda p, binary, timeout=10: False)
     assert app.main(["--stop", "--profile", "r", "--json"]) == 1
     obj = json.loads(capsys.readouterr().out)
     assert obj["ok"] is False and obj["status"] is None

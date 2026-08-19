@@ -193,14 +193,16 @@ class LaunchController:
         self.window._monitor._stop_log_follower()
         p = self.window._configure_panel.current_profile()
         self.window.status_label.setText("● stopping…")
-        argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary)
+        argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary,
+                                 timeout=p.runtime.stop_timeout)
         self._stop_proc = self._spawn_async(argv, on_done=self.window._monitor.update_status)
 
     def on_restart(self):
         self.window._monitor._stop_log_follower()
         p = self.window._configure_panel.current_profile()
         self.window.status_label.setText("● restarting…")
-        argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary)
+        argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary,
+                                 timeout=p.runtime.stop_timeout)
         # Launch only after the stop completes, so the new container's --name/port
         # don't collide with the one being torn down.
         self._stop_proc = self._spawn_async(argv, on_done=self.on_launch)

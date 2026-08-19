@@ -122,7 +122,7 @@ def _do_stop(p, base_dir, as_json=False):
     name = headless._container_name(p)
     host = p.runtime.bind_host
     port = p.settings.get("port", 8080)
-    if headless.stop_router(p, p.runtime.binary):
+    if headless.stop_router(p, p.runtime.binary, timeout=p.runtime.stop_timeout):
         return _emit(as_json, "stop", 0, status="stopped", name=name,
                      host=host, port=port,
                      text_out=f"'{p.name}' stopped")

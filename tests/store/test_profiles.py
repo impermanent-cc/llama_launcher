@@ -30,6 +30,19 @@ def test_save_and_load(tmp_path: Path):
     assert load_profile(path) == p
 
 
+def test_stop_timeout_round_trips():
+    p = Profile(name="Slow", runtime=Runtime(stop_timeout=45))
+    assert profile_from_dict(profile_to_dict(p)).runtime.stop_timeout == 45
+
+
+def test_stop_timeout_defaults_for_legacy_profile():
+    # A profile saved before stop_timeout existed has no such key; it must load
+    # with the 10s default rather than crashing.
+    legacy = profile_to_dict(Profile(name="Old"))
+    legacy["runtime"].pop("stop_timeout", None)
+    assert profile_from_dict(legacy).runtime.stop_timeout == 10
+
+
 def test_list_and_delete(tmp_path: Path):
     save_profile(_profile(), tmp_path)
     save_profile(Profile(name="Second"), tmp_path)

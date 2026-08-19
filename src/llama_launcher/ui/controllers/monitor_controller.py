@@ -2,7 +2,7 @@ import datetime
 
 from PySide6.QtCore import QRunnable, QThread, QThreadPool, QTimer, Signal
 
-from llama_launcher.core.spec import Profile, Runtime
+from llama_launcher.core.spec import DEFAULT_STOP_TIMEOUT, Profile, Runtime
 from llama_launcher.core.instances import build_instances
 from llama_launcher.core.mtp_stats import spec_counters, spec_delta
 from llama_launcher.core.validation import dial_host
@@ -567,7 +567,10 @@ class MonitorController:
 
     def _on_instance_stop(self, name: str) -> None:
         binary = self.window._configure_panel.current_profile().runtime.binary
-        self.window._launch._spawn_async(runtime.stop_argv(name, binary), on_done=self.update_status)
+        inst = next((i for i in self._instances if i.name == name), None)
+        timeout = inst.stop_timeout if inst is not None else DEFAULT_STOP_TIMEOUT
+        self.window._launch._spawn_async(runtime.stop_argv(name, binary, timeout=timeout),
+                                         on_done=self.update_status)
         if self._active_instance is not None and self._active_instance.name == name:
             self._active_instance = None
 

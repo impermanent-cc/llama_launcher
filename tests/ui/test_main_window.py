@@ -93,6 +93,17 @@ def test_advanced_podman_settings_roundtrip(qtbot):
     assert "--security-opt=label=disable" in preview
 
 
+def test_stop_timeout_roundtrips_through_profile(qtbot):
+    """The Stop grace-period spinbox round-trips load_profile -> current_profile,
+    so an edited grace period is actually saved onto the profile."""
+    w = MainWindow()
+    qtbot.addWidget(w)
+    p = Profile(name="slow", runtime=Runtime(stop_timeout=45))
+    w._configure_panel.load_profile(p)
+    assert w._configure_panel.stop_timeout_spin.value() == 45
+    assert w._configure_panel.current_profile().runtime.stop_timeout == 45
+
+
 def test_engine_roundtrips_through_profile(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)

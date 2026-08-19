@@ -45,6 +45,35 @@ def test_on_stop_clears_log_follower_and_spawns_async_stop(qtbot, monkeypatch):
     assert spawned["argv"] == ["podman", "stop", "-t", "10", "llama-m"]
 
 
+def test_on_stop_uses_profile_stop_timeout(qtbot, monkeypatch):
+    """The Stop button's `podman stop -t` grace period comes from the profile's
+    configurable stop_timeout, not a hardcoded 10s."""
+    spawned = {}
+    monkeypatch.setattr(LaunchController, "_spawn_async",
+                        lambda self, argv, on_done=None: spawned.setdefault("argv", argv))
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    p = _profile()
+    p.runtime.stop_timeout = 25
+    w._configure_panel.load_profile(p)
+    w._launch.on_stop()
+    assert spawned["argv"] == ["podman", "stop", "-t", "25", "llama-m"]
+
+
+def test_on_restart_uses_profile_stop_timeout(qtbot, monkeypatch):
+    """Restart tears down with the same configurable grace period as Stop."""
+    spawned = {}
+    monkeypatch.setattr(LaunchController, "_spawn_async",
+                        lambda self, argv, on_done=None: spawned.setdefault("argv", argv))
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    p = _profile()
+    p.runtime.stop_timeout = 30
+    w._configure_panel.load_profile(p)
+    w._launch.on_restart()
+    assert spawned["argv"] == ["podman", "stop", "-t", "30", "llama-m"]
+
+
 def test_collect_monitor_data(qtbot, monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_metrics",
                         lambda port, timeout=1.0, **kw: {"llamacpp:predicted_tokens_seconds": 50.0,
