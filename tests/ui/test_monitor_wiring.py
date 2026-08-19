@@ -1,6 +1,7 @@
 import llama_launcher.ui.main_window as mw
 from llama_launcher.core.spec import Profile, Mount, Runtime
 from llama_launcher.core.props import PropsInfo
+from llama_launcher.ui.controllers.launch_controller import LaunchController
 from llama_launcher.ui.controllers.monitor_controller import MonitorController
 from llama_launcher.ui.panels.configure_panel import ConfigurePanel
 
@@ -15,14 +16,17 @@ def test_on_stop_clears_log_follower_and_spawns_async_stop(qtbot, monkeypatch):
     """on_stop() kills the log follower immediately and spawns `podman stop`
     asynchronously (never blocking the UI thread) with the right argv."""
     spawned = {}
-    # NOTE: kept on mw.MainWindow (not repointed to LaunchController) --
-    # tests/ui/conftest.py's autouse _hermetic_ui_boundaries fixture ALSO
-    # class-patches mw.MainWindow._spawn_async (as a no-op) before this test
-    # body runs. A same-symbol override is required to win over it; patching
-    # LaunchController._spawn_async instead leaves the hermetic no-op in
-    # place on MainWindow, so self.window._spawn_async(...) never reaches
-    # LaunchController at all. Verified by reproduction -- see task-4 report.
-    monkeypatch.setattr(mw.MainWindow, "_spawn_async",
+    # NOTE: patched on LaunchController (not MainWindow). Launch code now
+    # calls self._spawn_async directly on the LaunchController instance (the
+    # facade unwind repointed launch_controller.py's own calls off
+    # self.window._spawn_async), so LaunchController is the class that must
+    # be patched for this test to observe the call. tests/ui/conftest.py's
+    # autouse _hermetic_ui_boundaries fixture ALSO class-patches
+    # LaunchController._spawn_async (as a no-op); this same-symbol
+    # class-patch still wins the override race because both use monkeypatch
+    # and this test body's setattr runs after fixture setup (last write
+    # wins, both undone at teardown).
+    monkeypatch.setattr(LaunchController, "_spawn_async",
                         lambda self, argv, on_done=None: spawned.setdefault("argv", argv))
     w = mw.MainWindow()
     qtbot.addWidget(w)

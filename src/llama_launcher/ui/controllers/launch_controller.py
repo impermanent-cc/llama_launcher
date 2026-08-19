@@ -33,12 +33,13 @@ class LaunchController:
 
     Widgets stay on the window (built by ConfigurePanel); this controller only
     owns behavior plus the plain state below (_fetch_worker/_update_worker/
-    _stop_proc/_update_timer). Calls into OTHER moved methods -- and into
-    widgets/methods that live on the window -- go through self.window.<x>,
-    even when both methods live on this same controller: the test suite
-    monkeypatches many of these at the MainWindow CLASS level (e.g.
-    `monkeypatch.setattr(mw.MainWindow, "_spawn_async", ...)`), and a direct
-    self.<method>() call here would bypass that patch.
+    _stop_proc/_update_timer). Members this controller itself owns (e.g.
+    `_spawn_async`, `_validate_or_warn`, `on_launch`) are called directly as
+    `self.<method>(...)`; widgets and methods owned by other panels/controllers
+    go through `self.window._<owner>.<x>` (e.g. `self.window._configure_panel.
+    image_edit`, `self.window._monitor.update_status`). Test-suite patches
+    that target this controller's own methods (e.g. `_spawn_async`) now patch
+    `LaunchController` directly, not `MainWindow`.
     """
 
     def __init__(self, window):
@@ -56,7 +57,7 @@ class LaunchController:
         if load_config(base_dir()).get("update_check", True):
             self._update_timer = QTimer(self.window)
             self._update_timer.setSingleShot(True)
-            self._update_timer.timeout.connect(self.window.run_update_check)
+            self._update_timer.timeout.connect(self.run_update_check)
             self._update_timer.start(3000)
 
     # -- teardown -------------------------------------------------------------
@@ -84,9 +85,9 @@ class LaunchController:
 
     # -- launch / stop / restart ----------------------------------------------
     def on_launch(self):
-        if not self.window._validate_or_warn():
+        if not self._validate_or_warn():
             return
-        p = self.window.current_profile()
+        p = self.window._configure_panel.current_profile()
 
         if p.mode == "router":
             router_host_dir, warnings = self.window.prepare_router_files()
@@ -113,21 +114,21 @@ class LaunchController:
             self.window.benchmark_panel.reset()
             self.window.benchmark_panel.set_benchmark_history(
                 benchmark_store.load(default_base_dir(), p.name))
-            self.window._spec_prev = None
-            self.window._props = None
-            self.window._props_model = None
-            self.window._spawn_async(
+            self.window._monitor._spec_prev = None
+            self.window._monitor._props = None
+            self.window._monitor._props_model = None
+            self._spawn_async(
                 runtime.rm_argv(self.window._container_name(), p.runtime.binary),
-                on_done=lambda: self.window._spawn_async(
-                    argv, on_done=self.window.update_status,
+                on_done=lambda: self._spawn_async(
+                    argv, on_done=self.window._monitor.update_status,
                     # Detached means no terminal, so a bad image ref or a CDI
                     # failure would otherwise produce nothing but a status label
                     # stuck on "stopped".
-                    on_error=self.window._report_launch_error))
+                    on_error=self._report_launch_error))
             self.window.refresh_router_panel_header()
             return
 
-        warn = self.window.vram_check()
+        warn = self.vram_check()
         if warn:
             QMessageBox.warning(self.window, "VRAM check", warn)
         self.window.monitor_panel.reset()
@@ -147,11 +148,11 @@ class LaunchController:
             # surfaces bad image / CDI / flag failures the terminal used to
             # show -- show_dialog is fixed here, at launch time, so a later
             # profile/mode switch before the error fires can't change it.
-            self.window._spawn_async(
+            self._spawn_async(
                 runtime.rm_argv(self.window._container_name(), p.runtime.binary),
-                on_done=lambda: self.window._spawn_async(
-                    argv, on_done=self.window.update_status,
-                    on_error=lambda e=None: self.window._report_launch_error(
+                on_done=lambda: self._spawn_async(
+                    argv, on_done=self.window._monitor.update_status,
+                    on_error=lambda e=None: self._report_launch_error(
                         e, show_dialog=True)))
         else:
             argv = build_command(p)
@@ -189,33 +190,33 @@ class LaunchController:
         # Stop the log follower immediately; run `podman stop` asynchronously so a
         # slow stop (podman waits up to its grace period for SIGTERM) never freezes
         # the GUI — which previously made Stop look like it did nothing.
-        self.window._stop_log_follower()
-        p = self.window.current_profile()
+        self.window._monitor._stop_log_follower()
+        p = self.window._configure_panel.current_profile()
         self.window.status_label.setText("● stopping…")
         argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary)
-        self._stop_proc = self.window._spawn_async(argv, on_done=self.window.update_status)
+        self._stop_proc = self._spawn_async(argv, on_done=self.window._monitor.update_status)
 
     def on_restart(self):
-        self.window._stop_log_follower()
-        p = self.window.current_profile()
+        self.window._monitor._stop_log_follower()
+        p = self.window._configure_panel.current_profile()
         self.window.status_label.setText("● restarting…")
         argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary)
         # Launch only after the stop completes, so the new container's --name/port
         # don't collide with the one being torn down.
-        self._stop_proc = self.window._spawn_async(argv, on_done=self.window.on_launch)
+        self._stop_proc = self._spawn_async(argv, on_done=self.on_launch)
 
     def _on_enable_metrics(self):
-        self.window._widgets["metrics"].set_value(True)
-        self.window.on_restart()
+        self.window._configure_panel._widgets["metrics"].set_value(True)
+        self.on_restart()
 
     # -- validation / vram / error reporting ----------------------------------
     def _validate_or_warn(self) -> bool:
-        p = self.window.current_profile()
+        p = self.window._configure_panel.current_profile()
         # The key must exist before the exposure rule is evaluated: a router
         # always gets one at launch, but this runs before prepare_router_files.
         if p.mode == "router":
             api_key_store.prepare_launch_key(self.window.router_base_dir(), p)
-        issues = self.window.router_issues()
+        issues = self.window._configure_panel.router_issues()
         errors = [i for i in issues if i.level == "error"]
         if errors:
             QMessageBox.critical(self.window, "Cannot launch",
@@ -227,8 +228,8 @@ class LaunchController:
         return True
 
     def vram_check(self) -> str | None:
-        p = self.window.current_profile()
-        meta, weights, _caps = model_info.inspect_model(p.model, self.window.mounts_panel.mounts()) if p.model else (None, None, None)
+        p = self.window._configure_panel.current_profile()
+        meta, weights, _caps = model_info.inspect_model(p.model, self.window._configure_panel.mounts_panel.mounts()) if p.model else (None, None, None)
         gpus = gpu.query_gpus()
         if meta is None or not gpus or not meta.n_layers or not meta.n_embd:
             return None
@@ -285,12 +286,12 @@ class LaunchController:
 
     def adopt_running_containers(self) -> list:
         """Containers this launcher owns, so a detached router survives a GUI restart."""
-        p = self.window.current_profile()
+        p = self.window._configure_panel.current_profile()
         return runtime.list_launcher_containers(p.runtime.binary)
 
     # -- image fetch / detect / update-check -----------------------------------
     def on_fetch_latest(self):
-        repo, tag = split_image(self.window.image_edit.text())
+        repo, tag = split_image(self.window._configure_panel.image_edit.text())
         if not repo:
             QMessageBox.information(
                 self.window, "No image",
@@ -300,20 +301,20 @@ class LaunchController:
         prefix = variant_prefix(tag) if tag else "server-cuda12"
         self._fetch_repo = repo
         self._fetch_got_result = False
-        self.window.fetch_btn.setEnabled(False)
-        self.window.fetch_btn.setText("Fetching…")
-        self.window.update_badge.setEnabled(False)
+        self.window._configure_panel.fetch_btn.setEnabled(False)
+        self.window._configure_panel.fetch_btn.setText("Fetching…")
+        self.window._configure_panel.update_badge.setEnabled(False)
         worker = _UpdateWorker(repo, prefix, parent=self.window)
-        worker.found.connect(self.window._on_fetch_found)
-        worker.failed.connect(self.window._on_fetch_failed)
-        worker.finished.connect(self.window._on_fetch_finished)   # QThread built-in
+        worker.found.connect(self._on_fetch_found)
+        worker.failed.connect(self._on_fetch_failed)
+        worker.finished.connect(self._on_fetch_finished)   # QThread built-in
         self._fetch_worker = worker
         worker.start()
 
     def _on_fetch_found(self, tag: str) -> None:
         self._fetch_got_result = True
         image = f"{self._fetch_repo}:{tag}"
-        self.window.image_edit.setText(image)
+        self.window._configure_panel.image_edit.setText(image)
         QMessageBox.information(
             self.window, "Latest build",
             f"Image set to {image}.\n\nThis only updates the tag — the build is NOT "
@@ -325,16 +326,16 @@ class LaunchController:
             self.window, "Fetch failed", f"Couldn't fetch the latest build:\n{msg}")
 
     def _on_fetch_finished(self) -> None:
-        self.window.fetch_btn.setEnabled(True)
-        self.window.fetch_btn.setText("Fetch latest")
-        self.window.update_badge.setEnabled(True)
+        self.window._configure_panel.fetch_btn.setEnabled(True)
+        self.window._configure_panel.fetch_btn.setText("Fetch latest")
+        self.window._configure_panel.update_badge.setEnabled(True)
         if not self._fetch_got_result:
             QMessageBox.information(
                 self.window, "Latest build", "No newer build found for this image.")
 
     def detect_image(self):
-        binary = self.window.binary_combo.currentText()
-        engine = self.window.engine_combo.currentData() or "llama.cpp"
+        binary = self.window._configure_panel.binary_combo.currentText()
+        engine = self.window._configure_panel.engine_combo.currentData() or "llama.cpp"
         images = runtime.list_local_images(binary, engine)
         if not images:
             example = ("ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
@@ -346,24 +347,24 @@ class LaunchController:
                 f"Pull one (e.g. {binary} pull {example}) or type the image yourself.")
             return
         if len(images) == 1:
-            self.window.image_edit.setText(images[0])
+            self.window._configure_panel.image_edit.setText(images[0])
             return
         choice, ok = QInputDialog.getItem(
             self.window, "Detect image", f"Local {engine} images:", images, 0, False)
         if ok and choice:
-            self.window.image_edit.setText(choice)
+            self.window._configure_panel.image_edit.setText(choice)
 
     def _autofill_image_if_empty(self):
-        if self.window.image_edit.text().strip():
+        if self.window._configure_panel.image_edit.text().strip():
             return
         images = runtime.list_local_images(
-            self.window.binary_combo.currentText(),
-            self.window.engine_combo.currentData() or "llama.cpp")
+            self.window._configure_panel.binary_combo.currentText(),
+            self.window._configure_panel.engine_combo.currentData() or "llama.cpp")
         if len(images) == 1:
-            self.window.image_edit.setText(images[0])
+            self.window._configure_panel.image_edit.setText(images[0])
 
     def check_for_update(self, tags: list[str]) -> str | None:
-        repo, tag = split_image(self.window.image_edit.text())
+        repo, tag = split_image(self.window._configure_panel.image_edit.text())
         if not tag:
             return None
         prefix = variant_prefix(tag)
@@ -373,7 +374,7 @@ class LaunchController:
         return None
 
     def run_update_check(self):
-        repo, tag = split_image(self.window.image_edit.text())
+        repo, tag = split_image(self.window._configure_panel.image_edit.text())
         if not repo or not tag:
             return
         prefix = variant_prefix(tag)
@@ -383,8 +384,8 @@ class LaunchController:
             if latest != current_tag:
                 m = registry._BUILD_RE.match(latest)
                 build_id = f"b{m.group('num')}" if m else latest
-                self.window.update_badge.setText(f"newer build {build_id} available")
-                self.window.update_badge.setVisible(True)
+                self.window._configure_panel.update_badge.setText(f"newer build {build_id} available")
+                self.window._configure_panel.update_badge.setVisible(True)
 
         worker = _UpdateWorker(repo, prefix, parent=self.window)
         worker.found.connect(_on_found)

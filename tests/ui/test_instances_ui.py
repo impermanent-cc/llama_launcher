@@ -99,7 +99,7 @@ def test_selecting_own_container_clears_active(win, monkeypatch):
 def test_stop_instance_spawns_stop_argv(win, monkeypatch):
     win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
     spawned = []
-    monkeypatch.setattr(win, "_spawn_async",
+    monkeypatch.setattr(win._launch, "_spawn_async",
                         lambda argv, on_done=None, on_error=None: spawned.append(argv))
     win._monitor._on_instance_stop("llama-emb")
     assert spawned and spawned[0][:2] == ["podman", "stop"] and spawned[0][-1] == "llama-emb"

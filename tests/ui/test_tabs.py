@@ -9,7 +9,7 @@ def test_window_has_three_tabs(qtbot):
     assert not hasattr(w, "router_panel")
     # preview + launch remain reachable (shared, below tabs)
     assert w._configure_panel.preview_text().startswith("podman run --rm")
-    assert hasattr(w, "launch_btn")
+    assert hasattr(w._configure_panel, "launch_btn")
 
 
 def test_api_key_and_harness_on_configure(qtbot):

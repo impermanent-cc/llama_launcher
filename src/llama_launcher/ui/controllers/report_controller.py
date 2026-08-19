@@ -18,12 +18,13 @@ class ReportController:
     """Owns report/export/web-ui behavior. Owns no workers -- no drain().
 
     Widgets stay on the window (built by MainWindow -- `monitor_panel`,
-    `status_label`, etc.); this controller only owns behavior. Calls into
-    OTHER moved methods -- and into widgets/methods that live on the window --
-    go through self.window.<x>, even when both methods live on this same
-    controller: the test suite monkeypatches many of these at the MainWindow
-    CLASS level, and a direct self.<method>() call here would bypass that
-    patch.
+    `status_label`, etc.); this controller only owns behavior. Members this
+    controller itself owns (e.g. `gather_report_data`, `_metrics_report_text`,
+    `_save_report`, `on_generate_report`, `_on_export_sh`, `open_web_ui`,
+    `export_sh`) are called directly as `self.<method>(...)`; widgets and
+    methods owned by other panels/controllers go through
+    `self.window._<owner>.<x>` (e.g. `self.window._configure_panel.
+    current_profile`, `self.window._monitor._poll_api_key`).
 
     `base_dir` is looked up via a deferred
     `from llama_launcher.ui.main_window import base_dir` inside the methods
@@ -45,10 +46,10 @@ class ReportController:
         path, _ = QFileDialog.getSaveFileName(self.window, "Export shell script", "run.sh",
                                               "Shell scripts (*.sh);;All files (*)")
         if path:
-            self.window.export_sh(path)
+            self.export_sh(path)
 
     def open_web_ui(self):
-        p = self.window.current_profile()
+        p = self.window._configure_panel.current_profile()
         port = p.settings.get("port", 8080)
         try:
             subprocess.Popen(["xdg-open", f"http://{dial_host(p.runtime.bind_host)}:{port}"],
@@ -57,19 +58,19 @@ class ReportController:
             QMessageBox.warning(self.window, "Open Web UI", "Could not open browser (xdg-open not found).")
 
     def export_sh(self, path: str):
-        cmd = " ".join(self.window.build_current_command())
+        cmd = " ".join(self.window._configure_panel.build_current_command())
         Path(path).write_text(f"#!/usr/bin/env bash\n{cmd}\n")
         os.chmod(path, 0o755)
 
     def gather_report_data(self) -> dict:
         import platform, json as _json
-        p = self.window.current_profile()
-        cmd = " ".join(self.window.build_current_command(p))
+        p = self.window._configure_panel.current_profile()
+        cmd = " ".join(self.window._configure_panel.build_current_command(p))
         # Pass the router context, or the report claims a healthy router has no
         # members and is exposed without a key -- in the one artifact users
         # paste when asking for help.
         issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
-                          members=self.window.member_pairs(),
+                          members=self.window._configure_panel.member_pairs(),
                           api_key_present=bool(
                               api_key_store.resolve_api_key(self.window.router_base_dir(), p))
                           if p.mode == "router" else False)
@@ -87,7 +88,7 @@ class ReportController:
             "validation": [f"[{i.level}] {i.message}" for i in issues],
             "status_history": [self.window.status_label.text()],
             "runtime": runtime_txt,
-            "metrics": self.window._metrics_report_text(p),
+            "metrics": self._metrics_report_text(p),
             "image": p.image,
             "logs": report_mod.redact_secrets(self.window.monitor_panel.log_view.toPlainText()[-4000:]),
         }
@@ -108,11 +109,11 @@ class ReportController:
         # router host. Without these the report's fetch 401'd (or returned nothing)
         # and always printed the "no metrics returned" note for routers.
         host = dial_host(p.runtime.bind_host)
-        key = self.window._poll_api_key(p)
+        key = self.window._monitor._poll_api_key(p)
         model_scope = None
         if p.mode == "router":
-            host = self.window._router_host(p)
-            model_scope = self.window._router_pollable_model()
+            host = self.window._monitor._router_host(p)
+            model_scope = self.window._monitor._router_pollable_model()
         m = metrics.fetch_metrics(port, model=model_scope, api_key=key, host=host)
         slots = metrics.fetch_slots(port, model=model_scope, api_key=key, host=host)
         if not m and not slots:
@@ -156,9 +157,9 @@ class ReportController:
         sections = dlg.selected_sections()
         cfg["report_sections"] = sections
         save_config(cfg, base_dir())
-        data = self.window.gather_report_data()
+        data = self.gather_report_data()
         md = report_mod.build_report(data, sections)
         from PySide6.QtWidgets import QApplication
         QApplication.clipboard().setText(md)
-        saved = self.window._save_report(md, data.get("generated_at"))
+        saved = self._save_report(md, data.get("generated_at"))
         QMessageBox.information(self.window, "Report saved", f"Report saved to:\n{saved}")

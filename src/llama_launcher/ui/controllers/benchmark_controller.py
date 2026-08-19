@@ -57,12 +57,13 @@ class BenchmarkController:
 
     Widgets stay on the window (built by MainWindow -- `benchmark_panel`);
     this controller only owns behavior plus the plain state below
-    (_benchmark_thread/_benchmark_worker/_benchmark_profile_name). Calls into
-    OTHER moved methods -- and into widgets/methods that live on the window --
-    go through self.window.<x>, even when both methods live on this same
-    controller: the test suite monkeypatches many of these at the MainWindow
-    CLASS level (e.g. `monkeypatch.setattr(mw.MainWindow, "_prepare_benchmark",
-    ...)`), and a direct self.<method>() call here would bypass that patch.
+    (_benchmark_thread/_benchmark_worker/_benchmark_profile_name). Members
+    this controller itself owns (e.g. `_prepare_benchmark`,
+    `_resolve_benchmark_member`, `_on_benchmark_finished`) are called directly
+    as `self.<method>(...)`; widgets and methods owned by other
+    panels/controllers go through `self.window._<owner>.<x>` (e.g.
+    `self.window._configure_panel.current_profile()`,
+    `self.window._monitor._poll_api_key`).
     """
 
     def __init__(self, window):
@@ -82,7 +83,7 @@ class BenchmarkController:
         """
         if p.mode != "router" or model_scope is None:
             return None
-        for member, member_profile in self.window.member_pairs():
+        for member, member_profile in self.window._configure_panel.member_pairs():
             if member_model_id(member) == model_scope:
                 return member_profile
         return None
@@ -98,14 +99,14 @@ class BenchmarkController:
         """
         port = p.settings.get("port", 8080)
         host, key, model_scope, poll = (dial_host(p.runtime.bind_host),
-                                        self.window._poll_api_key(p), None, True)
+                                        self.window._monitor._poll_api_key(p), None, True)
         if p.mode == "router":
-            host = self.window._router_host(p)
-            model_scope = self.window._router_pollable_model()
+            host = self.window._monitor._router_host(p)
+            model_scope = self.window._monitor._router_pollable_model()
             poll = model_scope is not None
         if not poll:
             return None
-        member = self.window._resolve_benchmark_member(p, model_scope)
+        member = self._resolve_benchmark_member(p, model_scope)
         snapshot = benchmark.build_snapshot(p, member=member)
         client = benchmark.requests_client(host, port, key, model_scope)
         return client, snapshot
@@ -122,8 +123,8 @@ class BenchmarkController:
         """
         if run_benchmark is None:
             run_benchmark = benchmark.run_benchmark
-        p = self.window.current_profile()
-        prepared = self.window._prepare_benchmark(p)
+        p = self.window._configure_panel.current_profile()
+        prepared = self._prepare_benchmark(p)
         if prepared is None:
             self.window.benchmark_panel.set_benchmark_progress("No model loaded to benchmark.")
             return
@@ -135,9 +136,9 @@ class BenchmarkController:
             run = run_benchmark(client, cfg["sizes"], cfg["n_predict"], cfg["warmup"],
                                 cfg["repeats"], snapshot, timestamp)
         except benchmark.BenchmarkError as e:
-            self.window._on_benchmark_failed(str(e))
+            self._on_benchmark_failed(str(e))
             return
-        self.window._on_benchmark_finished(run)
+        self._on_benchmark_finished(run)
 
     def _on_benchmark_run(self, cfg: dict) -> None:
         """Production path: build the endpoint/client on the UI thread, then run
@@ -145,8 +146,8 @@ class BenchmarkController:
         the GUI."""
         if self._benchmark_thread is not None:
             return          # a run is already active; the panel showed Cancel
-        p = self.window.current_profile()
-        prepared = self.window._prepare_benchmark(p)
+        p = self.window._configure_panel.current_profile()
+        prepared = self._prepare_benchmark(p)
         if prepared is None:
             self.window.benchmark_panel.set_benchmark_progress("No model loaded to benchmark.")
             return
@@ -161,11 +162,11 @@ class BenchmarkController:
         thread.started.connect(worker.run)
         # Queued across threads by Qt automatically -- worker lives on `thread`,
         # these slots run on the UI thread where GUI/store access is safe.
-        worker.finished.connect(self.window._on_benchmark_finished)
-        worker.failed.connect(self.window._on_benchmark_failed)
+        worker.finished.connect(self._on_benchmark_finished)
+        worker.failed.connect(self._on_benchmark_failed)
         worker.finished.connect(thread.quit)
         worker.failed.connect(thread.quit)
-        thread.finished.connect(self.window._on_benchmark_thread_done)
+        thread.finished.connect(self._on_benchmark_thread_done)
         self._benchmark_thread = thread
         self._benchmark_worker = worker
         self.window.benchmark_panel.set_benchmark_running(True)
@@ -187,11 +188,11 @@ class BenchmarkController:
 
     def _on_benchmark_clear(self) -> None:
         """Wipe the saved benchmark history for the current profile and the view."""
-        benchmark_store.clear(default_base_dir(), self.window.current_profile().name)
+        benchmark_store.clear(default_base_dir(), self.window._configure_panel.current_profile().name)
         self.window.benchmark_panel.reset()
 
     def _on_benchmark_finished(self, run) -> None:
-        name = self._benchmark_profile_name or self.window.current_profile().name
+        name = self._benchmark_profile_name or self.window._configure_panel.current_profile().name
         base = default_base_dir()
         previous_runs = benchmark_store.load(base, name)
         previous = previous_runs[-1] if previous_runs else None

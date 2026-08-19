@@ -13,13 +13,18 @@ import llama_launcher.services.metrics as _metrics
 import llama_launcher.services.registry as _registry
 import llama_launcher.services.router_api as _router_api
 import llama_launcher.ui.main_window as _mw
+from llama_launcher.ui.controllers.launch_controller import LaunchController
 
 
 @pytest.fixture(autouse=True)
 def _hermetic_ui_boundaries(monkeypatch):
-    # No real podman spawn from async Stop/Restart in tests.
-    monkeypatch.setattr(_mw.MainWindow, "_spawn_async",
-                        lambda self, argv, on_done=None: None)
+    # No real podman spawn from async Stop/Restart in tests. Signature must
+    # accept on_error too: monitor_controller.py (not yet repointed off the
+    # facade) still reaches this patch via MainWindow._spawn_async, whose
+    # delegator body always forwards on_error=... explicitly (even when
+    # None), not just on_done.
+    monkeypatch.setattr(LaunchController, "_spawn_async",
+                        lambda self, argv, on_done=None, on_error=None: None)
     monkeypatch.setattr(_runtime, "container_state", lambda name, binary: "absent")
     monkeypatch.setattr(_runtime, "is_rootless", lambda binary: False)
     monkeypatch.setattr(_runtime, "stats", lambda name, binary: None)

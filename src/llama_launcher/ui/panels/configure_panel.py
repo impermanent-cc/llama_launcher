@@ -82,19 +82,19 @@ class ConfigurePanel(QWidget):
         self.update_badge = QPushButton("")
         self.update_badge.setFlat(True)
         self.update_badge.setVisible(False)
-        self.update_badge.clicked.connect(self.window.on_fetch_latest)
+        self.update_badge.clicked.connect(self.window._launch.on_fetch_latest)
         self.detect_image_btn = QPushButton("Detect")
         self.detect_image_btn.setToolTip(
             "Fill the Image field from llama.cpp images already pulled locally "
             "(podman/docker images).")
-        self.detect_image_btn.clicked.connect(self.window.detect_image)
+        self.detect_image_btn.clicked.connect(self.window._launch.detect_image)
         self.fetch_btn = QPushButton("Fetch latest")
         self.fetch_btn.setToolTip(
             "Query the container registry (GHCR) for the newest build tag matching "
             "this image's repo and variant, and update the Image field. Requires an "
             "image to be set (use Detect or type one). This updates the tag only — it "
             "does NOT download the build; pull it with podman/docker pull.")
-        self.fetch_btn.clicked.connect(self.window.on_fetch_latest)
+        self.fetch_btn.clicked.connect(self.window._launch.on_fetch_latest)
         image_row = QHBoxLayout()
         image_row.setContentsMargins(0, 0, 0, 0)
         image_row.addWidget(self.image_edit, 1)
@@ -291,7 +291,7 @@ class ConfigurePanel(QWidget):
         self.preview.setMaximumHeight(90)
         preview_row.addWidget(self.preview, 1)
         self.export_sh_btn = QPushButton("Export .sh")
-        self.export_sh_btn.clicked.connect(self.window._on_export_sh)
+        self.export_sh_btn.clicked.connect(self.window._report._on_export_sh)
         config_bottom_box.addWidget(QLabel("Command preview:"))
         config_bottom_box.addLayout(preview_row)
 
@@ -302,7 +302,7 @@ class ConfigurePanel(QWidget):
         self.restart_btn = QPushButton("⟳ Restart")
         self.web_ui_btn = QPushButton("Open Web UI")
         self.web_ui_btn.setEnabled(False)
-        self.web_ui_btn.clicked.connect(self.window.open_web_ui)
+        self.web_ui_btn.clicked.connect(self.window._report.open_web_ui)
         self.detached_check = QCheckBox("Run detached (no terminal window)")
         self.detached_check.setToolTip(
             "Launch without a terminal window; watch output on the Monitor "
@@ -325,13 +325,13 @@ class ConfigurePanel(QWidget):
         self.save_btn.clicked.connect(self.window.save_current_profile)
         self.save_as_btn.clicked.connect(self.window.save_as_profile)
         self.delete_btn.clicked.connect(self.window.delete_current_profile)
-        self.report_btn.clicked.connect(self.window.on_generate_report)
+        self.report_btn.clicked.connect(self.window._report.on_generate_report)
         self.profile_combo.activated.connect(self.window._on_pick_profile)
 
         # lifecycle buttons
-        self.launch_btn.clicked.connect(self.window.on_launch)
-        self.stop_btn.clicked.connect(self.window.on_stop)
-        self.restart_btn.clicked.connect(self.window.on_restart)
+        self.launch_btn.clicked.connect(self.window._launch.on_launch)
+        self.stop_btn.clicked.connect(self.window._launch.on_stop)
+        self.restart_btn.clicked.connect(self.window._launch.on_restart)
 
     # -- Configure marshalling / handlers (moved from MainWindow) -----------
 
@@ -606,7 +606,7 @@ class ConfigurePanel(QWidget):
         line_edit.setText(container_path)
 
     def load_profile(self, p: Profile) -> None:
-        self.window._stop_log_follower()
+        self.window._monitor._stop_log_follower()
         self._profile = p
         self.name_edit.setText(p.name)
         self.image_edit.setText(p.image)
@@ -633,10 +633,10 @@ class ConfigurePanel(QWidget):
         index = self.mode_combo.findData(p.mode)
         self.mode_combo.setCurrentIndex(index if index >= 0 else 0)
         self.bind_host_combo.setCurrentText(p.runtime.bind_host)
-        self.window._router_statuses = {}
-        self.window._spec_prev = None
-        self.window._props = None
-        self.window._props_model = None
+        self.window._monitor._router_statuses = {}
+        self.window._monitor._spec_prev = None
+        self.window._monitor._props = None
+        self.window._monitor._props_model = None
         self.members_list.setRowCount(0)
         for member in p.members:
             self._add_member_item(member)
