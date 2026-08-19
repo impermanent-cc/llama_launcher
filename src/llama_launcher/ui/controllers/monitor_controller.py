@@ -7,7 +7,7 @@ from llama_launcher.core.instances import build_instances
 from llama_launcher.core.mtp_stats import spec_counters, spec_delta
 from llama_launcher.core.validation import dial_host
 from llama_launcher.store.profiles import list_profiles, load_config, save_config
-from llama_launcher.services import runtime, health, metrics, gpu
+from llama_launcher.services import runtime, health, metrics, gpu, native
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import router_api
 
@@ -110,7 +110,9 @@ def build_instances_data(target: dict) -> dict:
     binary = target["binary"]
     profiles = list_profiles(target["base_dir"])
     by_name = {p.name: p for p in profiles}
-    instances = build_instances(runtime.list_launcher_containers(binary), profiles, binary)
+    container_rows = runtime.list_launcher_containers(binary)
+    native_rows = native.list_native_instances(target["base_dir"])
+    instances = build_instances(container_rows + native_rows, profiles, binary)
     rows = []
     for inst in instances:
         summ = _instance_summary_data(inst, by_name, target["router_base_dir"])

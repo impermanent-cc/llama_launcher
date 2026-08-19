@@ -101,6 +101,27 @@ def test_build_instances_data_enriches_rows_with_tok_kv_mode(monkeypatch):
     assert rows["llama-emb"]["kv_pct"] is None
 
 
+def test_build_instances_data_includes_native_rows(tmp_path, monkeypatch):
+    """A native (non-container) server registered under base_dir shows up as a
+    Monitor card alongside container rows, carrying its own kind/pid."""
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    monkeypatch.setattr(mc.runtime, "list_launcher_containers", lambda b: [])
+    monkeypatch.setattr(mc.native, "list_native_instances",
+                        lambda base: [{"name": "llama-nat", "running": True,
+                                       "profile": "nat", "mode": "server",
+                                       "kind": "native", "pid": 4242}])
+    monkeypatch.setattr(mc, "list_profiles",
+                        lambda base: [Profile(name="nat", settings={"port": 8080})])
+    monkeypatch.setattr(mc.health, "probe_health", lambda *a, **k: "ready")
+    monkeypatch.setattr(mc.metrics, "fetch_metrics", lambda *a, **k: {})
+    monkeypatch.setattr(mc.metrics, "fetch_slots", lambda *a, **k: [])
+    target = {"binary": "podman", "base_dir": str(tmp_path),
+              "router_base_dir": str(tmp_path)}
+    out = mc.build_instances_data(target)
+    assert [i.name for i in out["instances"]] == ["llama-nat"]
+    assert out["instances"][0].kind == "native" and out["instances"][0].pid == 4242
+
+
 def _two_containers(*_a, **_k):
     return [
         {"name": "llama-solo", "running": True, "profile": "Solo", "mode": "server"},
