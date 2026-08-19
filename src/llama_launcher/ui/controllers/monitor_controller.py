@@ -176,7 +176,7 @@ class MonitorController:
 
     # -- teardown ------------------------------------------------------------
     def drain(self) -> None:
-        self.window._stop_stats_worker()
+        self._stop_stats_worker()
         # Let any in-flight monitor gather finish (bounded) so it isn't writing
         # to the window during teardown; the pool's threads outlive the window,
         # so there's nothing to abort even if this times out.
@@ -189,16 +189,16 @@ class MonitorController:
         if self.window.stats_toggle_btn.isChecked() != visible:
             self.window.stats_toggle_btn.setChecked(visible)
         if visible:
-            self.window._start_stats_worker()
+            self._start_stats_worker()
         else:
-            self.window._stop_stats_worker()
-        self.window._save_stats_config()
+            self._stop_stats_worker()
+        self._save_stats_config()
 
     def _refresh_stats_target(self) -> None:
         # Read GUI/profile state on the UI thread only; the worker reads the
         # resulting plain tuple (safe under the GIL), never the widgets.
-        self._stats_target = (self.window._monitored_container_name(),
-                              self.window.current_profile().runtime.binary)
+        self._stats_target = (self._monitored_container_name(),
+                              self.window._configure_panel.current_profile().runtime.binary)
 
     def _start_stats_worker(self) -> None:
         if self._stats_worker is not None and self._stats_worker.isRunning():
@@ -206,7 +206,7 @@ class MonitorController:
         from llama_launcher.services import stats as stats_svc
         from llama_launcher.services.sysstat import CpuSampler
         self._cpu_sampler = CpuSampler()
-        self.window._refresh_stats_target()
+        self._refresh_stats_target()
 
         def _build():
             name, binary = self._stats_target
@@ -252,12 +252,12 @@ class MonitorController:
         """
         if not p.settings.get("metrics"):
             return
-        model_scope = self.window._router_pollable_model() if p.mode == "router" else None
+        model_scope = self._router_pollable_model() if p.mode == "router" else None
         if p.mode == "router" and model_scope is None:
             return
         text = metrics.fetch_metrics_text(
             p.settings.get("port", 8080), model=model_scope,
-            api_key=self.window._poll_api_key(p),
+            api_key=self._poll_api_key(p),
             host=dial_host(p.runtime.bind_host))
         cur = spec_counters(text) if text else None
         if cur is None:
@@ -291,10 +291,10 @@ class MonitorController:
         instead of polling `_router_pollable_model()` again.
         """
         port = p.settings.get("port", 8080)
-        key = self.window._poll_api_key(p)
+        key = self._poll_api_key(p)
         if p.mode == "router":
-            host = self.window._router_host(p)
-            model_key = self.window._router_pollable_model()
+            host = self._router_host(p)
+            model_key = self._router_pollable_model()
         else:
             host = dial_host(p.runtime.bind_host)
             model_key = None
@@ -313,10 +313,10 @@ class MonitorController:
         return dial_host(p.runtime.bind_host)
 
     def refresh_router_models(self) -> None:
-        p = self.window.current_profile()
+        p = self.window._configure_panel.current_profile()
         if p.mode != "router":
             return
-        host = self.window._router_host(p)
+        host = self._router_host(p)
         port = p.settings.get("port", 8080)
         key = api_key_store.read_api_key(self.window.router_base_dir(), p.name)
         models = router_api.list_models(host, port, key)
@@ -340,22 +340,22 @@ class MonitorController:
         return None
 
     def _on_router_load(self, model_id: str) -> None:
-        p = self.window.current_profile()
+        p = self.window._configure_panel.current_profile()
         key = api_key_store.read_api_key(self.window.router_base_dir(), p.name)
-        ok = router_api.load_model(self.window._router_host(p), p.settings.get("port", 8080),
+        ok = router_api.load_model(self._router_host(p), p.settings.get("port", 8080),
                                    key, model_id)
-        self.window.refresh_router_models()
+        self.refresh_router_models()
         if not ok:
             # Silently discarding this left a failed load looking identical to a
             # slow one: the row just stayed "unloaded" forever.
             self.window._set_router_error(f"load failed: {model_id}")
 
     def _on_router_unload(self, model_id: str) -> None:
-        p = self.window.current_profile()
+        p = self.window._configure_panel.current_profile()
         key = api_key_store.read_api_key(self.window.router_base_dir(), p.name)
-        ok = router_api.unload_model(self.window._router_host(p), p.settings.get("port", 8080),
+        ok = router_api.unload_model(self._router_host(p), p.settings.get("port", 8080),
                                      key, model_id)
-        self.window.refresh_router_models()
+        self.refresh_router_models()
         if not ok:
             self.window._set_router_error(f"unload failed: {model_id}")
 
@@ -365,16 +365,16 @@ class MonitorController:
         # while the dock is open and the user switches profile/instance --
         # this UI-thread timer callback is the only writer of _stats_target.
         if self._stats_worker is not None and self._stats_worker.isRunning():
-            self.window._refresh_stats_target()
-        p = self.window._monitored_profile()
+            self._refresh_stats_target()
+        p = self._monitored_profile()
         if not runtime.binary_available(p.runtime.binary):
             self.window.status_label.setText("● stopped")
-            self.window.web_ui_btn.setEnabled(False)
+            self.window._configure_panel.web_ui_btn.setEnabled(False)
             self.window.benchmark_panel.set_benchmark_available(False)
             self._monitor_target = {"running": False}
             self._monitor_result = None
             return
-        name = self.window._monitored_container_name()
+        name = self._monitored_container_name()
         state = runtime.container_state(name, p.runtime.binary)
         # Default the gather target to "don't poll"; the running branch below
         # overwrites it with the live snapshot. Nothing is gathered off-thread
@@ -386,20 +386,20 @@ class MonitorController:
                                      host=dial_host(p.runtime.bind_host)) \
             if state == "running" else "down"
         self.window.status_label.setText("● " + health.derive_status(state, hstatus))
-        self.window.web_ui_btn.setEnabled(state == "running")
+        self.window._configure_panel.web_ui_btn.setEnabled(state == "running")
         router_model_key = None
         if state == "running":
-            if not self.window._log_follower_active():
-                self.window._start_log_follower()
+            if not self._log_follower_active():
+                self._start_log_follower()
             if hstatus == "ready":
-                router_model_key = self.window._refresh_props(p)
+                router_model_key = self._refresh_props(p)
             # Snapshot the poll inputs (cheap) and hand the blocking gather to a
             # pooled task off the UI thread. router_model_key was already
             # resolved by _refresh_props above -- reuse it so a router tick polls
             # _router_pollable_model() once. Render the previous tick's result
             # (up to one tick stale) and dispatch a fresh gather unless one is
             # already in flight (so a slow podman stats can't pile up).
-            self._monitor_target = self.window._compute_monitor_target(
+            self._monitor_target = self._compute_monitor_target(
                 running=True, model_scope=router_model_key)
             if self._monitor_result is not None:
                 self.window.monitor_panel.update_stats(self._monitor_result)
@@ -407,14 +407,14 @@ class MonitorController:
                 self._monitor_inflight = True
                 QThreadPool.globalInstance().start(
                     _MonitorGather(self.window, self._monitor_target))
-            self.window._update_spec_stats(p)
+            self._update_spec_stats(p)
         else:
             # Nothing running: drop the last gather so a stale summary isn't
             # rendered on the next start before a fresh gather completes.
             self._monitor_result = None
         if p.mode == "router":
             if state == "running":
-                self.window.refresh_router_models()
+                self.refresh_router_models()
             else:
                 # Router stopped/removed: clear the stale model list + connected
                 # state so a dead router doesn't keep showing load/unload rows.
@@ -428,39 +428,39 @@ class MonitorController:
         if ready and p.mode == "router":
             ready = router_model_key is not None
         self.window.benchmark_panel.set_benchmark_available(ready)
-        self.window._refresh_instances_list()
+        self._refresh_instances_list()
 
     def _refresh_instances_list(self) -> None:
         from llama_launcher.ui.main_window import base_dir
-        binary = self.window.current_profile().runtime.binary
+        binary = self.window._configure_panel.current_profile().runtime.binary
         self._instances = build_instances(
             runtime.list_launcher_containers(binary), list_profiles(base_dir()))
         rows = []
         for inst in self._instances:
-            summ = self.window.instance_summary(inst)
+            summ = self.instance_summary(inst)
             rows.append({"name": inst.name, "profile": inst.profile, "port": inst.port,
                          "running": inst.running, "health": summ["health"],
                          "stat": summ["stat"]})
-        self.window.monitor_panel.set_instances(rows, self.window._monitored_container_name())
+        self.window.monitor_panel.set_instances(rows, self._monitored_container_name())
 
     def _on_instance_selected(self, name: str) -> None:
         inst = next((i for i in self._instances if i.name == name), None)
         # Selecting the form's own container means "monitor the current profile" (fallback).
         self._active_instance = None if (inst is None or name == self.window._container_name()) else inst
-        self.window._start_log_follower()          # retarget the follower at the new container
-        self.window.update_status()
+        self._start_log_follower()          # retarget the follower at the new container
+        self.update_status()
 
     def _on_instance_stop(self, name: str) -> None:
-        binary = self.window.current_profile().runtime.binary
-        self.window._spawn_async(runtime.stop_argv(name, binary), on_done=self.window.update_status)
+        binary = self.window._configure_panel.current_profile().runtime.binary
+        self.window._launch._spawn_async(runtime.stop_argv(name, binary), on_done=self.update_status)
         if self._active_instance is not None and self._active_instance.name == name:
             self._active_instance = None
 
     def _on_instance_remove(self, name: str) -> None:
         # A stopped launcher container lingers in `podman ps -a` with no useful
         # action; remove it so the instances list can be cleared.
-        binary = self.window.current_profile().runtime.binary
-        self.window._spawn_async(runtime.rm_argv(name, binary), on_done=self.window.update_status)
+        binary = self.window._configure_panel.current_profile().runtime.binary
+        self.window._launch._spawn_async(runtime.rm_argv(name, binary), on_done=self.update_status)
         if self._active_instance is not None and self._active_instance.name == name:
             self._active_instance = None
 
@@ -468,7 +468,7 @@ class MonitorController:
         from llama_launcher.ui.main_window import base_dir
         inst = self._active_instance
         if inst is None:
-            return self.window.current_profile()
+            return self.window._configure_panel.current_profile()
         stored = next((p for p in list_profiles(base_dir())
                        if p.name == inst.profile), None)
         # Trust the running container's real mode (from its label) over the
@@ -511,7 +511,7 @@ class MonitorController:
             stat = "ready" if hstatus == "ready" else ""
         else:
             tok = metrics.fetch_metrics(inst.port, host=inst.host,
-                                        api_key=self.window._instance_api_key(inst)).get(
+                                        api_key=self._instance_api_key(inst)).get(
                 "llamacpp:predicted_tokens_seconds")
             stat = f"{tok:.0f} tok/s" if tok else ("ready" if hstatus == "ready" else "")
         return {"running": True, "health": hstatus, "stat": stat}
@@ -530,11 +530,11 @@ class MonitorController:
         """
         if not running:
             return {"running": False}
-        p = self.window._monitored_profile()
+        p = self._monitored_profile()
         host, key, ms, poll = (dial_host(p.runtime.bind_host),
-                               self.window._poll_api_key(p), None, True)
+                               self._poll_api_key(p), None, True)
         if p.mode == "router":
-            host = self.window._router_host(p)
+            host = self._router_host(p)
             ms = model_scope
             poll = ms is not None
         return {
@@ -542,7 +542,7 @@ class MonitorController:
             "port": p.settings.get("port", 8080),
             "metrics_on": bool(p.settings.get("metrics")),
             "host": host, "key": key, "model_scope": ms, "poll": poll,
-            "name": self.window._monitored_container_name(),
+            "name": self._monitored_container_name(),
             "binary": p.runtime.binary,
         }
 
@@ -550,10 +550,10 @@ class MonitorController:
         """Gather the Monitor summary synchronously (used by tests and any
         direct caller). The live poll instead snapshots _compute_monitor_target()
         and lets the worker call build_monitor_data() off the UI thread."""
-        p = self.window._monitored_profile()
-        ms = self.window._router_pollable_model() if p.mode == "router" else None
+        p = self._monitored_profile()
+        ms = self._router_pollable_model() if p.mode == "router" else None
         return build_monitor_data(
-            self.window._compute_monitor_target(running=True, model_scope=ms)) or {}
+            self._compute_monitor_target(running=True, model_scope=ms)) or {}
 
     # -- log follower ------------------------------------------------------
     def _log_follower_active(self) -> bool:
@@ -563,9 +563,9 @@ class MonitorController:
 
     def _start_log_follower(self):
         from PySide6.QtCore import QProcess
-        self.window._stop_log_follower()
-        p = self.window._monitored_profile()
-        name = self.window._monitored_container_name()
+        self._stop_log_follower()
+        p = self._monitored_profile()
+        name = self._monitored_container_name()
         # Attaching `podman logs -f` before the container exists just prints
         # "no such container" and exits, stranding the logs pane on that error.
         # Skip until it exists; update_status() retries once it's running and
@@ -575,7 +575,7 @@ class MonitorController:
         proc = QProcess(self.window)
         proc.setProcessChannelMode(QProcess.MergedChannels)
         proc.readyReadStandardOutput.connect(
-            lambda: self.window._enqueue_log(bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")))
+            lambda: self._enqueue_log(bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")))
         argv = runtime.logs_argv(name, p.runtime.binary)
         proc.start(argv[0], argv[1:])
         self._log_proc = proc
