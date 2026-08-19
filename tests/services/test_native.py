@@ -24,38 +24,42 @@ def test_is_alive_false_for_missing_pid(tmp_path):
     assert native.is_alive(1, "/opt/nonexistent-llama-server") is False
 
 
-def test_is_alive_true_for_self(tmp_path):
-    import os, sys
-    # This test process's cmdline references the python executable.
-    assert native.is_alive(os.getpid(), sys.executable) is True
+def test_is_alive_true_for_self():
+    import sys, signal
+    # Spawn a child launched by ABSOLUTE path so its cmdline argv[0] == sys.executable,
+    # matching how launch_native spawns a server by absolute native_binary path.
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        assert native.is_alive(proc.pid, sys.executable) is True
+        assert native.is_alive(proc.pid, "/opt/nonexistent-binary") is False
+    finally:
+        proc.send_signal(signal.SIGKILL)
+        proc.wait()
 
 
 def test_list_native_instances_shape_and_prune(tmp_path):
-    alive = {"pid": _self_pid(), "profile": "Gen", "port": 8080, "host": "127.0.0.1",
-             "started_at": "t", "binary": _self_exe(),
-             "log": str(tmp_path / "native" / "gen.log")}
-    dead = {"pid": 999999, "profile": "Dead", "port": 8081, "host": "127.0.0.1",
-            "started_at": "t", "binary": "/opt/gone", "log": "x"}
-    native.write_entry(tmp_path, alive)
-    native.write_entry(tmp_path, dead)
-    rows = native.list_native_instances(tmp_path)
-    assert len(rows) == 1
-    r = rows[0]
-    assert r["name"] == "llama-gen" and r["profile"] == "Gen"
-    assert r["running"] is True and r["mode"] == "server"
-    assert r["kind"] == "native" and r["pid"] == _self_pid()
-    # dead entry's registry file was pruned
-    assert not (native.registry_dir(tmp_path) / "dead.json").exists()
-
-
-def _self_pid():
-    import os
-    return os.getpid()
-
-
-def _self_exe():
-    import sys
-    return sys.executable
+    import sys, signal
+    # Spawn a child launched by ABSOLUTE path so its cmdline argv[0] matches the binary.
+    proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+    try:
+        alive = {"pid": proc.pid, "profile": "Gen", "port": 8080, "host": "127.0.0.1",
+                 "started_at": "t", "binary": sys.executable,
+                 "log": str(tmp_path / "native" / "gen.log")}
+        dead = {"pid": 999999, "profile": "Dead", "port": 8081, "host": "127.0.0.1",
+                "started_at": "t", "binary": "/opt/gone", "log": "x"}
+        native.write_entry(tmp_path, alive)
+        native.write_entry(tmp_path, dead)
+        rows = native.list_native_instances(tmp_path)
+        assert len(rows) == 1
+        r = rows[0]
+        assert r["name"] == "llama-gen" and r["profile"] == "Gen"
+        assert r["running"] is True and r["mode"] == "server"
+        assert r["kind"] == "native" and r["pid"] == proc.pid
+        # dead entry's registry file was pruned
+        assert not (native.registry_dir(tmp_path) / "dead.json").exists()
+    finally:
+        proc.send_signal(signal.SIGKILL)
+        proc.wait()
 
 
 import signal
