@@ -109,7 +109,7 @@ def test_server_launch_still_uses_the_terminal(win, monkeypatch):
     monkeypatch.setattr(win._launch, "_validate_or_warn", lambda: True)
     monkeypatch.setattr(win._launch, "vram_check", lambda: None)
     monkeypatch.setattr("llama_launcher.ui.main_window.terminal.launch",
-                        lambda argv: called.setdefault("argv", argv))
+                        lambda argv, **kw: called.setdefault("argv", argv))
     win._launch.on_launch()
     assert "-d" not in called["argv"]
 
@@ -175,7 +175,7 @@ def test_attached_server_launch_still_uses_terminal(win, monkeypatch):
                         lambda argv, on_done=None, on_error=None: spawned.append(argv))
     called = {}
     monkeypatch.setattr("llama_launcher.ui.main_window.terminal.launch",
-                        lambda argv: called.setdefault("argv", argv))
+                        lambda argv, **kw: called.setdefault("argv", argv))
     win._launch.on_launch()
     assert "-d" not in called["argv"]     # terminal used, attached --rm command
     assert spawned == []                  # no detached chain

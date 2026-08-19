@@ -10,7 +10,7 @@ def test_on_launch_resets_monitor(qtbot, monkeypatch):
     qtbot.addWidget(w)
     monkeypatch.setattr(w._launch, "_validate_or_warn", lambda: True)
     monkeypatch.setattr(w._launch, "vram_check", lambda: None)
-    monkeypatch.setattr(mw.terminal, "launch", lambda argv: None)
+    monkeypatch.setattr(mw.terminal, "launch", lambda argv, **kw: None)
     # seed monitor state, then launch
     w.monitor_panel.append_log(_DRAFT_LINE + "\n")
     assert not w.monitor_panel.mtp_label.isHidden()
@@ -24,7 +24,7 @@ def test_on_launch_sets_endpoints(qtbot, monkeypatch):
     qtbot.addWidget(w)
     monkeypatch.setattr(w._launch, "_validate_or_warn", lambda: True)
     monkeypatch.setattr(w._launch, "vram_check", lambda: None)
-    monkeypatch.setattr(mw.terminal, "launch", lambda argv: None)
+    monkeypatch.setattr(mw.terminal, "launch", lambda argv, **kw: None)
     w._configure_panel._widgets["embeddings"].set_value(True)
     w._configure_panel._widgets["port"].set_value(8080)
     w._launch.on_launch()
