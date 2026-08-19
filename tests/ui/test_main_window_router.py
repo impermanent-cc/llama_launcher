@@ -720,18 +720,18 @@ def test_benchmark_has_its_own_tab_and_config_strip_hidden_off_configure(win):
         assert win._configure_panel._config_bottom.isVisibleTo(win) is False, name
 
 
-def test_stopped_instance_card_offers_stop(win):
-    # Cards carry a single stop action regardless of running state (the old
-    # table's distinct Remove-for-stopped affordance is gone with the table).
-    stopped = []
-    win.monitor_panel.instance_stop_requested.connect(stopped.append)
+def test_stopped_instance_card_offers_remove(win):
+    # A stopped instance's card action button switches to Remove (podman rm),
+    # carried over from the old table's ✕ button -- see StatCard.update_row.
+    removed = []
+    win.monitor_panel.instance_remove_requested.connect(removed.append)
     win.monitor_panel.set_instance_cards({"rows": [
         {"name": "llama-dead", "profile": "Dead", "port": 8080,
          "running": False, "health": "down", "stat": "", "tok_s": None, "kv_pct": None,
          "embeddings": False, "reranking": False, "mode": "server"}],
         "selected_name": None})
     win.monitor_panel.card("llama-dead").stop_button().click()
-    assert stopped == ["llama-dead"]
+    assert removed == ["llama-dead"]
 
 
 def test_running_instance_offers_stop(win):

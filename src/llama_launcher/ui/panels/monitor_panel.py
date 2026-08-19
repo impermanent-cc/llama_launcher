@@ -216,6 +216,7 @@ class MonitorPanel(QWidget):
                 card = StatCard(name)
                 card.selected.connect(self.instance_selected)
                 card.stop_requested.connect(self.instance_stop_requested)
+                card.remove_requested.connect(self.instance_remove_requested)
                 self._cards[name] = card
                 self._cards_row.insertWidget(self._cards_row.count() - 1, card)  # before the stretch
         for r in rows:                              # update in place every tick

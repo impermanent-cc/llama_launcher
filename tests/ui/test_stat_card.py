@@ -3,7 +3,8 @@ from llama_launcher.ui.widgets.stat_card import StatCard
 
 def _row(**over):
     r = {"profile": "gen", "port": 8080, "health": "ready", "tok_s": 64.0,
-         "kv_pct": 0.5, "embeddings": False, "reranking": False, "mode": "server"}
+         "kv_pct": 0.5, "embeddings": False, "reranking": False, "mode": "server",
+         "running": True}
     r.update(over)
     return r
 
@@ -38,3 +39,22 @@ def test_set_selected_toggles(qtbot):
     c = StatCard("x"); qtbot.addWidget(c)
     c.set_selected(True); assert c.is_selected()
     c.set_selected(False); assert not c.is_selected()
+
+
+def test_running_card_stop_button_emits_stop_requested(qtbot):
+    c = StatCard("llama-gen"); qtbot.addWidget(c)
+    c.update_row(_row(running=True))
+    got = []; c.stop_requested.connect(got.append)
+    c.stop_button().click()
+    assert got == ["llama-gen"]
+
+
+def test_stopped_card_action_button_offers_remove(qtbot):
+    c = StatCard("llama-dead"); qtbot.addWidget(c)
+    c.update_row(_row(running=False, health="down"))
+    assert c.stop_button().text() == "✕"
+    got = []; c.remove_requested.connect(got.append)
+    stop_got = []; c.stop_requested.connect(stop_got.append)
+    c.stop_button().click()
+    assert got == ["llama-dead"]
+    assert stop_got == []

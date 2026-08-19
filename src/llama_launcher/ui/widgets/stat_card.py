@@ -9,15 +9,19 @@ class StatCard(QFrame):
 
     Shows the profile/port, a health dot, a headline stat (gen tok/s, or "ready"
     for an embedding/rerank server, or "router" for a router) and KV%. Clickable
-    to focus (emits `selected`); its ■ button emits `stop_requested`. Reused across
-    ticks -- the owning panel calls update_row() to refresh labels in place.
+    to focus (emits `selected`). Its action button is dual-mode, carried over
+    from the old instances table: running -> ■ emits `stop_requested`;
+    stopped -> ✕ emits `remove_requested` (podman rm a dead container). Reused
+    across ticks -- the owning panel calls update_row() to refresh labels in place.
     """
     selected = Signal(str)
     stop_requested = Signal(str)
+    remove_requested = Signal(str)
 
     def __init__(self, name: str, parent=None):
         super().__init__(parent)
         self._name = name
+        self._running = True
         self.setFrameShape(QFrame.StyledPanel)
         self.setMinimumWidth(180)
         self._selected = False
@@ -29,7 +33,7 @@ class StatCard(QFrame):
         self._stop_btn = QPushButton("■")
         self._stop_btn.setFixedWidth(28)
         self._stop_btn.setToolTip("Stop this instance")
-        self._stop_btn.clicked.connect(lambda: self.stop_requested.emit(self._name))
+        self._stop_btn.clicked.connect(self._on_action)
         top.addWidget(self._title, 1)
         top.addWidget(self._stop_btn)
         v.addLayout(top)
@@ -45,6 +49,9 @@ class StatCard(QFrame):
     def stop_button(self) -> QPushButton:
         return self._stop_btn
 
+    def _on_action(self) -> None:
+        (self.stop_requested if self._running else self.remove_requested).emit(self._name)
+
     def headline_text(self) -> str:
         return self._headline.text()
 
@@ -55,6 +62,10 @@ class StatCard(QFrame):
         return self._selected
 
     def update_row(self, row: dict) -> None:
+        running = row.get("running", True)
+        self._running = running
+        self._stop_btn.setText("■" if running else "✕")
+        self._stop_btn.setToolTip("Stop this instance" if running else "Remove this stopped container")
         port = row.get("port")
         title = row.get("profile") or self._name
         self._title.setText(f"{title}  :{port}" if port else title)
