@@ -344,7 +344,12 @@ from llama_launcher import app
 from llama_launcher.store import profiles as store
 
 
-def test_gate_treats_global_key_as_present_for_health(tmp_path):
+def test_gate_treats_global_key_as_present_for_health(tmp_path, monkeypatch):
+    # This test isolates the api-key exposure check; the container runtime binary
+    # (a shutil.which PATH probe) is incidental, so treat it as present -- a
+    # headless CI container has no podman, which would otherwise inject an
+    # unrelated "Runtime 'podman' not found on PATH" gate error.
+    monkeypatch.setattr(app, "binary_available", lambda binary: True)
     # global-mode router, only a global key exists, never launched (no per-profile file)
     api_key.write_global_key(tmp_path, "sk-shared")
     # A resolvable member is included so the real validate()'s "needs at least
