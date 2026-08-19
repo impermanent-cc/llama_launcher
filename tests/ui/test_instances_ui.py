@@ -76,6 +76,30 @@ def test_build_instances_data_scans_profiles_once_and_builds_rows(monkeypatch):
     assert [i.name for i in data["instances"]] == ["llama-emb", "llama-gen"]
 
 
+def test_build_instances_data_enriches_rows_with_tok_kv_mode(monkeypatch):
+    """Each row carries structured tok_s / kv_pct / mode for the stat cards: a gen
+    server gets tok/s + KV from /metrics + /slots; an embedding server gets neither."""
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    profs = [Profile(name="gen", image="img", settings={"port": 8080}),
+             Profile(name="emb", image="img", settings={"port": 8081, "embeddings": True})]
+    monkeypatch.setattr(mc, "list_profiles", lambda base: profs)
+    monkeypatch.setattr(mc.runtime, "list_launcher_containers", lambda b: [
+        {"name": "llama-gen", "running": True, "profile": "gen", "mode": "server"},
+        {"name": "llama-emb", "running": True, "profile": "emb", "mode": "server"}])
+    monkeypatch.setattr(mc.health, "probe_health", lambda *a, **k: "ready")
+    monkeypatch.setattr(mc.metrics, "fetch_metrics",
+                        lambda *a, **k: {"llamacpp:predicted_tokens_seconds": 64.0})
+    monkeypatch.setattr(mc.metrics, "fetch_slots",
+                        lambda *a, **k: [{"n_ctx": 100, "n_prompt_tokens_processed": 30}])
+    target = {"binary": "podman", "base_dir": "/b", "router_base_dir": "/r"}
+    rows = {r["name"]: r for r in mc.build_instances_data(target)["rows"]}
+    assert rows["llama-gen"]["tok_s"] == 64.0
+    assert abs(rows["llama-gen"]["kv_pct"] - 0.30) < 1e-9   # slots-derived KV
+    assert rows["llama-gen"]["mode"] == "server"
+    assert rows["llama-emb"]["tok_s"] is None               # embedding: no tok/s
+    assert rows["llama-emb"]["kv_pct"] is None
+
+
 def _two_containers(*_a, **_k):
     return [
         {"name": "llama-solo", "running": True, "profile": "Solo", "mode": "server"},
