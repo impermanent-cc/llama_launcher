@@ -168,7 +168,10 @@ def test_native_mode_hides_container_fields(qtbot):
     cp = w._configure_panel
     assert cp.native_binary_edit.isVisibleTo(cp)
     assert not cp.image_edit.isVisibleTo(cp)          # Image hidden
-    assert not cp.detached_check.isVisibleTo(cp)      # detached hidden (always managed bg)
+    # detached_check is reparented into MainWindow's button row, so isVisibleTo(cp)
+    # is trivially False; assert against its real parent so this checks the actual
+    # setVisible() state set by _update_detached_visibility (always-managed-bg native).
+    assert not cp.detached_check.isVisibleTo(cp.detached_check.parentWidget())
     assert not cp.extra_args_edit.isVisibleTo(cp)     # "Extra podman args" hidden
     assert not cp.selinux_check.isVisibleTo(cp)       # SELinux checkbox hidden
 
@@ -182,4 +185,6 @@ def test_container_mode_shows_container_fields(qtbot):
     assert cp.image_edit.isVisibleTo(cp)
     assert not cp.native_binary_edit.isVisibleTo(cp)
     assert cp.extra_args_edit.isVisibleTo(cp)
+    # detached checkbox is shown for a container server profile (see native test)
+    assert cp.detached_check.isVisibleTo(cp.detached_check.parentWidget())
     assert cp.selinux_check.isVisibleTo(cp)

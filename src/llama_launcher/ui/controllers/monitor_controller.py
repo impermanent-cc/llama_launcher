@@ -12,16 +12,27 @@ from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import router_api
 
 
+def _sigkill_if_alive(pid: int) -> None:
+    """SIGKILL `pid` only if it is still OUR native process -- the guard against
+    force-killing a pid the OS has recycled to an unrelated process during the
+    grace window. The binary is read from the still-live registry entry (a
+    running native process is never pruned, so if the entry is gone the process
+    is already dead and no kill is needed)."""
+    import signal as _signal
+    from llama_launcher.ui.main_window import base_dir
+
+    entry = next((e for e in native.read_entries(base_dir())
+                  if e.get("pid") == pid), None)
+    if entry is not None and native.is_alive(pid, entry.get("binary", "")):
+        native.stop_native(pid, _signal.SIGKILL)
+
+
 def _schedule_sigkill(pid: int, delay: int) -> None:
     """Send SIGKILL after `delay`s if the process is still alive -- the native
     analog of `podman stop -t`. SIGTERM was already sent; give it the grace
-    period, then force."""
+    period, then force (guarded against a recycled pid, see _sigkill_if_alive)."""
     from PySide6.QtCore import QTimer
-    import signal as _signal
-
-    def _kill():
-        native.stop_native(pid, _signal.SIGKILL)
-    QTimer.singleShot(max(0, delay) * 1000, _kill)
+    QTimer.singleShot(max(0, delay) * 1000, lambda: _sigkill_if_alive(pid))
 
 
 def _fmt_uptime(started_at: str | None) -> str:
