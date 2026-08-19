@@ -169,6 +169,8 @@ def test_native_mode_hides_container_fields(qtbot):
     assert cp.native_binary_edit.isVisibleTo(cp)
     assert not cp.image_edit.isVisibleTo(cp)          # Image hidden
     assert not cp.detached_check.isVisibleTo(cp)      # detached hidden (always managed bg)
+    assert not cp.extra_args_edit.isVisibleTo(cp)     # "Extra podman args" hidden
+    assert not cp.selinux_check.isVisibleTo(cp)       # SELinux checkbox hidden
 
 
 def test_container_mode_shows_container_fields(qtbot):
@@ -179,3 +181,5 @@ def test_container_mode_shows_container_fields(qtbot):
     cp = w._configure_panel
     assert cp.image_edit.isVisibleTo(cp)
     assert not cp.native_binary_edit.isVisibleTo(cp)
+    assert cp.extra_args_edit.isVisibleTo(cp)
+    assert cp.selinux_check.isVisibleTo(cp)

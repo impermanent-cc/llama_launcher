@@ -440,6 +440,8 @@ class ConfigurePanel(QWidget):
         self._left_form.setRowVisible(self.binary_combo, not native)
         self._left_form.setRowVisible(self.gpu_combo, not native)
         self._left_form.setRowVisible(self.mounts_panel, not native)
+        self._left_form.setRowVisible(self.extra_args_edit, not native)
+        self._left_form.setRowVisible(self.selinux_check, not native)
         self._update_detached_visibility()
         self.refresh_preview()
 

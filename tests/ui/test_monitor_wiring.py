@@ -303,6 +303,9 @@ def test_on_launch_native_spawns_process_not_container(qtbot, monkeypatch):
     monkeypatch.setattr(native_svc, "launch_native",
                         lambda p, base, now_iso: calls.setdefault(
                             "res", NativeResult(True, "llama-nat", "127.0.0.1", 8080, 4242)))
+    # No live instance for this profile -- the double-launch guard (Fix 1)
+    # must let the launch proceed.
+    monkeypatch.setattr(native_svc, "list_native_instances", lambda base_dir: [])
     # Fail the test loudly if the container path is taken instead.
     monkeypatch.setattr(LaunchController, "_spawn_async",
                         lambda self, *a, **k: calls.setdefault("container", True))
@@ -325,6 +328,44 @@ def test_on_launch_native_spawns_process_not_container(qtbot, monkeypatch):
     monkeypatch.setattr(w._launch, "vram_check", lambda: "")
     w._launch.on_launch()
     assert "res" in calls and "container" not in calls
+
+
+def test_on_launch_native_refuses_when_already_running(qtbot, monkeypatch):
+    """Fix 1: relaunching a native profile that already has a live instance
+    must NOT spawn a second llama-server -- doing so would fail to bind the
+    in-use port and orphan the original process (registry entry overwritten
+    with the dead PID, original left running with no way to stop it)."""
+    from llama_launcher.services import native as native_svc
+
+    p = _profile()
+    p.runtime.launch_mode = "native"
+    p.runtime.native_binary = "/opt/bin/llama-server"
+
+    launch_calls = {"n": 0}
+    monkeypatch.setattr(native_svc, "launch_native",
+                        lambda p, base, now_iso: launch_calls.__setitem__(
+                            "n", launch_calls["n"] + 1))
+    monkeypatch.setattr(
+        native_svc, "list_native_instances",
+        lambda base_dir: [{"name": native_svc.native_name(p.name),
+                           "running": True, "profile": p.name,
+                           "mode": "server", "pid": 4242, "kind": "native"}])
+
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._configure_panel.load_profile(p)
+    monkeypatch.setattr(w._configure_panel, "current_profile", lambda: p)
+    monkeypatch.setattr(w._launch, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(w._launch, "vram_check", lambda: "")
+
+    errors = []
+    monkeypatch.setattr(w._launch, "_report_launch_error",
+                        lambda *a, **k: errors.append((a, k)))
+
+    w._launch.on_launch()
+
+    assert launch_calls["n"] == 0
+    assert errors, "_report_launch_error should have fired to refuse the launch"
 
 
 def _router_profile():
