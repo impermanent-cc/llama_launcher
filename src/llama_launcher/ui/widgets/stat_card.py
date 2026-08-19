@@ -24,7 +24,7 @@ class StatCard(QFrame):
         self._running = True
         self.setFrameShape(QFrame.StyledPanel)
         self.setMinimumWidth(180)
-        self._selected = False
+        self._selected = None       # sentinel: forces the initial paint below
         self.set_selected(False)
         v = QVBoxLayout(self)
         top = QHBoxLayout()
@@ -83,10 +83,14 @@ class StatCard(QFrame):
         self._kv.setText(f"KV {kv * 100:.0f}%" if kv is not None else "")
 
     def set_selected(self, on: bool) -> None:
+        if on == self._selected:      # per-tick restyle guard (set_instance_cards
+            return                    # calls this every poll even when unchanged)
         self._selected = on
+        # Target the class name, not QFrame -- QLabel is a QFrame subclass, so a
+        # bare "QFrame { border: ... }" selector cascaded onto every child label.
         self.setStyleSheet(
-            "QFrame { border: 2px solid palette(highlight); border-radius: 4px; }" if on
-            else "QFrame { border: 1px solid palette(mid); border-radius: 4px; }")
+            "StatCard { border: 2px solid palette(highlight); border-radius: 4px; }" if on
+            else "StatCard { border: 1px solid palette(mid); border-radius: 4px; }")
 
     def mousePressEvent(self, ev):
         self.selected.emit(self._name)
