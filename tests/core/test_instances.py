@@ -33,6 +33,19 @@ def test_carries_stop_timeout_from_profile():
     assert inst.stop_timeout == 60
 
 
+def test_carries_binary_from_profile():
+    containers = [{"name": "llama-d", "running": True, "profile": "d", "mode": "server"}]
+    profiles = [Profile(name="d", runtime=Runtime(binary="docker"), settings={"port": 8080})]
+    (inst,) = build_instances(containers, profiles, "podman")
+    assert inst.binary == "docker"   # the profile's binary, not the listing default
+
+
+def test_unmatched_container_uses_listing_binary():
+    containers = [{"name": "llama-gone", "running": False, "profile": "gone", "mode": "server"}]
+    (inst,) = build_instances(containers, [], "docker")
+    assert inst.binary == "docker"   # falls back to the binary that listed it
+
+
 def test_unmatched_container_defaults_stop_timeout():
     containers = [{"name": "llama-gone", "running": False, "profile": "gone", "mode": "server"}]
     inst, = build_instances(containers, [])

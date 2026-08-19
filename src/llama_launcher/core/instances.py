@@ -20,9 +20,14 @@ class Instance:
     embeddings: bool
     reranking: bool
     stop_timeout: int = DEFAULT_STOP_TIMEOUT
+    binary: str = "podman"
 
 
-def build_instances(containers: list[dict], profiles: list[Profile]) -> list[Instance]:
+def build_instances(containers: list[dict], profiles: list[Profile],
+                    binary: str = "podman") -> list[Instance]:
+    """`binary` is the container binary these rows were listed with; it's the
+    fallback for an unmatched container (profile deleted) whose own binary is
+    unknown. A matched container is controlled with its profile's binary."""
     by_name = {p.name: p for p in profiles}
     out: list[Instance] = []
     for c in containers:
@@ -33,11 +38,13 @@ def build_instances(containers: list[dict], profiles: list[Profile]) -> list[Ins
             emb = bool(prof.settings.get("embeddings"))
             rer = bool(prof.settings.get("reranking"))
             stop_to = prof.runtime.stop_timeout
+            bin_ = prof.runtime.binary
         else:
-            port, host, emb, rer, stop_to = None, "127.0.0.1", False, False, DEFAULT_STOP_TIMEOUT
+            port, host, emb, rer = None, "127.0.0.1", False, False
+            stop_to, bin_ = DEFAULT_STOP_TIMEOUT, binary
         out.append(Instance(
             name=c["name"], profile=c.get("profile", ""), mode=c.get("mode", "server"),
             running=bool(c.get("running")), port=port, host=host,
-            embeddings=emb, reranking=rer, stop_timeout=stop_to))
+            embeddings=emb, reranking=rer, stop_timeout=stop_to, binary=bin_))
     out.sort(key=lambda i: (not i.running, i.name))   # running first, then by name
     return out

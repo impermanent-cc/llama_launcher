@@ -110,7 +110,7 @@ def build_instances_data(target: dict) -> dict:
     binary = target["binary"]
     profiles = list_profiles(target["base_dir"])
     by_name = {p.name: p for p in profiles}
-    instances = build_instances(runtime.list_launcher_containers(binary), profiles)
+    instances = build_instances(runtime.list_launcher_containers(binary), profiles, binary)
     rows = []
     for inst in instances:
         summ = _instance_summary_data(inst, by_name, target["router_base_dir"])
@@ -566,8 +566,9 @@ class MonitorController:
         self.update_status()
 
     def _on_instance_stop(self, name: str) -> None:
-        binary = self.window._configure_panel.current_profile().runtime.binary
         inst = next((i for i in self._instances if i.name == name), None)
+        binary = inst.binary if inst is not None \
+            else self.window._configure_panel.current_profile().runtime.binary
         timeout = inst.stop_timeout if inst is not None else DEFAULT_STOP_TIMEOUT
         self.window._launch._spawn_async(runtime.stop_argv(name, binary, timeout=timeout),
                                          on_done=self.update_status)
@@ -577,7 +578,9 @@ class MonitorController:
     def _on_instance_remove(self, name: str) -> None:
         # A stopped launcher container lingers in `podman ps -a` with no useful
         # action; remove it so the instances list can be cleared.
-        binary = self.window._configure_panel.current_profile().runtime.binary
+        inst = next((i for i in self._instances if i.name == name), None)
+        binary = inst.binary if inst is not None \
+            else self.window._configure_panel.current_profile().runtime.binary
         self.window._launch._spawn_async(runtime.rm_argv(name, binary), on_done=self.update_status)
         if self._active_instance is not None and self._active_instance.name == name:
             self._active_instance = None
