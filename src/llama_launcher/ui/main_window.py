@@ -5,17 +5,16 @@
 # the same module object report_controller.py's own import uses, so the patch
 # still reaches the real call site.
 import subprocess
-from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QLineEdit,
+    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
     QScrollArea, QLabel, QPushButton,
     QMessageBox, QInputDialog, QTabWidget, QDockWidget
 )
 
 from llama_launcher.core.spec import (
-    Profile, RouterMember, member_model_id, slugify,
+    member_model_id, slugify,
 )
 from llama_launcher.core.router_preset import render_preset
 from llama_launcher.core.pathmap import host_to_container
@@ -50,11 +49,10 @@ def base_dir():
     return default_base_dir()
 
 
-# StatsWorker/build_monitor_data used to be defined in this module; they now
-# live in monitor_controller.py (moved along with the status/instances/
-# monitor/log-follower/stats/router-poll behavior that uses them) but are
-# re-exported here too, since the test suite still reaches them as
-# `llama_launcher.ui.main_window.StatsWorker` /
+# build_monitor_data used to be defined in this module; it now lives in
+# monitor_controller.py (moved along with the status/instances/monitor/
+# log-follower/stats/router-poll behavior that uses it) but is re-exported
+# here too, since the test suite still reaches it as
 # `llama_launcher.ui.main_window.build_monitor_data`.
 #
 # This import is placed after base_dir() (which monitor_controller.py imports
@@ -62,17 +60,11 @@ def base_dir():
 # import base_dir` calls) so that name is already bound on this module by the
 # time those calls resolve.
 from llama_launcher.ui.controllers.monitor_controller import (  # noqa: E402
-    MonitorController, StatsWorker, build_monitor_data,
+    MonitorController, build_monitor_data,
 )
 
-# _UpdateWorker used to be defined in this module; it now lives in
-# launch_controller.py (moved along with the launch/stop/restart/image-fetch/
-# detect/update-check behavior that uses it) but is re-exported here too,
-# since the test suite still reaches it as
-# `llama_launcher.ui.main_window._UpdateWorker` (both names bind the same
-# class object, so a monkeypatch on either resolves for both).
 from llama_launcher.ui.controllers.launch_controller import (  # noqa: E402
-    LaunchController, _UpdateWorker,
+    LaunchController,
 )
 
 # BenchmarkWorker used to be defined in this module; it now lives in
@@ -283,350 +275,8 @@ class MainWindow(QMainWindow):
         self._status_timer.timeout.connect(self._monitor.update_status)
         self._status_timer.start()
 
-    # -- MonitorController state forwarders ----------------------------------
-    # This state now lives on self._monitor (see ui/controllers/monitor_
-    # controller.py); these r/w properties keep it reachable as window.<name>
-    # for MainWindow's own not-moved code (e.g. on_launch's post-launch reset,
-    # ConfigurePanel.load_profile), for _MonitorGather (which still writes
-    # _monitor_result/_monitor_inflight onto the window it was handed), and
-    # for the test suite.
-    @property
-    def _active_instance(self):
-        return self._monitor._active_instance
-
-    @_active_instance.setter
-    def _active_instance(self, value):
-        self._monitor._active_instance = value
-
-    @property
-    def _monitor_target(self):
-        return self._monitor._monitor_target
-
-    @_monitor_target.setter
-    def _monitor_target(self, value):
-        self._monitor._monitor_target = value
-
-    @property
-    def _monitor_result(self):
-        return self._monitor._monitor_result
-
-    @_monitor_result.setter
-    def _monitor_result(self, value):
-        self._monitor._monitor_result = value
-
-    @property
-    def _monitor_inflight(self):
-        return self._monitor._monitor_inflight
-
-    @_monitor_inflight.setter
-    def _monitor_inflight(self, value):
-        self._monitor._monitor_inflight = value
-
-    @property
-    def _stats_worker(self):
-        return self._monitor._stats_worker
-
-    @_stats_worker.setter
-    def _stats_worker(self, value):
-        self._monitor._stats_worker = value
-
-    @property
-    def _stats_target(self):
-        return self._monitor._stats_target
-
-    @_stats_target.setter
-    def _stats_target(self, value):
-        self._monitor._stats_target = value
-
-    @property
-    def _log_proc(self):
-        return self._monitor._log_proc
-
-    @_log_proc.setter
-    def _log_proc(self, value):
-        self._monitor._log_proc = value
-
-    @property
-    def _props(self):
-        return self._monitor._props
-
-    @_props.setter
-    def _props(self, value):
-        self._monitor._props = value
-
-    @property
-    def _props_model(self):
-        return self._monitor._props_model
-
-    @_props_model.setter
-    def _props_model(self, value):
-        self._monitor._props_model = value
-
-    @property
-    def _spec_prev(self):
-        return self._monitor._spec_prev
-
-    @_spec_prev.setter
-    def _spec_prev(self, value):
-        self._monitor._spec_prev = value
-
-    @property
-    def _router_statuses(self):
-        return self._monitor._router_statuses
-
-    @_router_statuses.setter
-    def _router_statuses(self, value):
-        self._monitor._router_statuses = value
-
-    # -- LaunchController state forwarders -----------------------------------
-    # This state now lives on self._launch (see ui/controllers/
-    # launch_controller.py); these properties keep it reachable as
-    # window.<name> for the test suite (_fetch_worker is set directly by
-    # tests exercising _stop_timers's drain path; _fetch_repo is read after
-    # on_fetch_latest starts a fetch).
-    @property
-    def _fetch_worker(self):
-        return self._launch._fetch_worker
-
-    @_fetch_worker.setter
-    def _fetch_worker(self, value):
-        self._launch._fetch_worker = value
-
-    @property
-    def _fetch_repo(self):
-        return self._launch._fetch_repo
-
-    # -- ConfigurePanel widget forwarders -----------------------------------
-    # Every Configure-tab widget now lives on self._configure_panel; these
-    # properties keep it reachable as window.<name> for the rest of
-    # MainWindow's methods (not yet moved) and for the test suite.
-    @property
-    def name_edit(self):
-        return self._configure_panel.name_edit
-
-    @property
-    def image_edit(self):
-        return self._configure_panel.image_edit
-
-    @property
-    def model_edit(self):
-        return self._configure_panel.model_edit
-
-    @property
-    def binary_combo(self):
-        return self._configure_panel.binary_combo
-
-    @property
-    def gpu_combo(self):
-        return self._configure_panel.gpu_combo
-
-    @property
-    def engine_combo(self):
-        return self._configure_panel.engine_combo
-
-    @property
-    def mode_combo(self):
-        return self._configure_panel.mode_combo
-
-    @property
-    def bind_host_combo(self):
-        return self._configure_panel.bind_host_combo
-
-    @property
-    def detached_check(self):
-        return self._configure_panel.detached_check
-
-    @property
-    def selinux_check(self):
-        return self._configure_panel.selinux_check
-
-    @property
-    def extra_args_edit(self):
-        return self._configure_panel.extra_args_edit
-
-    @property
-    def raw_edit(self):
-        return self._configure_panel.raw_edit
-
-    @property
-    def mmproj_edit(self):
-        return self._configure_panel.mmproj_edit
-
-    @property
-    def draft_model_edit(self):
-        return self._configure_panel.draft_model_edit
-
-    @property
-    def mounts_panel(self):
-        return self._configure_panel.mounts_panel
-
-    @property
-    def lora_panel(self):
-        return self._configure_panel.lora_panel
-
-    @property
-    def lora_section(self):
-        return self._configure_panel.lora_section
-
-    @property
-    def model_meta_label(self):
-        return self._configure_panel.model_meta_label
-
-    @property
-    def _draft_model_dot(self):
-        return self._configure_panel._draft_model_dot
-
-    @property
-    def _mmproj_dot(self):
-        return self._configure_panel._mmproj_dot
-
-    @property
-    def _left_form(self):
-        return self._configure_panel._left_form
-
-    @property
-    def add_member_btn(self):
-        return self._configure_panel.add_member_btn
-
-    @property
-    def remove_member_btn(self):
-        return self._configure_panel.remove_member_btn
-
-    @property
-    def edit_member_btn(self):
-        return self._configure_panel.edit_member_btn
-
-    @property
-    def members_list(self):
-        return self._configure_panel.members_list
-
-    @property
-    def members_guidance(self):
-        return self._configure_panel.members_guidance
-
-    @property
-    def _members_row(self):
-        return self._configure_panel._members_row
-
-    @property
-    def profile_combo(self):
-        return self._configure_panel.profile_combo
-
-    @property
-    def save_btn(self):
-        return self._configure_panel.save_btn
-
-    @property
-    def save_as_btn(self):
-        return self._configure_panel.save_as_btn
-
-    @property
-    def delete_btn(self):
-        return self._configure_panel.delete_btn
-
-    @property
-    def launch_btn(self):
-        return self._configure_panel.launch_btn
-
-    @property
-    def stop_btn(self):
-        return self._configure_panel.stop_btn
-
-    @property
-    def restart_btn(self):
-        return self._configure_panel.restart_btn
-
-    @property
-    def detect_image_btn(self):
-        return self._configure_panel.detect_image_btn
-
-    @property
-    def fetch_btn(self):
-        return self._configure_panel.fetch_btn
-
-    @property
-    def export_sh_btn(self):
-        return self._configure_panel.export_sh_btn
-
-    @property
-    def report_btn(self):
-        return self._configure_panel.report_btn
-
-    @property
-    def web_ui_btn(self):
-        return self._configure_panel.web_ui_btn
-
-    @property
-    def api_key_box(self):
-        return self._configure_panel.api_key_box
-
-    @property
-    def harness_box(self):
-        return self._configure_panel.harness_box
-
-    @property
-    def configure_status(self):
-        return self._configure_panel.configure_status
-
-    @property
-    def preview(self):
-        return self._configure_panel.preview
-
-    @property
-    def _config_bottom(self):
-        return self._configure_panel._config_bottom
-
-    @property
-    def _widgets(self):
-        return self._configure_panel._widgets
-
-    @property
-    def _group_boxes(self):
-        return self._configure_panel._group_boxes
-
-    @property
-    def _setting_rows(self):
-        return self._configure_panel._setting_rows
-
-    @property
-    def update_badge(self):
-        return self._configure_panel.update_badge
-
-    @property
-    def configure_tab(self):
-        return self._configure_panel.configure_tab
-
-    # -- ConfigurePanel behavior delegators ----------------------------------
-    # These methods now live on self._configure_panel (Task 2 of the
-    # main_window decomposition); MainWindow keeps a one-line forwarder for
-    # each so both the test suite and MainWindow's own not-yet-moved code
-    # (which calls them as self.<method>()) keep working unchanged.
-    def _profile_name(self) -> str:
-        return self._configure_panel._profile_name()
-
     def _container_name(self) -> str:
         return f"llama-{slugify(self._configure_panel._profile_name())}"
-
-    def active_catalog(self) -> dict:
-        return self._configure_panel.active_catalog()
-
-    def _apply_mode_to_settings_form(self) -> None:
-        return self._configure_panel._apply_mode_to_settings_form()
-
-    def _on_mode_changed(self, _index=0) -> None:
-        return self._configure_panel._on_mode_changed(_index)
-
-    def _apply_engine_enums(self) -> None:
-        return self._configure_panel._apply_engine_enums()
-
-    def _maybe_seed_default_image(self, engine: str) -> None:
-        return self._configure_panel._maybe_seed_default_image(engine)
-
-    def _on_engine_changed(self, _index=0) -> None:
-        return self._configure_panel._on_engine_changed(_index)
-
-    def _sync_load_mode_legacy(self) -> None:
-        return self._configure_panel._sync_load_mode_legacy()
 
     def _on_tab_changed(self, _index: int) -> None:
         # Entering the Configure tab must show a live key even for an edited-
@@ -638,82 +288,6 @@ class MainWindow(QMainWindow):
         # so hide the bottom strip on the Monitor/Benchmark tabs.
         self._configure_panel._config_bottom.setVisible(
             self.tabs.currentWidget() is self._configure_panel.configure_tab)
-
-    # -- MonitorController delegators (status/instances/monitor/log/stats/
-    # router-poll behavior now lives on self._monitor; see
-    # ui/controllers/monitor_controller.py) --------------------------------
-    def _on_stats_visibility(self, visible: bool) -> None:
-        return self._monitor._on_stats_visibility(visible)
-
-    def _refresh_stats_target(self) -> None:
-        return self._monitor._refresh_stats_target()
-
-    def _start_stats_worker(self) -> None:
-        return self._monitor._start_stats_worker()
-
-    def _stop_stats_worker(self) -> None:
-        return self._monitor._stop_stats_worker()
-
-    def _save_stats_config(self) -> None:
-        return self._monitor._save_stats_config()
-
-    def _add_member_item(self, member: RouterMember) -> None:
-        return self._configure_panel._add_member_item(member)
-
-    def set_member_fields(self, row: int, model_id: str | None = None,
-                          load_on_startup: bool | None = None,
-                          stop_timeout: int | None = None) -> None:
-        return self._configure_panel.set_member_fields(
-            row, model_id=model_id, load_on_startup=load_on_startup,
-            stop_timeout=stop_timeout)
-
-    def _member_candidates(self) -> list[str]:
-        return self._configure_panel._member_candidates()
-
-    def _on_add_member(self) -> None:
-        return self._configure_panel._on_add_member()
-
-    def _on_remove_member(self) -> None:
-        return self._configure_panel._on_remove_member()
-
-    def _has_unsaved_changes(self) -> bool:
-        return self._configure_panel._has_unsaved_changes()
-
-    def _on_edit_member(self) -> None:
-        return self._configure_panel._on_edit_member()
-
-    def members(self) -> list:
-        return self._configure_panel.members()
-
-    def member_pairs(self) -> list:
-        return self._configure_panel.member_pairs()
-
-    def missing_member_profiles(self) -> list:
-        return self._configure_panel.missing_member_profiles()
-
-    def router_issues(self) -> list:
-        return self._configure_panel.router_issues()
-
-    def _field_with_browse(self, line_edit: QLineEdit, dot: QWidget | None = None) -> QWidget:
-        return self._configure_panel._field_with_browse(line_edit, dot)
-
-    def _browse_into(self, line_edit: QLineEdit) -> None:
-        return self._configure_panel._browse_into(line_edit)
-
-    def load_profile(self, p: Profile) -> None:
-        return self._configure_panel.load_profile(p)
-
-    def current_profile(self) -> Profile:
-        return self._configure_panel.current_profile()
-
-    def build_current_command(self, p: Profile | None = None) -> list:
-        return self._configure_panel.build_current_command(p)
-
-    def preview_text(self) -> str:
-        return self._configure_panel.preview_text()
-
-    def refresh_preview(self) -> None:
-        return self._configure_panel.refresh_preview()
 
     def _reload_profile_list(self):
         self._configure_panel.profile_combo.clear()
@@ -828,160 +402,6 @@ class MainWindow(QMainWindow):
             f"Bound to {host}: reachable beyond this machine. The API key is required."
             if host not in LOOPBACK_HOSTS else "")
 
-    def _update_spec_stats(self, p: Profile) -> None:
-        return self._monitor._update_spec_stats(p)
-
-    def _poll_api_key(self, p: Profile) -> str | None:
-        return self._monitor._poll_api_key(p)
-
-    def _refresh_props(self, p: Profile) -> str | None:
-        return self._monitor._refresh_props(p)
-
-    def _report_launch_error(self, text: str = None, *, show_dialog: bool = False) -> None:
-        return self._launch._report_launch_error(text, show_dialog=show_dialog)
-
-    def adopt_running_containers(self) -> list:
-        return self._launch.adopt_running_containers()
-
-    def _router_host(self, p: Profile) -> str:
-        return self._monitor._router_host(p)
-
-    def refresh_router_models(self) -> None:
-        return self._monitor.refresh_router_models()
-
-    def _router_pollable_model(self) -> str | None:
-        return self._monitor._router_pollable_model()
-
-    def _on_router_load(self, model_id: str) -> None:
-        return self._monitor._on_router_load(model_id)
-
-    def _on_router_unload(self, model_id: str) -> None:
-        return self._monitor._on_router_unload(model_id)
-
-    def _validate_or_warn(self) -> bool:
-        return self._launch._validate_or_warn()
-
-    def vram_check(self) -> str | None:
-        return self._launch.vram_check()
-
-    def on_launch(self):
-        return self._launch.on_launch()
-
-    def _spawn_async(self, argv: list[str], on_done=None, on_error=None):
-        return self._launch._spawn_async(argv, on_done=on_done, on_error=on_error)
-
-    def on_stop(self):
-        return self._launch.on_stop()
-
-    def on_restart(self):
-        return self._launch.on_restart()
-
-    def _on_enable_metrics(self):
-        return self._launch._on_enable_metrics()
-
-    def _resolve_benchmark_member(self, p: Profile, model_scope: str | None):
-        return self._benchmark._resolve_benchmark_member(p, model_scope)
-
-    def _prepare_benchmark(self, p: Profile):
-        return self._benchmark._prepare_benchmark(p)
-
-    def _run_benchmark_sync(self, cfg: dict, run_benchmark=None) -> None:
-        return self._benchmark._run_benchmark_sync(cfg, run_benchmark=run_benchmark)
-
-    def _on_benchmark_run(self, cfg: dict) -> None:
-        return self._benchmark._on_benchmark_run(cfg)
-
-    def _on_benchmark_thread_done(self) -> None:
-        return self._benchmark._on_benchmark_thread_done()
-
-    def _on_benchmark_cancel(self) -> None:
-        return self._benchmark._on_benchmark_cancel()
-
-    def _on_benchmark_clear(self) -> None:
-        return self._benchmark._on_benchmark_clear()
-
-    def _on_benchmark_finished(self, run) -> None:
-        return self._benchmark._on_benchmark_finished(run)
-
-    def _on_benchmark_failed(self, msg: str) -> None:
-        return self._benchmark._on_benchmark_failed(msg)
-
-    @property
-    def _benchmark_thread(self):
-        return self._benchmark._benchmark_thread
-
-    def on_fetch_latest(self):
-        return self._launch.on_fetch_latest()
-
-    def _on_fetch_found(self, tag: str) -> None:
-        return self._launch._on_fetch_found(tag)
-
-    def _on_fetch_failed(self, msg: str) -> None:
-        return self._launch._on_fetch_failed(msg)
-
-    def _on_fetch_finished(self) -> None:
-        return self._launch._on_fetch_finished()
-
-    def detect_image(self):
-        return self._launch.detect_image()
-
-    def _autofill_image_if_empty(self):
-        return self._launch._autofill_image_if_empty()
-
-    def check_for_update(self, tags: list[str]) -> str | None:
-        return self._launch.check_for_update(tags)
-
-    def run_update_check(self):
-        return self._launch.run_update_check()
-
-    def update_status(self):
-        return self._monitor.update_status()
-
-    def _refresh_instances_list(self) -> None:
-        return self._monitor._refresh_instances_list()
-
-    def _on_instance_selected(self, name: str) -> None:
-        return self._monitor._on_instance_selected(name)
-
-    def _on_instance_stop(self, name: str) -> None:
-        return self._monitor._on_instance_stop(name)
-
-    def _on_instance_remove(self, name: str) -> None:
-        return self._monitor._on_instance_remove(name)
-
-    def _monitored_profile(self) -> Profile:
-        return self._monitor._monitored_profile()
-
-    def _monitored_container_name(self) -> str:
-        return self._monitor._monitored_container_name()
-
-    def _instance_api_key(self, inst) -> str | None:
-        return self._monitor._instance_api_key(inst)
-
-    def instance_summary(self, inst) -> dict:
-        return self._monitor.instance_summary(inst)
-
-    def _compute_monitor_target(self, running: bool, model_scope=None) -> dict:
-        return self._monitor._compute_monitor_target(running, model_scope)
-
-    def collect_monitor_data(self) -> dict:
-        return self._monitor.collect_monitor_data()
-
-    def _log_follower_active(self) -> bool:
-        return self._monitor._log_follower_active()
-
-    def _start_log_follower(self):
-        return self._monitor._start_log_follower()
-
-    def _enqueue_log(self, text: str) -> None:
-        return self._monitor._enqueue_log(text)
-
-    def _flush_log(self) -> None:
-        return self._monitor._flush_log()
-
-    def _stop_log_follower(self):
-        return self._monitor._stop_log_follower()
-
     def _stop_timers(self) -> None:
         """Stop background timers/workers so a torn-down window can't keep
         firing update_status, keep polling stats, or leave a QThread running
@@ -1014,27 +434,6 @@ class MainWindow(QMainWindow):
         self._launch.drain()
         self._benchmark.drain()
 
-    def _on_export_sh(self):
-        return self._report._on_export_sh()
-
-    def open_web_ui(self):
-        return self._report.open_web_ui()
-
-    def export_sh(self, path: str):
-        return self._report.export_sh(path)
-
-    def gather_report_data(self) -> dict:
-        return self._report.gather_report_data()
-
-    def _metrics_report_text(self, p: Profile) -> str:
-        return self._report._metrics_report_text(p)
-
-    def _save_report(self, md: str, ts: str | None = None) -> Path:
-        return self._report._save_report(md, ts)
-
-    def on_generate_report(self):
-        return self._report.on_generate_report()
-
     def closeEvent(self, event):
         if getattr(self, "_really_quit", False) or not self._minimize_to_tray:
             self._monitor._stop_log_follower()
@@ -1052,29 +451,3 @@ class MainWindow(QMainWindow):
         self._stop_timers()
         from PySide6.QtWidgets import QApplication
         QApplication.instance().quit()
-
-    def apply_model_caps(self) -> None:
-        return self._configure_panel.apply_model_caps()
-
-    def _suggestion_index(self, caps):
-        return self._configure_panel._suggestion_index(caps)
-
-    @staticmethod
-    def _dot_state_for(key, described, sugg_by_key, reason_by_key):
-        return ConfigurePanel._dot_state_for(key, described, sugg_by_key, reason_by_key)
-
-    def _apply_dot(self, widget, key, described, sugg_by_key, reason_by_key) -> None:
-        return self._configure_panel._apply_dot(widget, key, described, sugg_by_key, reason_by_key)
-
-    def _apply_field_dot(self, dot, key, described, sugg_by_key, reason_by_key) -> None:
-        return self._configure_panel._apply_field_dot(dot, key, described, sugg_by_key, reason_by_key)
-
-    def _resolve_sibling(self, filename) -> str | None:
-        return self._configure_panel._resolve_sibling(filename)
-
-    def _apply_suggestion(self, sg) -> None:
-        return self._configure_panel._apply_suggestion(sg)
-
-    @staticmethod
-    def _meta_caps_text(meta, size, caps) -> str:
-        return ConfigurePanel._meta_caps_text(meta, size, caps)

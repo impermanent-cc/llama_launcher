@@ -46,7 +46,7 @@ def test_draft_model_edit_widget_exists(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
     from PySide6.QtWidgets import QLineEdit
-    assert hasattr(w, "draft_model_edit"), "draft_model_edit attribute missing"
+    assert hasattr(w._configure_panel, "draft_model_edit"), "draft_model_edit attribute missing"
     assert isinstance(w._configure_panel.draft_model_edit, QLineEdit)
 
 

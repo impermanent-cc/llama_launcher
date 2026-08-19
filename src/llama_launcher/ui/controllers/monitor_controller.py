@@ -406,7 +406,7 @@ class MonitorController:
             if not self._monitor_inflight:
                 self._monitor_inflight = True
                 QThreadPool.globalInstance().start(
-                    _MonitorGather(self.window, self._monitor_target))
+                    _MonitorGather(self, self._monitor_target))
             self._update_spec_stats(p)
         else:
             # Nothing running: drop the last gather so a stale summary isn't
