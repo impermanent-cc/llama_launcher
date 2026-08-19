@@ -121,3 +121,21 @@ def test_profile_without_detached_key_defaults_false():
     # A profile JSON written before this field existed has no runtime.detached.
     p = profile_from_dict({"name": "Legacy", "runtime": {"binary": "podman"}})
     assert p.runtime.detached is False
+
+
+def test_launch_mode_and_native_binary_round_trip():
+    p = Profile(name="Native",
+                runtime=Runtime(launch_mode="native",
+                                native_binary="/opt/llama/build/bin/llama-server"))
+    out = profile_from_dict(profile_to_dict(p))
+    assert out.runtime.launch_mode == "native"
+    assert out.runtime.native_binary == "/opt/llama/build/bin/llama-server"
+
+
+def test_legacy_profile_defaults_to_container():
+    legacy = profile_to_dict(Profile(name="Old"))
+    legacy["runtime"].pop("launch_mode", None)
+    legacy["runtime"].pop("native_binary", None)
+    out = profile_from_dict(legacy)
+    assert out.runtime.launch_mode == "container"
+    assert out.runtime.native_binary == ""

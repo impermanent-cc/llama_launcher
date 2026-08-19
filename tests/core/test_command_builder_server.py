@@ -346,3 +346,37 @@ def test_mla_use_real_value_emitted():
     p.settings["mla-use"] = "2"
     argv = build_command(p)
     assert argv[argv.index("--mla-use") + 1] == "2"
+
+
+def test_native_launch_uses_binary_not_container():
+    p = Profile(name="n", model="/home/me/models/m.gguf",
+                runtime=Runtime(launch_mode="native",
+                                native_binary="/opt/bin/llama-server",
+                                bind_host="127.0.0.1"),
+                settings={"port": 9001})
+    argv = build_command(p)
+    assert argv[0] == "/opt/bin/llama-server"
+    assert "run" not in argv and "-v" not in argv and "--name" not in argv
+    assert "-m" in argv and "/home/me/models/m.gguf" in argv
+    # binds directly to the profile's host (no -p publish in native mode)
+    assert argv[argv.index("--host") + 1] == "127.0.0.1"
+    assert argv[argv.index("--port") + 1] == "9001"
+
+
+def test_native_host_defaults_to_bind_host_0000():
+    p = Profile(name="n", model="/m.gguf",
+                runtime=Runtime(launch_mode="native",
+                                native_binary="/opt/bin/llama-server",
+                                bind_host="0.0.0.0"),
+                settings={"port": 8080})
+    argv = build_command(p)
+    assert argv[argv.index("--host") + 1] == "0.0.0.0"
+
+
+def test_container_launch_host_unchanged():
+    # Container mode still binds 0.0.0.0 inside the container regardless of bind_host.
+    p = Profile(name="c", image="img:tag", model="/models/m.gguf",
+                runtime=Runtime(bind_host="127.0.0.1"), settings={"port": 8080})
+    argv = build_command(p)
+    assert argv[argv.index("--host") + 1] == "0.0.0.0"
+    assert argv[0] == "podman" and "run" in argv

@@ -296,6 +296,78 @@ def test_router_model_switch_refetches(qtbot, monkeypatch):
     assert calls["n"] == 2
 
 
+def test_on_launch_native_spawns_process_not_container(qtbot, monkeypatch):
+    from llama_launcher.services import native as native_svc
+    from llama_launcher.services.native import NativeResult
+    calls = {}
+    monkeypatch.setattr(native_svc, "launch_native",
+                        lambda p, base, now_iso: calls.setdefault(
+                            "res", NativeResult(True, "llama-nat", "127.0.0.1", 8080, 4242)))
+    # No live instance for this profile -- the double-launch guard (Fix 1)
+    # must let the launch proceed.
+    monkeypatch.setattr(native_svc, "list_native_instances", lambda base_dir: [])
+    # Fail the test loudly if the container path is taken instead.
+    monkeypatch.setattr(LaunchController, "_spawn_async",
+                        lambda self, *a, **k: calls.setdefault("container", True))
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    p = _profile()
+    p.runtime.launch_mode = "native"
+    p.runtime.native_binary = "/opt/bin/llama-server"
+    w._configure_panel.load_profile(p)
+    # NOTE (deviation from task-8-brief.md): ConfigurePanel does not yet
+    # round-trip Runtime.launch_mode/native_binary through load_profile() /
+    # current_profile() -- that widget wiring is Task 11's scope and has not
+    # landed in this worktree (only Tasks 1-7 are merged ahead of this one).
+    # current_profile() is the actual interface on_launch() consumes, so
+    # patch it directly to return our native profile rather than relying on
+    # a UI round-trip that doesn't exist yet.
+    monkeypatch.setattr(w._configure_panel, "current_profile", lambda: p)
+    # bypass VRAM/validation dialogs
+    monkeypatch.setattr(w._launch, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(w._launch, "vram_check", lambda: "")
+    w._launch.on_launch()
+    assert "res" in calls and "container" not in calls
+
+
+def test_on_launch_native_refuses_when_already_running(qtbot, monkeypatch):
+    """Fix 1: relaunching a native profile that already has a live instance
+    must NOT spawn a second llama-server -- doing so would fail to bind the
+    in-use port and orphan the original process (registry entry overwritten
+    with the dead PID, original left running with no way to stop it)."""
+    from llama_launcher.services import native as native_svc
+
+    p = _profile()
+    p.runtime.launch_mode = "native"
+    p.runtime.native_binary = "/opt/bin/llama-server"
+
+    launch_calls = {"n": 0}
+    monkeypatch.setattr(native_svc, "launch_native",
+                        lambda p, base, now_iso: launch_calls.__setitem__(
+                            "n", launch_calls["n"] + 1))
+    monkeypatch.setattr(
+        native_svc, "list_native_instances",
+        lambda base_dir: [{"name": native_svc.native_name(p.name),
+                           "running": True, "profile": p.name,
+                           "mode": "server", "pid": 4242, "kind": "native"}])
+
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._configure_panel.load_profile(p)
+    monkeypatch.setattr(w._configure_panel, "current_profile", lambda: p)
+    monkeypatch.setattr(w._launch, "_validate_or_warn", lambda: True)
+    monkeypatch.setattr(w._launch, "vram_check", lambda: "")
+
+    errors = []
+    monkeypatch.setattr(w._launch, "_report_launch_error",
+                        lambda *a, **k: errors.append((a, k)))
+
+    w._launch.on_launch()
+
+    assert launch_calls["n"] == 0
+    assert errors, "_report_launch_error should have fired to refuse the launch"
+
+
 def _router_profile():
     from llama_launcher.core.spec import Profile, Runtime
     return Profile(name="r", image="img", mode="router", runtime=Runtime())

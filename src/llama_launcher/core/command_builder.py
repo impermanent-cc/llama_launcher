@@ -239,7 +239,7 @@ def _render_setting(setting, value) -> list[str]:
     return [setting.flag, str(value)]
 
 
-def _owned_server_pairs(profile: Profile, catalog: dict) -> list:
+def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") -> list:
     pairs: list = []
     if profile.model:
         pairs.append(("-m", profile.model))
@@ -301,7 +301,7 @@ def _owned_server_pairs(profile: Profile, catalog: dict) -> list:
                 continue
             pairs.append((rendered[0], rendered[1] if len(rendered) > 1 else None))
 
-    pairs.append(("--host", "0.0.0.0"))
+    pairs.append(("--host", host))
     pairs.append(("--port", str(port)))
     return pairs
 
@@ -310,8 +310,8 @@ _SERVER_PROTECTED = {"--host", "--port"}
 _REPEATABLE = {"--lora", "--lora-scaled"}
 
 
-def _server_args(profile: Profile, catalog: dict) -> list[str]:
-    owned = _owned_server_pairs(profile, catalog)
+def _server_args(profile: Profile, catalog: dict, host: str = "0.0.0.0") -> list[str]:
+    owned = _owned_server_pairs(profile, catalog, host)
     argv, _warnings = _merge_raw_args(
         owned, _parse_raw_pairs(profile.raw_args), _SERVER_PROTECTED, _REPEATABLE)
     return argv
@@ -365,4 +365,7 @@ def build_command(profile: Profile, catalog: dict = CATALOG,
                   router_host_dir: str = "", detach: bool = False) -> list[str]:
     if profile.mode == "router":
         return _run_level_args(profile, router_host_dir) + _router_server_args(profile)
+    if profile.runtime.launch_mode == "native":
+        return [profile.runtime.native_binary] + _server_args(
+            profile, catalog, host=profile.runtime.bind_host)
     return _run_level_args(profile, detach=detach) + _server_args(profile, catalog)

@@ -8,7 +8,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from llama_launcher.core.spec import Profile
 from llama_launcher.core.validation import validate, dial_host
 from llama_launcher.store.profiles import profile_to_dict, load_config, save_config
-from llama_launcher.services import runtime, gpu, metrics
+from llama_launcher.services import runtime, gpu, metrics, native
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.core import report as report_mod
 from llama_launcher.ui.dialogs.report_dialog import ReportDialog
@@ -73,7 +73,8 @@ class ReportController:
                           members=self.window._configure_panel.member_pairs(),
                           api_key_present=bool(
                               api_key_store.resolve_api_key(self.window.router_base_dir(), p))
-                          if p.mode == "router" else False)
+                          if p.mode == "router" else False,
+                          native_binary_ok=native.native_binary_ok_for(p))
         gpus = gpu.query_gpus()
         gpu_txt = "\n".join(f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, "
                             f"util {g.util_pct}%, {g.temp_c}C" for g in gpus) or "(no nvidia-smi)"

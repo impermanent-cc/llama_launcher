@@ -101,6 +101,27 @@ def test_build_instances_data_enriches_rows_with_tok_kv_mode(monkeypatch):
     assert rows["llama-emb"]["kv_pct"] is None
 
 
+def test_build_instances_data_includes_native_rows(tmp_path, monkeypatch):
+    """A native (non-container) server registered under base_dir shows up as a
+    Monitor card alongside container rows, carrying its own kind/pid."""
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    monkeypatch.setattr(mc.runtime, "list_launcher_containers", lambda b: [])
+    monkeypatch.setattr(mc.native, "list_native_instances",
+                        lambda base: [{"name": "llama-nat", "running": True,
+                                       "profile": "nat", "mode": "server",
+                                       "kind": "native", "pid": 4242}])
+    monkeypatch.setattr(mc, "list_profiles",
+                        lambda base: [Profile(name="nat", settings={"port": 8080})])
+    monkeypatch.setattr(mc.health, "probe_health", lambda *a, **k: "ready")
+    monkeypatch.setattr(mc.metrics, "fetch_metrics", lambda *a, **k: {})
+    monkeypatch.setattr(mc.metrics, "fetch_slots", lambda *a, **k: [])
+    target = {"binary": "podman", "base_dir": str(tmp_path),
+              "router_base_dir": str(tmp_path)}
+    out = mc.build_instances_data(target)
+    assert [i.name for i in out["instances"]] == ["llama-nat"]
+    assert out["instances"][0].kind == "native" and out["instances"][0].pid == 4242
+
+
 def _two_containers(*_a, **_k):
     return [
         {"name": "llama-solo", "running": True, "profile": "Solo", "mode": "server"},
@@ -278,3 +299,34 @@ def test_stop_unknown_instance_falls_back_to_default_timeout(win, monkeypatch):
                         lambda argv, on_done=None, on_error=None: spawned.append(argv))
     win._monitor._on_instance_stop("llama-ghost")
     assert spawned[0] == ["podman", "stop", "-t", "10", "llama-ghost"]
+
+
+def test_native_instance_stop_sends_sigterm_then_schedules_kill(win, monkeypatch):
+    import signal
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    win._monitor._instances = [Instance(
+        name="llama-nat", profile="nat", mode="server", running=True,
+        port=8080, host="127.0.0.1", embeddings=False, reranking=False,
+        stop_timeout=7, binary="podman", kind="native", pid=4242)]
+    signals = []
+    monkeypatch.setattr(mc.native, "stop_native", lambda pid, sig: signals.append((pid, sig)))
+    scheduled = {}
+    monkeypatch.setattr(mc, "_schedule_sigkill",
+                        lambda pid, delay: scheduled.setdefault("v", (pid, delay)), raising=False)
+    win._monitor._on_instance_stop("llama-nat")
+    assert signals == [(4242, signal.SIGTERM)]
+    assert scheduled["v"] == (4242, 7)
+
+
+def test_native_instance_remove_calls_native(win, monkeypatch):
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    win._monitor._instances = [Instance(
+        name="llama-nat", profile="nat", mode="server", running=False,
+        port=None, host="127.0.0.1", embeddings=False, reranking=False,
+        stop_timeout=10, binary="podman", kind="native", pid=None)]
+    removed = []
+    monkeypatch.setattr(mc.native, "remove_native", lambda name, base: removed.append(name))
+    win._monitor._on_instance_remove("llama-nat")
+    assert removed == ["llama-nat"]

@@ -51,6 +51,8 @@ class Runtime:
     router_key_mode: str = "global"  # "global" (shared key) | "own" (per-profile key)
     engine: str = "llama.cpp"     # "llama.cpp" | "ik_llama.cpp"
     stop_timeout: int = DEFAULT_STOP_TIMEOUT  # `podman stop -t` grace before SIGKILL
+    launch_mode: str = "container"  # "container" (podman/docker) | "native" (subprocess)
+    native_binary: str = ""         # abs path to a prebuilt llama-server (native mode)
 
 
 @dataclass

@@ -177,6 +177,17 @@ def test_launch_warnings_go_to_stderr(monkeypatch, capsys):
     assert "dropped m2" in capsys.readouterr().err
 
 
+def test_launch_native_profile_refused_by_cli(monkeypatch, capsys):
+    native = _server("s")
+    native.runtime.launch_mode = "native"
+    native.runtime.native_binary = "/opt/bin/llama-server"
+    _profiles(monkeypatch, [native], last="s")
+    monkeypatch.setattr(app, "binary_available", lambda b: True)
+    monkeypatch.setattr(app, "validate", lambda p, **kw: [])
+    assert app.main(["--launch", "--profile", "s"]) == 1
+    assert "gui-only" in capsys.readouterr().err.lower()
+
+
 def test_stop_success_exit_0(monkeypatch, capsys):
     _ready_router(monkeypatch)
     monkeypatch.setattr(app.headless, "stop_router", lambda p, binary, timeout=10: True)

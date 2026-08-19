@@ -7,9 +7,21 @@ from llama_launcher.core.instances import build_instances
 from llama_launcher.core.mtp_stats import spec_counters, spec_delta
 from llama_launcher.core.validation import dial_host
 from llama_launcher.store.profiles import list_profiles, load_config, save_config
-from llama_launcher.services import runtime, health, metrics, gpu
+from llama_launcher.services import runtime, health, metrics, gpu, native
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import router_api
+
+
+def _schedule_sigkill(pid: int, delay: int) -> None:
+    """Send SIGKILL after `delay`s if the process is still alive -- the native
+    analog of `podman stop -t`. SIGTERM was already sent; give it the grace
+    period, then force."""
+    from PySide6.QtCore import QTimer
+    import signal as _signal
+
+    def _kill():
+        native.stop_native(pid, _signal.SIGKILL)
+    QTimer.singleShot(max(0, delay) * 1000, _kill)
 
 
 def _fmt_uptime(started_at: str | None) -> str:
@@ -51,8 +63,12 @@ def build_monitor_data(target: dict) -> dict | None:
          if target["metrics_on"] and poll else {})
     slots = (metrics.fetch_slots(port, model=model_scope, api_key=key, host=host)
              if poll else [])
-    st = runtime.stats(name, binary) or {}
-    uptime = _fmt_uptime(runtime.started_at(name, binary))
+    if target.get("kind") == "native" and target.get("pid"):
+        st = native.proc_stats(target["pid"]) or {}
+        uptime = ""     # native uptime is not tracked in v1
+    else:
+        st = runtime.stats(name, binary) or {}
+        uptime = _fmt_uptime(runtime.started_at(name, binary))
     return {
         "tok_s": m.get("llamacpp:predicted_tokens_seconds"),
         "prompt_tok_s": m.get("llamacpp:prompt_tokens_seconds"),
@@ -110,7 +126,9 @@ def build_instances_data(target: dict) -> dict:
     binary = target["binary"]
     profiles = list_profiles(target["base_dir"])
     by_name = {p.name: p for p in profiles}
-    instances = build_instances(runtime.list_launcher_containers(binary), profiles, binary)
+    container_rows = runtime.list_launcher_containers(binary)
+    native_rows = native.list_native_instances(target["base_dir"])
+    instances = build_instances(container_rows + native_rows, profiles, binary)
     rows = []
     for inst in instances:
         summ = _instance_summary_data(inst, by_name, target["router_base_dir"])
@@ -566,22 +584,34 @@ class MonitorController:
         self.update_status()
 
     def _on_instance_stop(self, name: str) -> None:
+        import signal
         inst = next((i for i in self._instances if i.name == name), None)
-        binary = inst.binary if inst is not None \
-            else self.window._configure_panel.current_profile().runtime.binary
-        timeout = inst.stop_timeout if inst is not None else DEFAULT_STOP_TIMEOUT
-        self.window._launch._spawn_async(runtime.stop_argv(name, binary, timeout=timeout),
-                                         on_done=self.update_status)
+        if inst is not None and inst.kind == "native":
+            if inst.pid is not None:
+                native.stop_native(inst.pid, signal.SIGTERM)
+                _schedule_sigkill(inst.pid, inst.stop_timeout)
+            self.update_status()
+        else:
+            binary = inst.binary if inst is not None \
+                else self.window._configure_panel.current_profile().runtime.binary
+            timeout = inst.stop_timeout if inst is not None else DEFAULT_STOP_TIMEOUT
+            self.window._launch._spawn_async(runtime.stop_argv(name, binary, timeout=timeout),
+                                             on_done=self.update_status)
         if self._active_instance is not None and self._active_instance.name == name:
             self._active_instance = None
 
     def _on_instance_remove(self, name: str) -> None:
         # A stopped launcher container lingers in `podman ps -a` with no useful
         # action; remove it so the instances list can be cleared.
+        from llama_launcher.ui.main_window import base_dir
         inst = next((i for i in self._instances if i.name == name), None)
-        binary = inst.binary if inst is not None \
-            else self.window._configure_panel.current_profile().runtime.binary
-        self.window._launch._spawn_async(runtime.rm_argv(name, binary), on_done=self.update_status)
+        if inst is not None and inst.kind == "native":
+            native.remove_native(name, base_dir())
+            self.update_status()
+        else:
+            binary = inst.binary if inst is not None \
+                else self.window._configure_panel.current_profile().runtime.binary
+            self.window._launch._spawn_async(runtime.rm_argv(name, binary), on_done=self.update_status)
         if self._active_instance is not None and self._active_instance.name == name:
             self._active_instance = None
 
@@ -649,6 +679,8 @@ class MonitorController:
             "host": host, "key": key, "model_scope": ms, "poll": poll,
             "name": self._monitored_container_name(),
             "binary": p.runtime.binary,
+            "kind": self._active_instance.kind if self._active_instance is not None else "container",
+            "pid": self._active_instance.pid if self._active_instance is not None else None,
         }
 
     def collect_monitor_data(self) -> dict:
@@ -671,17 +703,25 @@ class MonitorController:
         self._stop_log_follower()
         p = self._monitored_profile()
         name = self._monitored_container_name()
-        # Attaching `podman logs -f` before the container exists just prints
-        # "no such container" and exits, stranding the logs pane on that error.
-        # Skip until it exists; update_status() retries once it's running and
-        # `podman logs` replays from the beginning, so no early output is lost.
-        if not runtime.container_exists(name, p.runtime.binary):
-            return
+        active = self._active_instance
+        if active is not None and active.kind == "native":
+            from llama_launcher.ui.main_window import base_dir
+            logpath = native.native_log_path(base_dir(), active.profile)
+            if not logpath.exists():
+                return
+            argv = native.logs_argv(str(logpath))
+        else:
+            # Attaching `podman logs -f` before the container exists just prints
+            # "no such container" and exits, stranding the logs pane on that error.
+            # Skip until it exists; update_status() retries once it's running and
+            # `podman logs` replays from the beginning, so no early output is lost.
+            if not runtime.container_exists(name, p.runtime.binary):
+                return
+            argv = runtime.logs_argv(name, p.runtime.binary)
         proc = QProcess(self.window)
         proc.setProcessChannelMode(QProcess.MergedChannels)
         proc.readyReadStandardOutput.connect(
             lambda: self._enqueue_log(bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")))
-        argv = runtime.logs_argv(name, p.runtime.binary)
         proc.start(argv[0], argv[1:])
         self._log_proc = proc
 

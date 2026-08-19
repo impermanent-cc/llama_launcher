@@ -41,31 +41,48 @@ def _under_any_mount(path: str, profile: Profile) -> bool:
 
 def validate(profile: Profile, running_ports: tuple = (),
              binary_found: bool = True, members: tuple = (),
-             api_key_present: bool = False) -> list[Issue]:
+             api_key_present: bool = False, native_binary_ok: bool = True) -> list[Issue]:
+    """`native_binary_ok` mirrors `binary_found`: core stays I/O-free, so the
+    caller stats `profile.runtime.native_binary` (e.g. via
+    services.native.native_binary_available) and passes the result in."""
     issues: list[Issue] = []
+    is_native = profile.runtime.launch_mode == "native"
 
-    if not binary_found:
+    if is_native:
+        if profile.mode == "router":
+            issues.append(Issue("error",
+                "Native launch does not support router mode in this version; "
+                "use a container runtime for router profiles."))
+        nb = profile.runtime.native_binary
+        if not nb:
+            issues.append(Issue("error", "Native mode needs a llama-server binary path."))
+        elif not native_binary_ok:
+            issues.append(Issue("error",
+                f"Native binary not found or not executable: {nb}"))
+
+    if not is_native and not binary_found:
         issues.append(Issue("error",
                             f"Runtime '{profile.runtime.binary}' not found on PATH."))
 
-    img = profile.image.lower()
-    looks_ik = "ik-llama" in img or "ik_llama" in img
-    if profile.runtime.engine == "ik_llama.cpp" and img and not looks_ik:
-        issues.append(Issue(
-            "warning",
-            "Engine is ik_llama.cpp but the image doesn't look like an ik build "
-            "(no 'ik-llama'/'ik_llama' in the ref); ik-only flags may be rejected. "
-            "Use an ik-llama-cpp image."))
-    elif profile.runtime.engine == "llama.cpp" and looks_ik:
-        issues.append(Issue(
-            "warning",
-            "Engine is llama.cpp but the image looks like an ik_llama.cpp build; "
-            "switch the Engine to ik_llama.cpp to reach its flags."))
+    if not is_native:
+        img = profile.image.lower()
+        looks_ik = "ik-llama" in img or "ik_llama" in img
+        if profile.runtime.engine == "ik_llama.cpp" and img and not looks_ik:
+            issues.append(Issue(
+                "warning",
+                "Engine is ik_llama.cpp but the image doesn't look like an ik build "
+                "(no 'ik-llama'/'ik_llama' in the ref); ik-only flags may be rejected. "
+                "Use an ik-llama-cpp image."))
+        elif profile.runtime.engine == "llama.cpp" and looks_ik:
+            issues.append(Issue(
+                "warning",
+                "Engine is llama.cpp but the image looks like an ik_llama.cpp build; "
+                "switch the Engine to ik_llama.cpp to reach its flags."))
 
-    for m in profile.mounts:
-        if bool(m.host) != bool(m.container):
-            issues.append(Issue("error",
-                                "Mount row is incomplete (host and container both required)."))
+        for m in profile.mounts:
+            if bool(m.host) != bool(m.container):
+                issues.append(Issue("error",
+                                    "Mount row is incomplete (host and container both required)."))
 
     # Exposure applies to BOTH modes: Runtime.bind_host drives the publish
     # address for every launch, so a single-model server bound past loopback
@@ -85,16 +102,17 @@ def validate(profile: Profile, running_ports: tuple = (),
     else:
         if not profile.model:
             issues.append(Issue("error", "No model selected."))
-        elif not _under_any_mount(profile.model, profile):
+        elif not is_native and not _under_any_mount(profile.model, profile):
             issues.append(Issue("error",
                                 "Model path is not under any mounted folder; the "
                                 "container can't see it."))
 
-        if profile.mmproj and not _under_any_mount(profile.mmproj, profile):
+        if (profile.mmproj and not is_native
+                and not _under_any_mount(profile.mmproj, profile)):
             issues.append(Issue("error", "mmproj path is not under any mount."))
 
         for lora in profile.loras:
-            if not _under_any_mount(lora.path, profile):
+            if not is_native and not _under_any_mount(lora.path, profile):
                 issues.append(Issue("error", f"LoRA path not under any mount: {lora.path}"))
 
     if profile.settings.get("tools"):

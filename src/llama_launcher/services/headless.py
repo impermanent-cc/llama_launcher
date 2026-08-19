@@ -85,6 +85,11 @@ def launch_server(profile, base_dir, binary) -> LaunchResult:
 
 def launch(profile, base_dir, binary) -> LaunchResult:
     """Dispatch to the router or server launcher by profile.mode."""
+    if profile.runtime.launch_mode == "native":
+        return LaunchResult(False, _container_name(profile),
+                            profile.runtime.bind_host,
+                            profile.settings.get("port", 8080),
+                            [], "native launch is GUI-only in this version")
     if profile.mode == "router":
         return launch_router(profile, base_dir, binary)
     return launch_server(profile, base_dir, binary)

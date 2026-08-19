@@ -22,7 +22,7 @@ from llama_launcher.core.spec import (
 )
 from llama_launcher.core.validation import validate, Issue
 from llama_launcher.services import api_key as api_key_store
-from llama_launcher.services import model_info, runtime
+from llama_launcher.services import model_info, runtime, native
 from llama_launcher.store.profiles import list_profiles, resolve_member_pairs
 from llama_launcher.ui.widgets.setting_widgets import make_widget, SuggestionDot
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox, NoWheelSpinBox
@@ -105,6 +105,7 @@ class ConfigurePanel(QWidget):
         image_row.addWidget(self.update_badge)
         image_widget = QWidget()
         image_widget.setLayout(image_row)
+        self._image_row = image_widget   # container-only row, hidden in native mode
         from PySide6.QtWidgets import QTableWidget, QHeaderView
 
         # NoWheel: an unfocused scroll over these must not silently flip launch
@@ -118,6 +119,22 @@ class ConfigurePanel(QWidget):
         self.bind_host_combo.setEditable(True)
         self.bind_host_combo.addItems(["127.0.0.1", "0.0.0.0"])
         self.bind_host_combo.currentTextChanged.connect(self.refresh_preview)
+
+        # Launch mode: container (podman/docker, default) vs native (a
+        # directly-run prebuilt llama-server binary). NoWheel for the same
+        # reason as mode_combo -- an unfocused scroll must not silently swap
+        # how the server is launched.
+        self.launch_mode_combo = NoWheelComboBox()
+        self.launch_mode_combo.addItem("Container (podman/docker)", "container")
+        self.launch_mode_combo.addItem("Native (run a built binary)", "native")
+        self.launch_mode_combo.currentIndexChanged.connect(self._on_launch_mode_changed)
+
+        self.native_binary_edit = QLineEdit()
+        self.native_binary_edit.setPlaceholderText("/path/to/llama-server")
+        self.native_binary_edit.setToolTip(
+            "Path to a prebuilt llama-server executable (mainline or ik_llama.cpp). "
+            "The launcher runs it directly as a managed background process.")
+        self.native_binary_edit.textChanged.connect(self.refresh_preview)
 
         # `podman stop -t` grace period for the Stop button. Large MoE models can
         # need more than podman's 10s default to unload cleanly before SIGKILL.
@@ -182,6 +199,7 @@ class ConfigurePanel(QWidget):
         self.members_list.cellDoubleClicked.connect(
             lambda _r, _c: self._on_edit_member() if _c == 0 else None)
 
+        left_form.addRow("Launch mode", self.launch_mode_combo)
         left_form.addRow("Mode", self.mode_combo)
         left_form.addRow("Bind address", self.bind_host_combo)
         left_form.addRow("Stop grace period", self.stop_timeout_spin)
@@ -191,6 +209,8 @@ class ConfigurePanel(QWidget):
         left_form.addRow("Image", image_widget)
         left_form.addRow("Model", self._field_with_browse(self.model_edit))
         left_form.addRow("Runtime", self.binary_combo)
+        self._native_binary_row = self._native_binary_field_with_browse()
+        left_form.addRow("llama-server binary", self._native_binary_row)
         left_form.addRow("GPU", self.gpu_combo)
 
         # mounts editor
@@ -390,7 +410,7 @@ class ConfigurePanel(QWidget):
         for w in (self.model_edit, self.mmproj_edit, self.draft_model_edit):
             w.setEnabled(not is_router)
         self.lora_panel.setEnabled(not is_router)
-        self.detached_check.setVisible(not is_router)
+        self._update_detached_visibility()
         # The reusable API key + harness block + status/exposure banner are
         # ROUTER-only concepts (a single server uses its own --api-key field in
         # the Settings column). Show them only in router mode.
@@ -402,6 +422,28 @@ class ConfigurePanel(QWidget):
         self.refresh_preview()
         if is_router:
             self.window.refresh_router_panel_header()
+
+    def _update_detached_visibility(self) -> None:
+        """"Run detached" only makes sense for a container launch in server
+        mode: a router is never detached (it's always a managed background
+        process) and neither is native mode (native always runs as a managed
+        background subprocess -- there's no terminal-vs-detached choice)."""
+        is_router = self.mode_combo.currentData() == "router"
+        is_native = self.launch_mode_combo.currentData() == "native"
+        self.detached_check.setVisible(not is_router and not is_native)
+
+    def _on_launch_mode_changed(self, *_) -> None:
+        native = self.launch_mode_combo.currentData() == "native"
+        # Native shows the binary path; hides everything container-only.
+        self._left_form.setRowVisible(self._native_binary_row, native)
+        self._left_form.setRowVisible(self._image_row, not native)
+        self._left_form.setRowVisible(self.binary_combo, not native)
+        self._left_form.setRowVisible(self.gpu_combo, not native)
+        self._left_form.setRowVisible(self.mounts_panel, not native)
+        self._left_form.setRowVisible(self.extra_args_edit, not native)
+        self._left_form.setRowVisible(self.selinux_check, not native)
+        self._update_detached_visibility()
+        self.refresh_preview()
 
     def _apply_engine_enums(self) -> None:
         """Extend/revert -ctk/-ctv enum choices for the current engine."""
@@ -583,7 +625,8 @@ class ConfigurePanel(QWidget):
         key_present = bool(api_key_store.resolve_api_key(self.window.router_base_dir(), p)) \
             if p.mode == "router" else False
         issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
-                          members=self.member_pairs(), api_key_present=key_present)
+                          members=self.member_pairs(), api_key_present=key_present,
+                          native_binary_ok=native.native_binary_ok_for(p))
         for name in self.missing_member_profiles():
             issues.append(Issue(
                 "error",
@@ -602,6 +645,31 @@ class ConfigurePanel(QWidget):
         btn.clicked.connect(lambda: self._browse_into(line_edit))
         row.addWidget(btn)
         return container
+
+    def _native_binary_field_with_browse(self) -> QWidget:
+        """Like `_field_with_browse`, but for `native_binary_edit`.
+
+        `_field_with_browse`'s Browse maps the picked file through the mount
+        table (host -> container path) -- correct for a path that will live
+        INSIDE a container, wrong here: a native binary is a plain host-side
+        executable with no relation to any mount, so mapping it would show
+        the "not in a mounted folder" warning (or silently reject the pick)
+        for the common case of an empty/unrelated mount table.
+        """
+        container = QWidget()
+        row = QHBoxLayout(container)
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self.native_binary_edit, 1)
+        btn = QPushButton("Browse…")
+        btn.clicked.connect(self._browse_native_binary)
+        row.addWidget(btn)
+        return container
+
+    def _browse_native_binary(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Select llama-server binary", os.path.expanduser("~"))
+        if path:
+            self.native_binary_edit.setText(path)
 
     def _browse_into(self, line_edit: QLineEdit) -> None:
         start = os.path.expanduser("~")
@@ -650,6 +718,10 @@ class ConfigurePanel(QWidget):
         self.mode_combo.setCurrentIndex(index if index >= 0 else 0)
         self.bind_host_combo.setCurrentText(p.runtime.bind_host)
         self.stop_timeout_spin.setValue(p.runtime.stop_timeout)
+        idx = self.launch_mode_combo.findData(p.runtime.launch_mode)
+        self.launch_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.native_binary_edit.setText(p.runtime.native_binary)
+        self._on_launch_mode_changed()
         self.window._monitor._router_statuses = {}
         self.window._monitor._spec_prev = None
         self.window._monitor._props = None
@@ -688,7 +760,9 @@ class ConfigurePanel(QWidget):
                             detached=self.detached_check.isChecked(),
                             router_key_mode=self.api_key_box._current_scope(),
                             engine=self.engine_combo.currentData() or "llama.cpp",
-                            stop_timeout=self.stop_timeout_spin.value()),
+                            stop_timeout=self.stop_timeout_spin.value(),
+                            launch_mode=self.launch_mode_combo.currentData() or "container",
+                            native_binary=self.native_binary_edit.text().strip()),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,

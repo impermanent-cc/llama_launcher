@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QMessageBox, QInputDialog
 
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core import vram
-from llama_launcher.services import runtime, terminal, registry, model_info, gpu
+from llama_launcher.services import runtime, terminal, registry, model_info, gpu, native
 from llama_launcher.services import benchmark_store
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.services import api_key as api_key_store
@@ -88,6 +88,37 @@ class LaunchController:
         if not self._validate_or_warn():
             return
         p = self.window._configure_panel.current_profile()
+
+        if p.runtime.launch_mode == "native":
+            # Refuse a relaunch over an already-running native instance for
+            # this profile: launch_native would spawn a second llama-server
+            # that fails to bind the in-use port and exits, while write_entry
+            # overwrites the registry with that dead PID -- orphaning the
+            # original process (still holding the port/VRAM) with no
+            # registry entry, invisible and unstoppable from the UI.
+            live = native.list_native_instances(default_base_dir())
+            name = native.native_name(p.name)
+            if any(row.get("name") == name or row.get("profile") == p.name
+                   for row in live):
+                self._report_launch_error(
+                    f"A native server for profile '{p.name}' is already "
+                    f"running. Stop it first.", show_dialog=True)
+                return
+
+            self.window.monitor_panel.reset()
+            self.window.benchmark_panel.reset()
+            self.window.monitor_panel.set_endpoints(
+                p.settings.get("port", 8080),
+                bool(p.settings.get("embeddings")),
+                bool(p.settings.get("reranking")))
+            from datetime import datetime
+            res = native.launch_native(p, default_base_dir(),
+                                       now_iso=datetime.now().isoformat())
+            if not res.ok:
+                self._report_launch_error(res.error, show_dialog=True)
+            else:
+                self.window._monitor.update_status()
+            return
 
         if p.mode == "router":
             router_host_dir, warnings = self.window.prepare_router_files()
