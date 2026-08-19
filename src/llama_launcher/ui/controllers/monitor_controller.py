@@ -69,15 +69,17 @@ def build_monitor_data(target: dict) -> dict | None:
 class _MonitorGather(QRunnable):
     """Run build_monitor_data() off the UI thread on the global thread pool.
 
-    Delivery is by writing plain attributes on the window (assignment is atomic
-    under the GIL) rather than a cross-thread Qt signal, and the task holds a
-    reference to the window so it can't be garbage-collected mid-gather. That
-    sidesteps the "C++ object deleted while its thread runs" aborts a persistent
-    QThread worker risks when a MainWindow is torn down (notably across tests).
+    Delivery is by writing plain attributes on the owning MonitorController
+    (assignment is atomic under the GIL) rather than a cross-thread Qt signal,
+    and the task holds a reference to that controller so it (and transitively
+    the window, via controller.window) can't be garbage-collected mid-gather.
+    That sidesteps the "C++ object deleted while its thread runs" aborts a
+    persistent QThread worker risks when a MainWindow is torn down (notably
+    across tests).
     """
-    def __init__(self, window, target):
+    def __init__(self, owner, target):
         super().__init__()
-        self._window = window
+        self._owner = owner
         self._target = target
 
     def run(self):
@@ -85,8 +87,8 @@ class _MonitorGather(QRunnable):
             data = build_monitor_data(self._target)
         except Exception:            # noqa: BLE001 - worker must never raise
             data = None
-        self._window._monitor_result = data
-        self._window._monitor_inflight = False
+        self._owner._monitor_result = data
+        self._owner._monitor_inflight = False
 
 
 class StatsWorker(QThread):
