@@ -51,6 +51,31 @@ def test_instance_summary_gen_row_shows_tok_s(win, monkeypatch):
     assert s["stat"] == "64 tok/s"
 
 
+def test_build_instances_data_scans_profiles_once_and_builds_rows(monkeypatch):
+    """The off-thread builder is a pure function of a primitives-only target: it
+    does all the blocking I/O (list_launcher_containers + per-instance probes)
+    and scans profiles exactly ONCE for the whole table (folding the old N+1
+    per-instance list_profiles scans)."""
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    profs = [Profile(name="emb", image="img", settings={"port": 8081, "embeddings": True}),
+             Profile(name="gen", image="img", settings={"port": 8080})]
+    scans = []
+    monkeypatch.setattr(mc, "list_profiles", lambda base: (scans.append(base), profs)[1])
+    monkeypatch.setattr(mc.runtime, "list_launcher_containers", lambda b: [
+        {"name": "llama-emb", "running": True, "profile": "emb", "mode": "server"},
+        {"name": "llama-gen", "running": True, "profile": "gen", "mode": "server"}])
+    monkeypatch.setattr(mc.health, "probe_health", lambda *a, **k: "ready")
+    monkeypatch.setattr(mc.metrics, "fetch_metrics",
+                        lambda *a, **k: {"llamacpp:predicted_tokens_seconds": 42.0})
+    target = {"binary": "podman", "base_dir": "/b", "router_base_dir": "/r"}
+    data = mc.build_instances_data(target)
+    rows = {r["name"]: r for r in data["rows"]}
+    assert rows["llama-emb"]["stat"] == "ready"      # embedding row -> ready, no tok/s
+    assert rows["llama-gen"]["stat"] == "42 tok/s"   # gen row -> tok/s from /metrics
+    assert len(scans) == 1                           # profiles scanned exactly once
+    assert [i.name for i in data["instances"]] == ["llama-emb", "llama-gen"]
+
+
 def _two_containers(*_a, **_k):
     return [
         {"name": "llama-solo", "running": True, "profile": "Solo", "mode": "server"},
@@ -58,16 +83,13 @@ def _two_containers(*_a, **_k):
     ]
 
 
-def test_tick_populates_two_instance_rows(win, monkeypatch):
-    base = store.default_base_dir()
-    store.save_profile(Profile(name="emb", image="img", settings={"port": 8081}), base)
-    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
-    monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
-                        _two_containers)
-    monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
-                        lambda *a, **k: "ready")
+def _populate(win):
+    """Drive the off-thread instances gather to completion: tick 1 dispatches,
+    the drain lets the pooled task finish, tick 2 renders it into self._instances."""
+    from PySide6.QtCore import QThreadPool
     win._monitor._refresh_instances_list()
-    assert win.monitor_panel.instances_table.rowCount() == 2
+    QThreadPool.globalInstance().waitForDone(2000)
+    win._monitor._refresh_instances_list()
 
 
 def test_selecting_an_instance_sets_active_without_touching_form(win, monkeypatch):
@@ -78,7 +100,7 @@ def test_selecting_an_instance_sets_active_without_touching_form(win, monkeypatc
                         _two_containers)
     monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
                         lambda *a, **k: "ready")
-    win._monitor._refresh_instances_list()
+    _populate(win)
     win._monitor._on_instance_selected("llama-emb")
     assert win._monitor._active_instance is not None and win._monitor._active_instance.name == "llama-emb"
     assert win._configure_panel.current_profile().name == "Solo"          # form untouched
@@ -91,9 +113,80 @@ def test_selecting_own_container_clears_active(win, monkeypatch):
                         _two_containers)
     monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
                         lambda *a, **k: "ready")
-    win._monitor._refresh_instances_list()
+    _populate(win)
     win._monitor._on_instance_selected("llama-solo")              # the form's own container
     assert win._monitor._active_instance is None                  # falls back to current profile
+
+
+def test_instances_rows_rendered_off_thread(win, monkeypatch):
+    """The instances table is gathered off the UI thread: the first tick only
+    dispatches the pooled gather (no rows yet); a later tick renders the result.
+
+    Mirrors the monitor-summary off-thread cadence so N per-instance probes never
+    block the event loop on a Monitor tick.
+    """
+    from PySide6.QtCore import QThreadPool
+    base = store.default_base_dir()
+    store.save_profile(Profile(name="emb", image="img", settings={"port": 8081}), base)
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
+                        _two_containers)
+    monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
+                        lambda *a, **k: "ready")
+    win._monitor._refresh_instances_list()                 # tick 1: dispatch only
+    assert win.monitor_panel.instances_table.rowCount() == 0
+    QThreadPool.globalInstance().waitForDone(2000)
+    win._monitor._refresh_instances_list()                 # tick 2: renders gathered rows
+    assert win.monitor_panel.instances_table.rowCount() == 2
+
+
+def test_active_instance_cleared_when_its_container_vanishes(win, monkeypatch):
+    """A monitored instance whose container disappears on its own (crash, external
+    stop) is auto-cleared so the Monitor falls back to the form profile instead of
+    stranding on a dead target -- previously only explicit Stop/Remove cleared it."""
+    from PySide6.QtCore import QThreadPool
+    base = store.default_base_dir()
+    store.save_profile(Profile(name="emb", image="img", settings={"port": 8081}), base)
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
+                        lambda *a, **k: "ready")
+    monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
+                        _two_containers)
+    _populate(win)
+    win._monitor._on_instance_selected("llama-emb")
+    QThreadPool.globalInstance().waitForDone(2000)         # drain the gather update_status dispatched
+    assert win._monitor._active_instance is not None
+    # emb's container vanishes from the fresh list
+    monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
+                        lambda *a, **k: [{"name": "llama-solo", "running": True,
+                                          "profile": "Solo", "mode": "server"}])
+    _populate(win)                                         # dispatch+render the shrunken list
+    assert win._monitor._active_instance is None
+
+
+def test_active_instance_kept_when_fresh_list_is_empty(win, monkeypatch):
+    """A transient `podman ps` failure returns [] (not an error), so an EMPTY
+    fresh list is ambiguous -- it must NOT be read as 'my instance vanished' and
+    yank the user off the monitored instance + retarget the log follower. Only a
+    non-empty list that omits the instance is genuine evidence of external stop."""
+    from PySide6.QtCore import QThreadPool
+    base = store.default_base_dir()
+    store.save_profile(Profile(name="emb", image="img", settings={"port": 8081}), base)
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    monkeypatch.setattr("llama_launcher.ui.main_window.health.probe_health",
+                        lambda *a, **k: "ready")
+    monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
+                        _two_containers)
+    _populate(win)
+    win._monitor._on_instance_selected("llama-emb")
+    QThreadPool.globalInstance().waitForDone(2000)
+    assert win._monitor._active_instance is not None
+    # ps blip: returns [] even though the instance is really still running
+    monkeypatch.setattr("llama_launcher.ui.main_window.runtime.list_launcher_containers",
+                        lambda *a, **k: [])
+    _populate(win)
+    assert win._monitor._active_instance is not None       # not yanked off on an empty list
+    assert win._monitor._active_instance.name == "llama-emb"
 
 
 def test_stop_instance_spawns_stop_argv(win, monkeypatch):

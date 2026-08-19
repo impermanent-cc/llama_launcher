@@ -66,6 +66,60 @@ def build_monitor_data(target: dict) -> dict | None:
     }
 
 
+def _instance_api_key_from(inst, by_name: dict, router_base_dir: str) -> str | None:
+    """API key for polling one running instance, resolved from a profiles
+    snapshot (never a fresh disk scan). A router reads its key store; a single
+    server uses its stored --api-key. Mirrors the UI-thread _instance_api_key,
+    but keyed off the snapshot so the whole table costs one list_profiles."""
+    if inst.mode == "router":
+        return api_key_store.read_api_key(router_base_dir, inst.profile)
+    stored = by_name.get(inst.profile)
+    return (stored.settings.get("api-key") or None) if stored else None
+
+
+def _instance_summary_data(inst, by_name: dict, router_base_dir: str) -> dict:
+    """Per-row health + headline stat for one instance (pure; blocking I/O).
+
+    An embedding/rerank server has no tok/s, so it reports "ready"; a generation
+    server reports its last predicted-tokens/sec from /metrics. Uses the profiles
+    snapshot for key resolution instead of re-scanning disk per row."""
+    if not inst.running or inst.port is None:
+        return {"health": "down", "stat": ""}
+    hstatus = health.probe_health(inst.port, host=inst.host)
+    if inst.embeddings or inst.reranking:
+        stat = "ready" if hstatus == "ready" else ""
+    else:
+        tok = metrics.fetch_metrics(
+            inst.port, host=inst.host,
+            api_key=_instance_api_key_from(inst, by_name, router_base_dir),
+        ).get("llamacpp:predicted_tokens_seconds")
+        stat = f"{tok:.0f} tok/s" if tok else ("ready" if hstatus == "ready" else "")
+    return {"health": hstatus, "stat": stat}
+
+
+def build_instances_data(target: dict) -> dict:
+    """Gather the instances table from a primitives-only `target`, off the UI thread.
+
+    Does every blocking call the table needs -- the `list_launcher_containers`
+    subprocess and the per-instance health/metrics probes -- plus a SINGLE
+    `list_profiles` scan shared across all rows (the old synchronous refresh did
+    one scan to build the list and one more per instance to resolve its key, so
+    N servers cost N+1 scans on the UI thread every tick). Returns the built
+    Instance list (for selection lookup) and the plain row dicts to render.
+    """
+    binary = target["binary"]
+    profiles = list_profiles(target["base_dir"])
+    by_name = {p.name: p for p in profiles}
+    instances = build_instances(runtime.list_launcher_containers(binary), profiles)
+    rows = []
+    for inst in instances:
+        summ = _instance_summary_data(inst, by_name, target["router_base_dir"])
+        rows.append({"name": inst.name, "profile": inst.profile, "port": inst.port,
+                     "running": inst.running, "health": summ["health"],
+                     "stat": summ["stat"]})
+    return {"instances": instances, "rows": rows}
+
+
 class _MonitorGather(QRunnable):
     """Run build_monitor_data() off the UI thread on the global thread pool.
 
@@ -89,6 +143,32 @@ class _MonitorGather(QRunnable):
             data = None
         self._owner._monitor_result = data
         self._owner._monitor_inflight = False
+
+
+class _InstancesGather(QRunnable):
+    """Run build_instances_data() off the UI thread on the global thread pool.
+
+    Same delivery model as _MonitorGather: it writes the result onto the owning
+    MonitorController (GIL-atomic assignment) instead of emitting a cross-thread
+    Qt signal, and holds a reference to the controller so it can't be
+    garbage-collected mid-gather. A gather that raises leaves the previous result
+    intact (rather than blanking the table) but always clears the in-flight flag.
+    Note a `podman ps` failure is NOT a raise -- it returns [] -- so an empty
+    result still overwrites; _render_instances guards the auto-clear against that.
+    """
+    def __init__(self, owner, target):
+        super().__init__()
+        self._owner = owner
+        self._target = target
+
+    def run(self):
+        try:
+            data = build_instances_data(self._target)
+        except Exception:            # noqa: BLE001 - worker must never raise
+            data = None
+        if data is not None:
+            self._owner._instances_result = data
+        self._owner._instances_inflight = False
 
 
 class StatsWorker(QThread):
@@ -156,6 +236,13 @@ class MonitorController:
         self._monitor_target = {"running": False}
         self._monitor_result = None
         self._monitor_inflight = False
+
+        # -- instances table: same off-UI-thread pattern as the monitor summary.
+        # The blocking list_launcher_containers subprocess + the N per-instance
+        # health/metrics probes are gathered by a pooled _InstancesGather task;
+        # update_status renders the last result and dispatches a fresh gather.
+        self._instances_result = None
+        self._instances_inflight = False
 
         # -- log follower --
         self._log_proc = None
@@ -433,17 +520,41 @@ class MonitorController:
         self._refresh_instances_list()
 
     def _refresh_instances_list(self) -> None:
+        # Render the previous gather (up to one tick stale) then dispatch a fresh
+        # one off the UI thread, guarded so a slow gather can't pile up. Mirrors
+        # the monitor-summary cadence -- the podman ps subprocess and the N
+        # per-instance probes must not run on the event loop.
+        self._render_instances()
+        if not self._instances_inflight:
+            self._instances_inflight = True
+            QThreadPool.globalInstance().start(_InstancesGather(self, self._instances_target()))
+
+    def _instances_target(self) -> dict:
+        """Snapshot the primitives the gather needs (UI thread only)."""
         from llama_launcher.ui.main_window import base_dir
-        binary = self.window._configure_panel.current_profile().runtime.binary
-        self._instances = build_instances(
-            runtime.list_launcher_containers(binary), list_profiles(base_dir()))
-        rows = []
-        for inst in self._instances:
-            summ = self.instance_summary(inst)
-            rows.append({"name": inst.name, "profile": inst.profile, "port": inst.port,
-                         "running": inst.running, "health": summ["health"],
-                         "stat": summ["stat"]})
-        self.window.monitor_panel.set_instances(rows, self._monitored_container_name())
+        return {"binary": self.window._configure_panel.current_profile().runtime.binary,
+                "base_dir": base_dir(),
+                "router_base_dir": self.window.router_base_dir()}
+
+    def _render_instances(self) -> None:
+        result = self._instances_result
+        if result is None:
+            return
+        self._instances = result["instances"]
+        # Auto-clear a monitored instance whose container has dropped out of the
+        # fresh list (crash / external stop) so the Monitor falls back to the form
+        # profile and retargets the log follower instead of stranding on a dead
+        # target -- previously only explicit Stop/Remove cleared _active_instance.
+        # Gate on a NON-EMPTY list: `podman ps` failing (daemon hiccup, timeout)
+        # returns [] rather than raising, so an empty list is ambiguous and must
+        # not be read as "my instance vanished" -- only a populated list that
+        # omits the instance is genuine evidence it was stopped externally.
+        if (self._active_instance is not None and self._instances
+                and self._active_instance.name not in {i.name for i in self._instances}):
+            self._active_instance = None
+            self._start_log_follower()
+        self.window.monitor_panel.set_instances(
+            result["rows"], self._monitored_container_name())
 
     def _on_instance_selected(self, name: str) -> None:
         inst = next((i for i in self._instances if i.name == name), None)
@@ -492,31 +603,15 @@ class MonitorController:
     def _monitored_container_name(self) -> str:
         return self._active_instance.name if self._active_instance else self.window._container_name()
 
-    def _instance_api_key(self, inst) -> str | None:
-        """API key for polling a specific running instance -- the key that
-        instance's server uses (mirrors _poll_api_key, but keyed off the
-        Instance since the summary runs per-row). A router reads its key store;
-        a server uses its stored --api-key. Without this, /metrics polls went
-        out unauthenticated and the auth middleware answered 401 every tick."""
-        from llama_launcher.ui.main_window import base_dir
-        if inst.mode == "router":
-            return api_key_store.read_api_key(self.window.router_base_dir(), inst.profile)
-        stored = next((p for p in list_profiles(base_dir())
-                       if p.name == inst.profile), None)
-        return (stored.settings.get("api-key") or None) if stored else None
-
     def instance_summary(self, inst) -> dict:
-        if not inst.running or inst.port is None:
-            return {"running": inst.running, "health": "down", "stat": ""}
-        hstatus = health.probe_health(inst.port, host=inst.host)
-        if inst.embeddings or inst.reranking:
-            stat = "ready" if hstatus == "ready" else ""
-        else:
-            tok = metrics.fetch_metrics(inst.port, host=inst.host,
-                                        api_key=self._instance_api_key(inst)).get(
-                "llamacpp:predicted_tokens_seconds")
-            stat = f"{tok:.0f} tok/s" if tok else ("ready" if hstatus == "ready" else "")
-        return {"running": True, "health": hstatus, "stat": stat}
+        """Per-row health + headline stat for one instance. Thin UI-side wrapper
+        over the pure _instance_summary_data (which the off-thread gather also
+        uses); resolves the profiles snapshot + router key dir on demand. Returns
+        {"health", "stat"} -- the old dead "running" key (rows read inst.running
+        directly) was dropped."""
+        from llama_launcher.ui.main_window import base_dir
+        by_name = {p.name: p for p in list_profiles(base_dir())}
+        return _instance_summary_data(inst, by_name, self.window.router_base_dir())
 
     def _compute_monitor_target(self, running: bool, model_scope=None) -> dict:
         """Snapshot the poll inputs into a primitives-only dict on the UI thread.
