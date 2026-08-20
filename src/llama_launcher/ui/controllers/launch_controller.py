@@ -157,7 +157,8 @@ class LaunchController:
             self.window._monitor._props = None
             self.window._monitor._props_model = None
             self._spawn_async(
-                runtime.rm_argv(self.window._container_name(), p.runtime.binary),
+                runtime.rm_argv(self.window._container_name(), p.runtime.binary,
+                                connection=connection),
                 on_done=lambda: self._spawn_async(
                     argv, on_done=self.window._monitor.update_status,
                     # Detached means no terminal, so a bad image ref or a CDI
@@ -188,7 +189,8 @@ class LaunchController:
             # show -- show_dialog is fixed here, at launch time, so a later
             # profile/mode switch before the error fires can't change it.
             self._spawn_async(
-                runtime.rm_argv(self.window._container_name(), p.runtime.binary),
+                runtime.rm_argv(self.window._container_name(), p.runtime.binary,
+                                connection=connection),
                 on_done=lambda: self._spawn_async(
                     argv, on_done=self.window._monitor.update_status,
                     on_error=lambda e=None: self._report_launch_error(
