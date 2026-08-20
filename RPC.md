@@ -124,3 +124,67 @@ pool — the head and all workers, local or remote — must run the **same**
 `llama.cpp` build (i.e. the same image tag, rebuilt and re-pushed/re-pulled
 together whenever you update). Mixing builds across nodes is the most common
 cause of an RPC pool that connects but fails or misbehaves mid-load.
+
+## Verifying a real multi-node pooled run — what to look for
+
+A pool can "start" (workers up, head running) and still not actually be
+pooling, or fail subtly mid-load. Use these signals to tell the difference.
+(Written after a CPU-only local dry-run on 2026-08-20 that validated the
+wiring end-to-end; a real GPU-worker run is the remaining acceptance step.)
+
+### Success signals — the head log at load time
+
+- The RPC devices appear in the head's device list, e.g. `RPC[<host>:<port>]`
+  alongside your local `CUDA0`.
+- The `load_tensors:` summary prints a **non-zero buffer size per RPC device**
+  (`RPC[…] model buffer size = … MiB`). This line is the authoritative record
+  of where each layer landed. If an RPC device shows ~0, no layers went to
+  that worker.
+- The model finishes loading and `/health` returns `200` **without**
+  `Remote RPC server crashed or returned malformed response`.
+- Each worker log shows `Accepted client connection` plus allocations, no crash.
+
+### Confirm it is actually distributed (not all on the head)
+
+- Run `nvidia-smi` **on each worker node** during load/inference — the
+  `ggml-rpc-server` process should be holding VRAM. A worker sitting at ~0 MiB
+  got no layers.
+- **`-ngl` (GPU-layers) must be high** (e.g. `99`) to offload layers onto the
+  RPC devices at all — without it, layers stay on the head and workers idle.
+- Use **`--tensor-split`** on the head if the automatic split overcommits one
+  node.
+
+### Failure modes and how to recognize them
+
+1. **Wire-format mismatch (most common):** head and a worker on *different*
+   llama.cpp builds → connects, then malformed-response/garbage mid-load. Fix:
+   the **same image tag on every node** (see "One build, every node").
+2. **Worker OOM:** there is no per-worker `--mem` cap, so a worker exposes its
+   full VRAM; if the split over-allocates, it OOM-kills mid-upload and the head
+   reports "server crashed." Watch each node's VRAM headroom — that is what the
+   GUI's "Check fit" estimates.
+3. **`[create_node] invalid data ptr` / graph-compute crash:** observed with
+   **CPU-device** workers (`-d CPU`) on current llama.cpp — the CPU-donation
+   path appears buggy upstream. GPU workers are the supported path; if you see
+   this with GPU workers, suspect a version mismatch (#1).
+4. **Dead ssh tunnel / unreachable worker:** the launcher's readiness gate
+   refuses to start the head ("worker N failed to start"). Check that node's
+   image tag and that its tunnel came up.
+5. The rpc-server's "**Never expose the RPC server to an open network**"
+   warning is **expected** — loopback publish + ssh tunnels keep it private.
+
+### Performance expectation
+
+Pooling is **slower than single-box** — it is a capacity feature, not a speed
+feature; each token serializes tensors over the link. Catastrophic slowness
+usually means the interconnect (LAN bandwidth) is the bottleneck — RPC is
+bandwidth-sensitive. Avoid `--cpu-moe` / `--no-kv-offload` (they centralize
+work on the head; the launcher warns about them).
+
+### In the GUI
+
+- Run **"Check fit"** first and sanity-check its pooled VRAM+RAM headline
+  against real per-node `nvidia-smi` free memory.
+- Known cosmetic quirk: a **worker card's tok/s reflects the head's** HTTP
+  metrics (an `rpc-server` has no HTTP endpoint). Judge a worker's health by
+  its container being up and its VRAM in `nvidia-smi`, not its card number.
