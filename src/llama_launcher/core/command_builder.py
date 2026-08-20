@@ -398,3 +398,32 @@ def build_rpc_endpoints(workers, resolve) -> str:
     head runs with --network host and reaches every worker over the host loopback.
     """
     return ",".join(f"127.0.0.1:{resolve(w)}" for w in workers)
+
+
+_RPC_ENTRYPOINT = "/app/rpc-server"
+
+
+def build_worker_command(profile, worker, index, connection="", wport=None):
+    """Argv to run one rpc-server worker container. Publishes only to the worker
+    host's loopback (never the LAN); the head reaches it directly (local) or over
+    an ssh -L tunnel (remote)."""
+    rt = profile.runtime
+    port = wport if wport is not None else worker.port
+    argv = [rt.binary]
+    if connection:
+        argv += ["--connection", connection]
+    argv += ["run", "-d", "--name", f"llama-{slugify(profile.name)}-rpc{index}"]
+    argv += ["--label", f"llama-launcher.profile={profile.name}"]
+    argv += ["--label", "llama-launcher.mode=rpc-worker"]
+    argv += ["--label", f"llama-launcher.pool={profile.name}"]
+    if worker.device.upper().startswith("CUDA"):
+        if rt.gpu_mode == "cdi":
+            argv += ["--device", "nvidia.com/gpu=all"]
+        elif rt.gpu_mode == "gpus-all":
+            argv += ["--gpus", "all"]
+    argv += ["-p", f"127.0.0.1:{port}:{port}"]
+    argv += ["--entrypoint", _RPC_ENTRYPOINT, profile.image]
+    argv += ["-H", "0.0.0.0", "-p", str(port), "-d", worker.device]
+    if worker.mem_mb:
+        argv += ["--mem", str(worker.mem_mb)]
+    return argv

@@ -1,4 +1,4 @@
-from llama_launcher.core.command_builder import build_command, build_rpc_endpoints
+from llama_launcher.core.command_builder import build_command, build_rpc_endpoints, build_worker_command
 from llama_launcher.core.spec import Mount, Profile, RpcWorker, Runtime
 
 
@@ -50,3 +50,37 @@ def test_build_command_rpc_head_binds_to_configured_host_not_all_interfaces():
                 runtime=Runtime(launch_mode="rpc", bind_host="127.0.0.1"))
     argv = build_command(p, rpc_endpoints="127.0.0.1:50052")
     assert argv[argv.index("--host") + 1] == "127.0.0.1"
+
+
+def _pool():
+    return Profile(name="pool", image="localhost/llama-rpc:b1",
+                   runtime=Runtime(launch_mode="rpc", gpu_mode="cdi"))
+
+
+def test_worker_command_cpu_donor_loopback_publish_no_gpu():
+    argv = build_worker_command(_pool(), RpcWorker(node="box2", device="CPU",
+                                mem_mb=32000, port=50052), index=1, connection="box2")
+    assert argv[:3] == ["podman", "--connection", "box2"]
+    assert "-d" in argv and "--device" not in argv and "--gpus" not in argv
+    assert "-p" in argv and argv[argv.index("-p") + 1] == "127.0.0.1:50052:50052"
+    assert "--name" in argv and argv[argv.index("--name") + 1] == "llama-pool-rpc1"
+    assert argv[argv.index("--entrypoint") + 1] == "/app/rpc-server"
+    tail = argv[argv.index("localhost/llama-rpc:b1") + 1:]
+    assert tail == ["-H", "0.0.0.0", "-p", "50052", "-d", "CPU", "--mem", "32000"]
+
+
+def test_worker_command_gpu_donor_adds_cdi_and_omits_zero_mem():
+    argv = build_worker_command(_pool(), RpcWorker(node="local", device="CUDA0",
+                                mem_mb=0, port=50053), index=0, connection="")
+    assert "--connection" not in argv
+    assert argv[argv.index("--device") + 1] == "nvidia.com/gpu=all"
+    tail = argv[argv.index("localhost/llama-rpc:b1") + 1:]
+    assert tail == ["-H", "0.0.0.0", "-p", "50053", "-d", "CUDA0"]   # no --mem
+
+
+def test_worker_command_labels_tag_the_pool():
+    argv = build_worker_command(_pool(), RpcWorker(node="box2"), index=2, connection="box2")
+    joined = " ".join(argv)
+    assert "llama-launcher.mode=rpc-worker" in joined
+    assert "llama-launcher.pool=pool" in joined
+    assert "llama-launcher.profile=pool" in joined
