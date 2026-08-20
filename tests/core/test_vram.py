@@ -1,6 +1,15 @@
+from types import SimpleNamespace
+
 from llama_launcher.core.vram import (
     bytes_per_elem, kv_cache_bytes, estimate, fits, VramEstimate, pooled_fit,
+    estimate_for_model,
 )
+
+
+def _meta(**kw):
+    base = dict(n_layers=2, n_head=8, n_head_kv=4, n_embd=64, ctx_train=4096)
+    base.update(kw)
+    return SimpleNamespace(**base)
 
 
 def test_bytes_per_elem():
@@ -73,3 +82,34 @@ def test_pooled_fit_does_not_fit_is_negative_margin():
     gb = 1024 ** 3
     r = pooled_fit(200 * gb, [("vram", 48 * gb), ("ram", 96 * gb)])
     assert r.fits is False and r.margin == -56 * gb
+
+
+def test_estimate_for_model_matches_estimate_total_bytes():
+    """The shared weights+KV estimate used by both the single-node (vram_check)
+    and pooled (Check fit) preflights equals a direct estimate().total_bytes."""
+    meta = _meta()
+    got = estimate_for_model(meta, 1000, ctx_size=100,
+                             k_quant="f16", v_quant="f16")
+    direct = estimate(n_layers=2, n_head=8, n_head_kv=4, n_embd=64, ctx=100,
+                      k_quant="f16", v_quant="f16", weights_bytes=1000)
+    assert got == direct.total_bytes
+
+
+def test_estimate_for_model_falls_back_to_ctx_train_then_default():
+    # ctx_size None -> meta.ctx_train
+    on_train = estimate_for_model(_meta(ctx_train=512), 0, ctx_size=None)
+    direct_train = estimate(n_layers=2, n_head=8, n_head_kv=4, n_embd=64,
+                            ctx=512, weights_bytes=0)
+    assert on_train == direct_train.total_bytes
+    # ctx_size None and ctx_train falsy -> 4096
+    on_default = estimate_for_model(_meta(ctx_train=0), 0, ctx_size=None)
+    direct_default = estimate(n_layers=2, n_head=8, n_head_kv=4, n_embd=64,
+                              ctx=4096, weights_bytes=0)
+    assert on_default == direct_default.total_bytes
+
+
+def test_estimate_for_model_returns_weights_when_meta_insufficient():
+    assert estimate_for_model(None, 1234) == 1234
+    assert estimate_for_model(_meta(n_layers=0), 1234) == 1234
+    assert estimate_for_model(_meta(n_embd=0), 1234) == 1234
+    assert estimate_for_model(None, None) == 0

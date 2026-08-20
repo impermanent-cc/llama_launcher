@@ -58,7 +58,8 @@ def default_ram_reader(base_dir: Path):
     return _reader
 
 
-def gather_donations(profile, base_dir, *, gpus=None, ram=None) -> list:
+def gather_donations(profile, base_dir, *, gpus=None,
+                     ram=None) -> list[tuple[str, int]]:
     """One `(kind, bytes)` donation per configured RPC worker.
 
     A worker whose `device` starts with "CUDA" donates VRAM; any other device
@@ -95,7 +96,7 @@ def _gib(n: int) -> float:
     return n / _GIB
 
 
-def headline(estimate_bytes: int, donations: list) -> str:
+def headline(estimate_bytes: int, donations: list[tuple[str, int]]) -> str:
     """One human-readable line summarizing whether the pool fits the model,
     e.g. "120 GB model -> fits: 48 GB VRAM + 96 GB RAM = 144 GB (margin 24 GB)".
     """
