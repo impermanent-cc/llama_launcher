@@ -28,6 +28,11 @@ def test_build_command_rpc_head_is_host_networked_and_local():
     assert "--connection" not in argv           # head runs locally
     assert argv[argv.index("--rpc") + 1] == "127.0.0.1:50052"
     assert argv[0] == "podman" and "run" in argv
+    # The RPC head must force the llama-server entrypoint even when the pool
+    # image's tag ("b1") doesn't match the full/light heuristic — a pool image is
+    # a full-style (tools.sh-entrypoint) build, so the head would otherwise run
+    # the dispatcher and print usage instead of serving.
+    assert argv[argv.index("--entrypoint") + 1] == "/app/llama-server"
 
 
 def test_build_command_container_mode_unchanged():
@@ -64,9 +69,12 @@ def test_worker_command_cpu_donor_loopback_publish_no_gpu():
     assert "-d" in argv and "--device" not in argv and "--gpus" not in argv
     assert "-p" in argv and argv[argv.index("-p") + 1] == "127.0.0.1:50052:50052"
     assert "--name" in argv and argv[argv.index("--name") + 1] == "llama-pool-rpc1"
-    assert argv[argv.index("--entrypoint") + 1] == "/app/rpc-server"
+    assert argv[argv.index("--entrypoint") + 1] == "/app/ggml-rpc-server"
     tail = argv[argv.index("localhost/llama-rpc:b1") + 1:]
-    assert tail == ["-H", "0.0.0.0", "-p", "50052", "-d", "CPU", "--mem", "32000"]
+    # mem_mb is a preflight-only pledge; current ggml-rpc-server has no --mem flag,
+    # so it must NOT reach the worker argv (an unknown arg makes it exit).
+    assert "--mem" not in argv
+    assert tail == ["-H", "0.0.0.0", "-p", "50052", "-d", "CPU"]
 
 
 def test_worker_command_gpu_donor_adds_cdi_and_omits_zero_mem():

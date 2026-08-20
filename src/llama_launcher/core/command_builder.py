@@ -222,8 +222,14 @@ def _run_level_args(profile: Profile, router_host_dir: str = "",
 
     # Full/light images use the /app/tools.sh dispatcher (which rejects -m); point
     # them straight at llama-server unless the user already set an --entrypoint.
+    # An RPC pool head ALWAYS needs this override regardless of tag: a pool image
+    # must carry both llama-server and ggml-rpc-server, so it is a full-style
+    # (tools.sh-entrypoint) build, yet a user's custom tag (e.g. `…:rpc-cuda`)
+    # won't match the full/light tag heuristic. Verified live 2026-08-20: without
+    # this, the head ran tools.sh and printed usage instead of serving.
     has_entrypoint = any(a == "--entrypoint" or a.startswith("--entrypoint=") for a in extra)
-    if needs_server_entrypoint(profile.image) and not has_entrypoint:
+    force_server = needs_server_entrypoint(profile.image) or profile.runtime.launch_mode == "rpc"
+    if force_server and not has_entrypoint:
         argv += ["--entrypoint", _SERVER_ENTRYPOINT]
 
     argv.append(profile.image)
@@ -400,7 +406,11 @@ def build_rpc_endpoints(workers, resolve) -> str:
     return ",".join(f"127.0.0.1:{resolve(w)}" for w in workers)
 
 
-_RPC_ENTRYPOINT = "/app/rpc-server"
+# Current llama.cpp builds the RPC server as `ggml-rpc-server` (upstream
+# tools/rpc/CMakeLists.txt: `set(TARGET ggml-rpc-server)`); the older
+# `rpc-server` name no longer exists. Verified live 2026-08-20 against a
+# GGML_RPC=ON image.
+_RPC_ENTRYPOINT = "/app/ggml-rpc-server"
 
 
 def build_worker_command(profile, worker, index, connection="", wport=None):
@@ -424,6 +434,9 @@ def build_worker_command(profile, worker, index, connection="", wport=None):
     argv += ["-p", f"127.0.0.1:{port}:{port}"]
     argv += ["--entrypoint", _RPC_ENTRYPOINT, profile.image]
     argv += ["-H", "0.0.0.0", "-p", str(port), "-d", worker.device]
-    if worker.mem_mb:
-        argv += ["--mem", str(worker.mem_mb)]
+    # NB: current `ggml-rpc-server` has no per-worker memory-budget flag (its
+    # only options are -t/-d/-H/-p/-c; verified live 2026-08-20). `worker.mem_mb`
+    # is therefore a preflight-only pledge (feeds pooled_fit + the overcommit
+    # warning) and is deliberately NOT passed to the worker — an unknown arg
+    # makes ggml-rpc-server exit with "unknown argument".
     return argv

@@ -42,9 +42,15 @@ project's `cuda.Dockerfile` doesn't already thread `GGML_RPC` through to
 podman run --rm --entrypoint /app/llama-server llama.cpp:rpc-cuda --help | grep -i rpc
 #   --rpc SERVERS     ...
 
-# rpc-server must exist in the image:
-podman run --rm --entrypoint /bin/sh llama.cpp:rpc-cuda -c 'ls -l /app/rpc-server'
+# the RPC worker binary must exist. Current llama.cpp names it
+# `ggml-rpc-server` (older builds called it `rpc-server`):
+podman run --rm --entrypoint /bin/sh llama.cpp:rpc-cuda -c 'ls -l /app/ggml-rpc-server'
 ```
+
+The worker binary's only options are `-t/-d/-H/-p/-c` — there is **no**
+per-worker `--mem` budget flag in current builds, so Llama Launcher treats a
+worker's memory pledge as a "Check fit" preflight number only and never passes
+it to the worker.
 
 If either check fails, the build didn't actually turn RPC on — re-check the
 `GGML_RPC` plumbing before trying to launch a pool against this tag.
@@ -60,11 +66,11 @@ just with every worker on localhost.
 
    ```bash
    podman run -d --name rpc-w0 --device nvidia.com/gpu=all \
-     -p 127.0.0.1:50052:50052 --entrypoint /app/rpc-server \
+     -p 127.0.0.1:50052:50052 --entrypoint /app/ggml-rpc-server \
      llama.cpp:rpc-cuda -H 0.0.0.0 -p 50052 -d CUDA0
 
    podman run -d --name rpc-w1 \
-     -p 127.0.0.1:50053:50053 --entrypoint /app/rpc-server \
+     -p 127.0.0.1:50053:50053 --entrypoint /app/ggml-rpc-server \
      llama.cpp:rpc-cuda -H 0.0.0.0 -p 50053 -d CPU
    ```
 
