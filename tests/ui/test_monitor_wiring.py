@@ -80,7 +80,7 @@ def test_collect_monitor_data(qtbot, monkeypatch):
                                                          "llamacpp:prompt_tokens_seconds": 200.0})
     monkeypatch.setattr(mw.metrics, "fetch_slots", lambda port, timeout=1.0, **kw:
                         [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     monkeypatch.setattr(mw.runtime, "stats", lambda name, b: {"cpu_perc": "9%", "mem_usage": "1G / 16G"})
     w = mw.MainWindow()
     qtbot.addWidget(w)
@@ -99,7 +99,7 @@ def test_collect_monitor_data_reports_speculating(qtbot, monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda *a, **k: {})
     monkeypatch.setattr(mw.runtime, "stats", lambda name, binary: {})
     monkeypatch.setattr(mw.runtime, "started_at", lambda name, binary: None)
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     w = mw.MainWindow()
     qtbot.addWidget(w)
     assert w._monitor.collect_monitor_data()["speculating"] is True
@@ -156,7 +156,7 @@ def test_build_monitor_data_gathers_from_a_plain_target(monkeypatch):
                         lambda *a, **k: {"llamacpp:predicted_tokens_seconds": 50.0})
     monkeypatch.setattr(mw.metrics, "fetch_slots",
                         lambda *a, **k: [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     monkeypatch.setattr(mw.runtime, "stats",
                         lambda name, b: {"cpu_perc": "9%", "mem_usage": "1G / 16G"})
     monkeypatch.setattr(mw.runtime, "started_at", lambda name, b: None)
@@ -175,7 +175,7 @@ def test_build_monitor_data_prefers_kv_cache_metric(monkeypatch):
                         lambda *a, **k: {"llamacpp:kv_cache_usage_ratio": 0.83})
     monkeypatch.setattr(mw.metrics, "fetch_slots",
                         lambda *a, **k: [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     monkeypatch.setattr(mw.runtime, "stats", lambda name, b: {})
     monkeypatch.setattr(mw.runtime, "started_at", lambda name, b: None)
     target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
@@ -190,7 +190,7 @@ def test_build_monitor_data_returns_none_when_not_running(monkeypatch):
     nothing (an idle/stopped server isn't polled off-thread every second)."""
     called = []
     monkeypatch.setattr(mw.runtime, "stats", lambda *a, **k: called.append(1))
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: called.append(1))
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": called.append(1))
     assert mw.build_monitor_data({"running": False}) is None
     assert called == []
 

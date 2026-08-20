@@ -7,7 +7,7 @@ from llama_launcher.core.instances import build_instances
 from llama_launcher.core.mtp_stats import spec_counters, spec_delta
 from llama_launcher.core.nodes import connection_for, host_of
 from llama_launcher.core.validation import dial_host
-from llama_launcher.store.nodes import load_nodes
+from llama_launcher.store.nodes import load_nodes, get_node
 from llama_launcher.store.profiles import list_profiles, load_config, save_config
 from llama_launcher.services import runtime, health, metrics, gpu, native
 from llama_launcher.services import api_key as api_key_store
@@ -56,6 +56,13 @@ def _fmt_uptime(started_at: str | None) -> str:
         return ""
 
 
+def focused_gpu_ssh(node_name: str, base_dir) -> str:
+    """SSH target for the node a monitored instance runs on ('' for local/missing)."""
+    from pathlib import Path
+    node = get_node(Path(base_dir), node_name)
+    return node.ssh_target if node and node.kind == "remote" else ""
+
+
 def build_monitor_data(target: dict) -> dict | None:
     """Gather the Monitor summary from a primitives-only `target`.
 
@@ -87,7 +94,7 @@ def build_monitor_data(target: dict) -> dict | None:
         "prompt_tok_s": m.get("llamacpp:prompt_tokens_seconds"),
         "kv_pct": kv_ratio(m, slots),
         "speculating": any(s.get("speculative") for s in slots),
-        "gpus": gpu.query_gpus(),
+        "gpus": gpu.query_gpus(target.get("gpu_ssh", "")),
         "cpu": st.get("cpu_perc", ""),
         "mem": st.get("mem_usage", ""),
         "uptime": uptime,
@@ -733,6 +740,7 @@ class MonitorController:
             "binary": p.runtime.binary,
             "kind": self._active_instance.kind if self._active_instance is not None else "container",
             "pid": self._active_instance.pid if self._active_instance is not None else None,
+            "gpu_ssh": focused_gpu_ssh(p.runtime.node, self.window.base_dir()),
         }
 
     def collect_monitor_data(self) -> dict:
