@@ -95,6 +95,7 @@ def launch_pool(profile, base_dir, *, run=None, popen=None, connect=None,
     head = build_command(profile, rpc_endpoints=endpoints)
     if run(head) != 0:
         _teardown(profile, base_dir, workers, tunnels, run)
+        _TUNNELS.pop(profile.name, None)
         return PoolResult(False, "head llama-server failed to start")
     return PoolResult(True, head_argv=head)
 
