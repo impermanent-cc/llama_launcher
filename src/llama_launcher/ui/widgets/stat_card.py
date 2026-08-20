@@ -55,6 +55,9 @@ class StatCard(QFrame):
     def headline_text(self) -> str:
         return self._headline.text()
 
+    def title_text(self) -> str:
+        return self._title.text()
+
     def kv_text(self) -> str:
         return self._kv.text()
 
@@ -68,7 +71,11 @@ class StatCard(QFrame):
         self._stop_btn.setToolTip("Stop this instance" if running else "Remove this stopped container")
         port = row.get("port")
         title = row.get("profile") or self._name
-        self._title.setText(f"{title}  :{port}" if port else title)
+        title = f"{title}  :{port}" if port else title
+        node = row.get("node")
+        if node and node != "local":
+            title = f"{title} · {node}"
+        self._title.setText(title)
         health = row.get("health", "down")
         self._health.setText(f"{_DOT.get(health, '○')} {health}")
         if row.get("mode") == "router":

@@ -5,7 +5,9 @@ from PySide6.QtCore import QRunnable, QThread, QThreadPool, QTimer, Signal
 from llama_launcher.core.spec import DEFAULT_STOP_TIMEOUT, Profile, Runtime
 from llama_launcher.core.instances import build_instances
 from llama_launcher.core.mtp_stats import spec_counters, spec_delta
+from llama_launcher.core.nodes import connection_for, host_of
 from llama_launcher.core.validation import dial_host
+from llama_launcher.store.nodes import load_nodes
 from llama_launcher.store.profiles import list_profiles, load_config, save_config
 from llama_launcher.services import runtime, health, metrics, gpu, native
 from llama_launcher.services import api_key as api_key_store
@@ -128,18 +130,50 @@ def build_instances_data(target: dict) -> dict:
     """Gather the instances table from a primitives-only `target`, off the UI thread.
 
     Does every blocking call the table needs -- the `list_launcher_containers`
-    subprocess and the per-instance health/metrics probes -- plus a SINGLE
-    `list_profiles` scan shared across all rows (the old synchronous refresh did
-    one scan to build the list and one more per instance to resolve its key, so
-    N servers cost N+1 scans on the UI thread every tick). Returns the built
-    Instance list (for selection lookup) and the plain row dicts to render.
+    subprocess (once per enabled node) and the per-instance health/metrics
+    probes -- plus a SINGLE `list_profiles` scan shared across all rows (the
+    old synchronous refresh did one scan to build the list and one more per
+    instance to resolve its key, so N servers cost N+1 scans on the UI thread
+    every tick). Returns the built Instance list (for selection lookup) and
+    the plain row dicts to render.
+
+    `target["nodes"]` (when present) is a list of plain-dict node snapshots
+    ({name, connection, host, binary, enabled}) -- see _instances_target. A
+    disabled node is skipped; a node whose `list_launcher_containers` call
+    raises OSError (unreachable) contributes zero rows instead of aborting
+    the whole gather, so one dead remote can't blank the table for the rest.
+    Callers that don't pass "nodes" (older targets, existing tests) get the
+    prior local-only behaviour unchanged.
     """
-    binary = target["binary"]
     profiles = list_profiles(target["base_dir"])
     by_name = {p.name: p for p in profiles}
-    container_rows = runtime.list_launcher_containers(binary)
-    native_rows = native.list_native_instances(target["base_dir"])
-    instances = build_instances(container_rows + native_rows, profiles, binary)
+    nodes = target.get("nodes")
+    legacy_target = nodes is None      # old single-node target with no "nodes" key
+    if legacy_target:
+        nodes = [{"name": "local", "connection": "", "host": "",
+                  "binary": target["binary"], "enabled": True}]
+    instances = []
+    for nd in nodes:
+        if not nd.get("enabled", True):
+            continue
+        binary = nd["binary"]
+        node_name = nd.get("name", "local")
+        conn = nd.get("connection", "")
+        try:
+            if legacy_target:
+                # Preserve the exact old call shape (no `connection` kwarg) so
+                # callers/tests built before nodes existed are unaffected.
+                container_rows = runtime.list_launcher_containers(binary)
+            else:
+                container_rows = runtime.list_launcher_containers(binary, connection=conn)
+        except OSError:
+            container_rows = []
+        native_rows = (native.list_native_instances(target["base_dir"])
+                       if node_name == "local" else [])
+        instances.extend(build_instances(
+            container_rows + native_rows, profiles, binary,
+            node=node_name, node_host=nd.get("host", "")))
+    instances.sort(key=lambda i: (not i.running, i.node, i.name))
     rows = []
     for inst in instances:
         summ = _instance_summary_data(inst, by_name, target["router_base_dir"])
@@ -147,7 +181,7 @@ def build_instances_data(target: dict) -> dict:
                      "running": inst.running, "health": summ["health"],
                      "stat": summ["stat"], "tok_s": summ["tok_s"],
                      "kv_pct": summ["kv_pct"], "embeddings": inst.embeddings,
-                     "reranking": inst.reranking, "mode": inst.mode})
+                     "reranking": inst.reranking, "mode": inst.mode, "node": inst.node})
     return {"instances": instances, "rows": rows}
 
 
@@ -561,11 +595,18 @@ class MonitorController:
             QThreadPool.globalInstance().start(_InstancesGather(self, self._instances_target()))
 
     def _instances_target(self) -> dict:
-        """Snapshot the primitives the gather needs (UI thread only)."""
+        """Snapshot the primitives the gather needs (UI thread only), including
+        every registered node as plain dicts -- no live Node objects, since the
+        gather runs off the UI thread and must not touch shared state."""
         from llama_launcher.ui.main_window import base_dir
         return {"binary": self.window._configure_panel.current_profile().runtime.binary,
                 "base_dir": base_dir(),
-                "router_base_dir": self.window.router_base_dir()}
+                "router_base_dir": self.window.router_base_dir(),
+                "nodes": [
+                    {"name": n.name, "connection": connection_for(n), "host": host_of(n),
+                     "binary": n.binary, "enabled": n.enabled}
+                    for n in load_nodes(base_dir())
+                ]}
 
     def _render_instances(self) -> None:
         result = self._instances_result
