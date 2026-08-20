@@ -51,13 +51,17 @@ def parse_nvidia_smi(text: str) -> list[GpuStat]:
     return out
 
 
-def query_gpus() -> list[GpuStat]:
-    if shutil.which("nvidia-smi") is None:
+def nvidia_smi_argv(ssh_target: str = "") -> list[str]:
+    cmd = ["nvidia-smi", f"--query-gpu={_QUERY}", "--format=csv,noheader,nounits"]
+    return ["ssh", ssh_target, *cmd] if ssh_target else cmd
+
+
+def query_gpus(ssh_target: str = "") -> list[GpuStat]:
+    if not ssh_target and shutil.which("nvidia-smi") is None:
         return []
     try:
-        res = subprocess.run(
-            ["nvidia-smi", f"--query-gpu={_QUERY}", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, check=False, timeout=5)
+        res = subprocess.run(nvidia_smi_argv(ssh_target),
+                             capture_output=True, text=True, check=False, timeout=5)
     except (OSError, subprocess.SubprocessError):
         return []
     if res.returncode != 0:
