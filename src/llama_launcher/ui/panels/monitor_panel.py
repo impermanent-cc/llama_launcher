@@ -242,3 +242,15 @@ class MonitorPanel(QWidget):
 
     def add_status_banner(self, banner) -> None:
         self.layout().insertWidget(0, banner)   # above the cards row
+
+    @staticmethod
+    def _card_title(inst) -> str:
+        """Display title for a StatCard built from an Instance. An rpc-worker
+        container shares its pool head's profile label (Task 4), so it needs
+        its own title -- see core.instances.worker_card_title -- instead of
+        rendering identically to the head's card. Any other instance keeps
+        its profile name (StatCard.update_row appends port/node itself)."""
+        from llama_launcher.core.instances import worker_card_title
+        if inst.mode == "rpc-worker":
+            return worker_card_title(inst)
+        return inst.profile

@@ -3,13 +3,13 @@ import datetime
 from PySide6.QtCore import QRunnable, QThread, QThreadPool, QTimer, Signal
 
 from llama_launcher.core.spec import DEFAULT_STOP_TIMEOUT, Profile, Runtime
-from llama_launcher.core.instances import build_instances
+from llama_launcher.core.instances import build_instances, worker_card_title
 from llama_launcher.core.mtp_stats import spec_counters, spec_delta
 from llama_launcher.core.nodes import connection_for, host_of
 from llama_launcher.core.validation import dial_host
 from llama_launcher.store.nodes import load_nodes, get_node
 from llama_launcher.store.profiles import list_profiles, load_config, save_config
-from llama_launcher.services import runtime, health, metrics, gpu, native
+from llama_launcher.services import runtime, health, metrics, gpu, native, rpc
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import router_api
 
@@ -185,11 +185,22 @@ def build_instances_data(target: dict) -> dict:
     rows = []
     for inst in instances:
         summ = _instance_summary_data(inst, by_name, target["router_base_dir"])
-        rows.append({"name": inst.name, "profile": inst.profile, "port": inst.port,
+        # An rpc-worker container shares its pool head's `llama-launcher.profile`
+        # label (Task 4) so the pool joins as one profile -- which would
+        # otherwise render the worker's card with the SAME title/port as the
+        # head. Override the display-only fields with the worker's own
+        # identity (StatCard.update_row would append `node` again if left as
+        # the plain node name, so the already-worker_card_title-composed title
+        # carries it and "local" suppresses the second append).
+        if inst.mode == "rpc-worker":
+            profile_disp, port_disp, node_disp = worker_card_title(inst), None, "local"
+        else:
+            profile_disp, port_disp, node_disp = inst.profile, inst.port, inst.node
+        rows.append({"name": inst.name, "profile": profile_disp, "port": port_disp,
                      "running": inst.running, "health": summ["health"],
                      "stat": summ["stat"], "tok_s": summ["tok_s"],
                      "kv_pct": summ["kv_pct"], "embeddings": inst.embeddings,
-                     "reranking": inst.reranking, "mode": inst.mode, "node": inst.node})
+                     "reranking": inst.reranking, "mode": inst.mode, "node": node_disp})
     return {"instances": instances, "rows": rows}
 
 
@@ -644,6 +655,20 @@ class MonitorController:
         self._start_log_follower()          # retarget the follower at the new container
         self.update_status()
 
+    def _rpc_pool_profile_for(self, inst) -> Profile | None:
+        """The stored Profile for `inst` (or the current form profile when inst
+        is None) when it is the HEAD of an rpc pool -- i.e. its runtime.launch_mode
+        is "rpc" -- else None. An rpc-worker's own card must never be routed
+        through the pool stop (it stops just that one worker container), so it
+        short-circuits to None regardless of what its (shared, head's) profile
+        says."""
+        if inst is not None and inst.mode == "rpc-worker":
+            return None
+        name = inst.profile if inst is not None \
+            else self.window._configure_panel.current_profile().name
+        prof = next((p for p in list_profiles(self.window.base_dir()) if p.name == name), None)
+        return prof if prof is not None and prof.runtime.launch_mode == "rpc" else None
+
     def _on_instance_stop(self, name: str) -> None:
         import signal
         inst = next((i for i in self._instances if i.name == name), None)
@@ -651,6 +676,16 @@ class MonitorController:
             if inst.pid is not None:
                 native.stop_native(inst.pid, signal.SIGTERM)
                 _schedule_sigkill(inst.pid, inst.stop_timeout)
+            self.update_status()
+            if self._active_instance is not None and self._active_instance.name == name:
+                self._active_instance = None
+            return
+        pool_profile = self._rpc_pool_profile_for(inst)
+        if pool_profile is not None:
+            # Coordinated stop: the head AND every worker container, over each
+            # worker's own node -- a bare `podman stop` on just the head would
+            # leave the workers running.
+            rpc.stop_pool(pool_profile, self.window.base_dir())
             self.update_status()
         else:
             binary = inst.binary if inst is not None \

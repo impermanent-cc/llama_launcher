@@ -1,5 +1,5 @@
-from llama_launcher.core.spec import Profile, Runtime
-from llama_launcher.core.instances import Instance, build_instances
+from llama_launcher.core.spec import Profile, Runtime, RpcWorker
+from llama_launcher.core.instances import Instance, build_instances, worker_card_title
 
 
 def _prof(name, port, host="127.0.0.1", embeddings=False, reranking=False):
@@ -74,3 +74,54 @@ def test_native_row_carries_kind_and_pid():
              "kind": "native", "pid": 4242}]
     (inst,) = build_instances(rows, [_prof("n", 8080)])
     assert inst.kind == "native" and inst.pid == 4242
+
+
+def test_rpc_worker_device_resolved_by_name_index():
+    """A worker container shares its pool head's `llama-launcher.profile` label
+    (Task 4), so its device comes from the profile's rpc_workers list, indexed
+    by the `-rpcN` suffix on the container's own name."""
+    containers = [
+        {"name": "llama-pool-rpc0", "running": True, "profile": "pool", "mode": "rpc-worker"},
+        {"name": "llama-pool-rpc1", "running": True, "profile": "pool", "mode": "rpc-worker"},
+    ]
+    profiles = [Profile(name="pool", settings={"port": 8080}, runtime=Runtime(
+        launch_mode="rpc",
+        rpc_workers=[RpcWorker(node="box1", device="CPU"), RpcWorker(node="box2", device="CUDA0")]))]
+    insts = {i.name: i for i in build_instances(containers, profiles)}
+    assert insts["llama-pool-rpc0"].device == "CPU"
+    assert insts["llama-pool-rpc1"].device == "CUDA0"
+
+
+def test_rpc_worker_device_empty_when_index_out_of_range():
+    containers = [{"name": "llama-pool-rpc5", "running": True, "profile": "pool", "mode": "rpc-worker"}]
+    profiles = [Profile(name="pool", settings={"port": 8080}, runtime=Runtime(
+        launch_mode="rpc", rpc_workers=[RpcWorker(node="box1")]))]
+    (inst,) = build_instances(containers, profiles)
+    assert inst.device == ""
+
+
+def test_rpc_worker_device_empty_when_no_name_suffix():
+    containers = [{"name": "llama-pool-worker", "running": True, "profile": "pool", "mode": "rpc-worker"}]
+    profiles = [Profile(name="pool", settings={"port": 8080}, runtime=Runtime(
+        launch_mode="rpc", rpc_workers=[RpcWorker(node="box1", device="CUDA0")]))]
+    (inst,) = build_instances(containers, profiles)
+    assert inst.device == ""
+
+
+def test_non_worker_instance_has_no_device():
+    containers = [{"name": "llama-a", "running": True, "profile": "a", "mode": "server"}]
+    (inst,) = build_instances(containers, [_prof("a", 8080)])
+    assert inst.device == ""
+
+
+def test_worker_card_title_includes_node():
+    inst = Instance(name="llama-pool-rpc1", profile="pool", mode="rpc-worker", running=True,
+                    port=None, host="127.0.0.1", embeddings=False, reranking=False, node="box2")
+    assert worker_card_title(inst) == "rpc-worker · box2"
+
+
+def test_worker_card_title_includes_device_when_resolved():
+    inst = Instance(name="llama-pool-rpc1", profile="pool", mode="rpc-worker", running=True,
+                    port=None, host="127.0.0.1", embeddings=False, reranking=False,
+                    node="box2", device="CUDA0")
+    assert worker_card_title(inst) == "rpc-worker · box2 · CUDA0"

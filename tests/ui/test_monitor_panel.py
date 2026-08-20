@@ -288,6 +288,28 @@ def test_benchmark_panel_has_controls_table_and_clear(qtbot):
     assert not hasattr(panel, "bench_history")
 
 
+def test_card_title_rpc_worker_includes_node(qtbot):
+    """MonitorPanel._card_title special-cases an rpc-worker Instance (which
+    otherwise shares its pool head's profile name/port -- Task 4's containers
+    are labeled with the SAME `llama-launcher.profile`) so its StatCard title
+    identifies the worker's own node instead of duplicating the head's."""
+    from llama_launcher.core.instances import Instance
+    p = MonitorPanel(); qtbot.addWidget(p)
+    inst = Instance(name="llama-pool-rpc1", profile="pool", mode="rpc-worker",
+                    running=True, port=None, host="127.0.0.1",
+                    embeddings=False, reranking=False, node="box2")
+    label = p._card_title(inst)
+    assert "rpc-worker" in label and "box2" in label
+
+
+def test_card_title_non_worker_instance_uses_profile_name(qtbot):
+    from llama_launcher.core.instances import Instance
+    p = MonitorPanel(); qtbot.addWidget(p)
+    inst = Instance(name="llama-a", profile="a", mode="server", running=True,
+                    port=8080, host="127.0.0.1", embeddings=False, reranking=False)
+    assert p._card_title(inst) == "a"
+
+
 def test_monitor_stats_legend_explains_gen_prompt_kv(qtbot):
     p = MonitorPanel()
     qtbot.addWidget(p)
