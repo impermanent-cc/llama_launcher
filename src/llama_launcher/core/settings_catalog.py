@@ -263,6 +263,10 @@ _ALL = [
     Setting("chat-template-file", "--chat-template-file", "string", "", "Server & Tools", (),
             tooltip="Path to a custom Jinja chat-template file to use instead of the model's "
                     "built-in template. Empty = use the model's own template."),
+    Setting("chat-template-kwargs", "--chat-template-kwargs", "string", "", "Server & Tools", (),
+            tooltip="Extra parameters passed to the Jinja template as a JSON object string, "
+                    "e.g. '{\"enable_thinking\":false}'. Must be a valid JSON object. "
+                    "Empty = pass nothing extra."),
     Setting("tools", "--tools", "multiselect", "", "Server & Tools", (), danger=True,
             enum=("read_file", "write_file", "edit_file", "apply_diff",
                   "file_glob_search", "grep_search", "exec_shell_command",
@@ -288,6 +292,11 @@ _ALL = [
             -1, 1048576, 1,
             tooltip="Maximum tokens the model may spend on internal reasoning before "
                     "answering. -1 = unrestricted; 0 = no thinking."),
+    Setting("reasoning-budget-message", "--reasoning-budget-message", "string", "",
+            "Server & Tools", (),
+            tooltip="Text injected before the end-of-thinking tag when the reasoning budget "
+                    "is exhausted (nudges the model to stop thinking and answer). Only "
+                    "meaningful with a reasoning-budget above 0. Empty = inject nothing."),
     Setting("metrics", "--metrics", "bool", False, "Server & Tools", (),
             tooltip="Expose the Prometheus /metrics endpoint (needed for the Monitor "
                     "tab's throughput numbers). Off by default in llama-server."),
@@ -327,6 +336,14 @@ _ALL = [
     Setting("spec-draft-n-min", "--spec-draft-n-min", "int", 0, "Speculative Decoding", (),
             0, 64, 1,
             tooltip="Minimum draft tokens to use per speculative step. Default 0."),
+    # Negative form, like cors-credentials: llama.cpp offloads draft sampling to
+    # the backend by default, so the bool defaults False (unchecked = keep the
+    # default on, emit nothing) and checking it emits the --no- disable flag.
+    Setting("spec-draft-backend-sampling", "--no-spec-draft-backend-sampling", "bool", False,
+            "Speculative Decoding", (),
+            tooltip="Disable offloading draft-model sampling to the backend during "
+                    "speculative decoding. llama.cpp enables backend draft sampling by "
+                    "default; check this to force it off."),
     Setting("cache-type-k-draft", "--cache-type-k-draft", "enum", "f16", "Speculative Decoding",
             ("-ctkd",), enum=KV_CACHE_TYPES,
             tooltip="K KV-cache quantization for the draft model. Lower precision "
