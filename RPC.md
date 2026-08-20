@@ -105,6 +105,10 @@ to real remote nodes:
 - Launch order is workers-first: the launcher waits for every worker's port
   to be listening before starting the head. Stop order is head-first, then
   workers, then any open tunnels are closed.
+- Launch-time validation does not ssh-probe every node, so use the GUI's
+  "Check fit" button before launching a pool — it pre-checks per-node
+  RPC-image presence and VRAM/RAM fit up front, instead of failing partway
+  through a live launch.
 
 ## One build, every node
 

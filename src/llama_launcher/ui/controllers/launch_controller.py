@@ -129,6 +129,18 @@ class LaunchController:
             return
 
         if p.runtime.launch_mode == "rpc":
+            # Refuse a relaunch over an already-running pool: rpc.launch_pool
+            # starts by tearing down the CURRENT pool's live ssh tunnels
+            # (so a stale one isn't orphaned on relaunch), then the worker
+            # `run` collides on the still-live `llama-<slug>-rpc0` container
+            # name and fails -- leaving a healthy pool degraded with a
+            # confusing error instead of a clean refusal.
+            if runtime.container_state(self.window._container_name(),
+                                       p.runtime.binary, connection="") == "running":
+                self._report_launch_error(
+                    f"An RPC pool for profile '{p.name}' is already "
+                    f"running. Stop it before relaunching.", show_dialog=True)
+                return
             self._launch_pool(p)
             return
 
