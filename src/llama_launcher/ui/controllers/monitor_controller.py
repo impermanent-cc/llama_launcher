@@ -184,17 +184,22 @@ def build_instances_data(target: dict) -> dict:
     instances.sort(key=lambda i: (not i.running, i.node, i.name))
     rows = []
     for inst in instances:
-        summ = _instance_summary_data(inst, by_name, target["router_base_dir"])
         # An rpc-worker container shares its pool head's `llama-launcher.profile`
         # label (Task 4) so the pool joins as one profile -- which would
         # otherwise render the worker's card with the SAME title/port as the
         # head. Override the display-only fields with the worker's own
         # identity (StatCard.update_row would append `node` again if left as
         # the plain node name, so the already-worker_card_title-composed title
-        # carries it and "local" suppresses the second append).
+        # carries it and "local" suppresses the second append). An rpc-server
+        # has no HTTP endpoint, so DON'T run the health/metrics probe: its
+        # `inst.port` resolves to the pool head's port, which would make a
+        # worker card show the HEAD's tok/s (misleading). Report up/down only.
         if inst.mode == "rpc-worker":
+            summ = {"health": "ready" if inst.running else "down",
+                    "stat": "", "tok_s": None, "kv_pct": None}
             profile_disp, port_disp, node_disp = worker_card_title(inst), None, "local"
         else:
+            summ = _instance_summary_data(inst, by_name, target["router_base_dir"])
             profile_disp, port_disp, node_disp = inst.profile, inst.port, inst.node
         rows.append({"name": inst.name, "profile": profile_disp, "port": port_disp,
                      "running": inst.running, "health": summ["health"],

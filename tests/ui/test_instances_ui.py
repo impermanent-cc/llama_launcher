@@ -138,6 +138,39 @@ def test_build_instances_data_titles_rpc_worker_row(monkeypatch):
     assert head["profile"] == "pool" and head["port"] == 8080   # head's row unaffected
 
 
+def test_rpc_worker_row_does_not_show_head_http_metrics(monkeypatch):
+    """A worker shares the head's port (8080), so an HTTP probe of the worker's
+    row hits the HEAD's endpoint. The worker card must NOT surface those metrics
+    (an rpc-server has no HTTP endpoint) -- only up/down."""
+    from llama_launcher.core.spec import RpcWorker
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    profs = [Profile(name="pool", image="img", runtime=Runtime(
+                 launch_mode="rpc", rpc_workers=[RpcWorker(node="box2", device="CUDA0")]),
+             settings={"port": 8080})]
+    monkeypatch.setattr(mc, "list_profiles", lambda base: profs)
+
+    def _containers(binary, connection=""):
+        if connection == "box2":
+            return [{"name": "llama-pool-rpc0", "running": True, "profile": "pool",
+                     "mode": "rpc-worker"}]
+        return [{"name": "llama-pool", "running": True, "profile": "pool", "mode": "server"}]
+    monkeypatch.setattr(mc.runtime, "list_launcher_containers", _containers)
+    monkeypatch.setattr(mc.health, "probe_health", lambda *a, **k: "ready")
+    # The head IS serving 42 tok/s; the worker row must ignore it.
+    monkeypatch.setattr(mc.metrics, "fetch_metrics",
+                        lambda *a, **k: {"llamacpp:predicted_tokens_seconds": 42.0})
+    monkeypatch.setattr(mc.metrics, "fetch_slots", lambda *a, **k: [])
+    target = {"binary": "podman", "base_dir": "/b", "router_base_dir": "/r",
+              "nodes": [{"name": "local", "connection": "", "host": "", "binary": "podman", "enabled": True},
+                        {"name": "box2", "connection": "box2", "host": "10.0.0.2",
+                         "binary": "podman", "enabled": True}]}
+    rows = {r["name"]: r for r in mc.build_instances_data(target)["rows"]}
+    worker = rows["llama-pool-rpc0"]
+    assert worker["tok_s"] is None and worker["stat"] == ""     # no head metrics
+    assert worker["health"] == "ready"                          # up/down only
+    assert rows["llama-pool"]["tok_s"] == 42.0                  # head still shows its own
+
+
 def test_build_instances_data_includes_native_rows(tmp_path, monkeypatch):
     """A native (non-container) server registered under base_dir shows up as a
     Monitor card alongside container rows, carrying its own kind/pid."""

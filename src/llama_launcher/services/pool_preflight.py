@@ -71,13 +71,23 @@ def gather_donations(profile, base_dir, *, gpus=None, ram=None) -> list:
     gpus = gpus or default_gpus_reader(base_dir)
     ram = ram or default_ram_reader(base_dir)
     donations = []
+    # A node's free VRAM (or free RAM) is one shared pool: two no-pledge workers
+    # on the SAME node draw from it, so probing it once per worker double-counts
+    # and inflates the fit. Read each node's free memory once per kind; an
+    # explicit `--mem` pledge is a per-worker allocation the user chose, so
+    # pledges stay additive.
+    counted_free: set = set()
     for w in profile.runtime.rpc_workers:
         is_vram = (w.device or "").upper().startswith("CUDA")
+        kind = "vram" if is_vram else "ram"
         if w.mem_mb:
             amount = int(w.mem_mb) * _MIB
+        elif (w.node, kind) in counted_free:
+            amount = 0
         else:
+            counted_free.add((w.node, kind))
             amount = int(gpus(w.node)) if is_vram else int(ram(w.node))
-        donations.append(("vram" if is_vram else "ram", amount))
+        donations.append((kind, amount))
     return donations
 
 

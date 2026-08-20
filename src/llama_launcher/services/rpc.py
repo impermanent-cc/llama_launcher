@@ -114,10 +114,12 @@ def launch_pool(profile, base_dir, *, run=None, popen=None, connect=None,
 
 
 def _teardown(profile, base_dir, workers, tunnels, run):
+    to = profile.runtime.stop_timeout
     for i, w in enumerate(workers):
         node = get_node(base_dir, w.node) or LOCAL_NODE
         run(rt_svc.stop_argv(f"llama-{slugify(profile.name)}-rpc{i}",
-                             profile.runtime.binary, connection=connection_for(node)))
+                             profile.runtime.binary, timeout=to,
+                             connection=connection_for(node)))
     for t in tunnels:
         try:
             t.terminate()

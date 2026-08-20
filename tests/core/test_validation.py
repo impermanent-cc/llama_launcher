@@ -449,3 +449,11 @@ def test_rpc_cpu_moe_centralizing_warning():
     issues = validate(_rpc([RpcWorker(node="local")], settings={"cpu-moe": True}),
                       worker_image_present={"local": True})
     assert "warning" in _levels(issues, "centralizes")
+
+
+def test_rpc_router_mode_is_error():
+    # RPC pooling does not support router mode (GUI-only server-head pools).
+    p = _rpc([RpcWorker(node="local")])
+    p.mode = "router"
+    issues = validate(p, worker_image_present={"local": True})
+    assert "error" in _levels(issues, "does not support router")

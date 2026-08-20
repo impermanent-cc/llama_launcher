@@ -25,7 +25,13 @@ class RpcWorkersTable(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Node", "Device", "Mem MB", "Port"])
+        self.table.setHorizontalHeaderLabels(["Node", "Device", "Contribution MB", "Port"])
+        # Current llama.cpp `ggml-rpc-server` has no per-worker memory-cap flag,
+        # so this value is NOT enforced on the worker; it is only a pledge feeding
+        # the "Check fit" preflight (pooled VRAM+RAM vs. model size).
+        self.table.horizontalHeaderItem(2).setToolTip(
+            "Estimate only — how much memory you expect this worker to donate, "
+            "used by 'Check fit'. Not enforced (rpc-server has no memory cap).")
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.Stretch)             # Node
         for col in (1, 2, 3):

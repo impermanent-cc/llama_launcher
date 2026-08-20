@@ -62,7 +62,7 @@ class Runtime:
     launch_mode: str = "container"  # "container" (podman/docker) | "native" (subprocess) | "rpc"
     native_binary: str = ""         # abs path to a prebuilt llama-server (native mode)
     node: str = "local"             # which registered node this profile launches on
-    rpc_workers: list = field(default_factory=list)  # list[RpcWorker], RPC mode only
+    rpc_workers: list[RpcWorker] = field(default_factory=list)  # RPC mode only
 
 
 @dataclass
