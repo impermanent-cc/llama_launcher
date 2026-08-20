@@ -1,5 +1,8 @@
 """Registered machines the launcher can drive. Pure module (no I/O)."""
+import re
 from dataclasses import dataclass
+
+_SSH_TARGET_RE = re.compile(r"^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9._-]+(?::[0-9]+)?$")
 
 
 @dataclass(frozen=True)
@@ -13,6 +16,13 @@ class Node:
 
 
 LOCAL_NODE = Node(name="local", kind="local")
+
+
+def valid_ssh_target(target: str) -> bool:
+    """True if `target` is a safe ssh destination (`user@host[:port]` or `host`).
+    Rejects empty, a leading '-', and anything outside the charset, so it can
+    never be smuggled to ssh as an option flag (argv-flag injection)."""
+    return bool(target) and not target.startswith("-") and bool(_SSH_TARGET_RE.match(target))
 
 
 def connection_for(node: Node) -> str:

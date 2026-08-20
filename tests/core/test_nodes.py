@@ -1,4 +1,4 @@
-from llama_launcher.core.nodes import Node, LOCAL_NODE, connection_for, host_of
+from llama_launcher.core.nodes import Node, LOCAL_NODE, connection_for, host_of, valid_ssh_target
 
 
 def test_local_node_injects_no_connection():
@@ -12,3 +12,35 @@ def test_remote_node_connection_and_host():
              ssh_target="me@192.168.1.11:22", binary="podman")
     assert connection_for(n) == "box-b"
     assert host_of(n) == "192.168.1.11"
+
+
+def test_valid_ssh_target_accepts_user_at_host():
+    assert valid_ssh_target("me@10.0.0.2") is True
+
+
+def test_valid_ssh_target_accepts_plain_host():
+    assert valid_ssh_target("host") is True
+
+
+def test_valid_ssh_target_accepts_host_with_port():
+    assert valid_ssh_target("user@host:22") is True
+
+
+def test_valid_ssh_target_rejects_empty():
+    assert valid_ssh_target("") is False
+
+
+def test_valid_ssh_target_rejects_leading_dash_proxycommand():
+    assert valid_ssh_target("-oProxyCommand=x") is False
+
+
+def test_valid_ssh_target_rejects_leading_dash_option():
+    assert valid_ssh_target("-x") is False
+
+
+def test_valid_ssh_target_rejects_embedded_space():
+    assert valid_ssh_target("a b") is False
+
+
+def test_valid_ssh_target_rejects_command_injection():
+    assert valid_ssh_target("user@host;rm -rf") is False
