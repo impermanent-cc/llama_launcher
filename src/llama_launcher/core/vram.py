@@ -36,6 +36,26 @@ def estimate(*, n_layers, n_head, n_head_kv, n_embd, ctx,
                         overhead_bytes=int(overhead_bytes))
 
 
+def estimate_for_model(meta, weights_bytes, *, ctx_size=None,
+                       k_quant="f16", v_quant="f16") -> int:
+    """Weights+KV total-bytes estimate for a model from its GGUF metadata.
+
+    `meta` is a model_info.inspect_model result (duck-typed: n_layers/n_head/
+    n_head_kv/n_embd/ctx_train). When metadata is too thin for a KV estimate,
+    fall back to the weights size alone. Shared by the single-node preflight
+    (LaunchController.vram_check) and the pooled one (Check fit) so both derive
+    the estimate identically. ctx precedence: explicit ctx_size -> meta.ctx_train
+    -> 4096."""
+    if meta is None or not meta.n_layers or not meta.n_embd:
+        return int(weights_bytes or 0)
+    ctx = ctx_size or meta.ctx_train or 4096
+    est = estimate(
+        n_layers=meta.n_layers, n_head=meta.n_head or 1,
+        n_head_kv=meta.n_head_kv or meta.n_head or 1, n_embd=meta.n_embd, ctx=ctx,
+        k_quant=k_quant, v_quant=v_quant, weights_bytes=weights_bytes or 0)
+    return est.total_bytes
+
+
 def fits(estimate_bytes: int, free_bytes: int) -> tuple[bool, int]:
     margin = int(free_bytes) - int(estimate_bytes)
     return (margin >= 0, margin)
@@ -72,7 +92,8 @@ class PooledFit:
         return self.vram_bytes + self.ram_bytes
 
 
-def pooled_fit(estimate_bytes, donations) -> PooledFit:
+def pooled_fit(estimate_bytes: int,
+               donations: list[tuple[str, int]]) -> PooledFit:
     vram = sum(int(b) for kind, b in donations if kind == "vram")
     ram = sum(int(b) for kind, b in donations if kind == "ram")
     total = vram + ram

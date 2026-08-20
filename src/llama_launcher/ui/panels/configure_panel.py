@@ -592,17 +592,10 @@ class ConfigurePanel(QWidget):
         """Same weights+KV-cache estimate LaunchController.vram_check() uses
         for the single-node preflight, reused here for the pooled one."""
         meta, weights, _caps = model_info.inspect_model(p.model, self.mounts_panel.mounts())
-        if meta is None or not meta.n_layers or not meta.n_embd:
-            return int(weights or 0)
-        ctx = p.settings.get("ctx-size") or meta.ctx_train or 4096
-        est = vram.estimate(
-            n_layers=meta.n_layers, n_head=meta.n_head or 1,
-            n_head_kv=meta.n_head_kv or meta.n_head or 1, n_embd=meta.n_embd, ctx=ctx,
+        return vram.estimate_for_model(
+            meta, weights, ctx_size=p.settings.get("ctx-size"),
             k_quant=p.settings.get("cache-type-k", "f16"),
-            v_quant=p.settings.get("cache-type-v", "f16"),
-            weights_bytes=weights or 0,
-        )
-        return est.total_bytes
+            v_quant=p.settings.get("cache-type-v", "f16"))
 
     def _poll_check_fit(self) -> None:
         if not self._check_fit_inflight:

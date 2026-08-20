@@ -408,15 +408,11 @@ class LaunchController:
         split_mode = p.settings.get("split-mode", "layer")
         main_gpu = p.settings.get("main-gpu", 0)
         free = vram.available_free_bytes(free_per_gpu, split_mode, main_gpu)
-        ctx = p.settings.get("ctx-size") or meta.ctx_train or 4096
-        est = vram.estimate(
-            n_layers=meta.n_layers, n_head=meta.n_head or 1,
-            n_head_kv=meta.n_head_kv or meta.n_head or 1, n_embd=meta.n_embd, ctx=ctx,
+        est_total = vram.estimate_for_model(
+            meta, weights, ctx_size=p.settings.get("ctx-size"),
             k_quant=p.settings.get("cache-type-k", "f16"),
-            v_quant=p.settings.get("cache-type-v", "f16"),
-            weights_bytes=weights or 0,
-        )
-        ok, margin = vram.fits(est.total_bytes, free)
+            v_quant=p.settings.get("cache-type-v", "f16"))
+        ok, margin = vram.fits(est_total, free)
         if ok:
             return None
         gib = 1024 ** 3
@@ -427,7 +423,7 @@ class LaunchController:
             free_txt = f"~{free/gib:.1f} GiB ({parts} across {len(free_per_gpu)} GPUs)"
         else:
             free_txt = f"~{free/gib:.1f} GiB"
-        return (f"Estimated VRAM need ~{est.total_bytes/gib:.1f} GiB exceeds free "
+        return (f"Estimated VRAM need ~{est_total/gib:.1f} GiB exceeds free "
                 f"{free_txt} by ~{-margin/gib:.1f} GiB. It may not fit — "
                 f"consider quantized KV cache (-ctk/-ctv q8_0) or a higher --n-cpu-moe. "
                 f"(Estimate is conservative; --n-cpu-moe/-ngl reduce actual GPU use.)")

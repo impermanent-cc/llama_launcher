@@ -7,7 +7,9 @@ from .settings_catalog import (
     ROUTER_ONLY_KEYS,
     router_catalog,
 )
-from .spec import Profile, slugify
+from collections.abc import Callable
+
+from .spec import Profile, RpcWorker, slugify
 
 
 def _mount_opts(mount) -> str:
@@ -396,7 +398,8 @@ def build_command(profile: Profile, catalog: dict = CATALOG,
         + _server_args(profile, catalog)
 
 
-def build_rpc_endpoints(workers, resolve) -> str:
+def build_rpc_endpoints(workers: list[RpcWorker],
+                        resolve: Callable[[RpcWorker], int]) -> str:
     """`--rpc` value: comma-joined 127.0.0.1:<port> for each worker.
 
     `resolve(worker) -> int` gives the head-facing port (local worker's own port,
