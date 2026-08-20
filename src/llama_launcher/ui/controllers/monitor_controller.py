@@ -87,8 +87,9 @@ def build_monitor_data(target: dict) -> dict | None:
         st = native.proc_stats(target["pid"]) or {}
         uptime = ""     # native uptime is not tracked in v1
     else:
-        st = runtime.stats(name, binary) or {}
-        uptime = _fmt_uptime(runtime.started_at(name, binary))
+        mon_conn = target.get("mon_conn", "")
+        st = runtime.stats(name, binary, connection=mon_conn) or {}
+        uptime = _fmt_uptime(runtime.started_at(name, binary, connection=mon_conn))
     return {
         "tok_s": m.get("llamacpp:predicted_tokens_seconds"),
         "prompt_tok_s": m.get("llamacpp:prompt_tokens_seconds"),
@@ -536,7 +537,8 @@ class MonitorController:
             self._monitor_result = None
             return
         name = self._monitored_container_name()
-        state = runtime.container_state(name, p.runtime.binary)
+        state = runtime.container_state(name, p.runtime.binary,
+                                         connection=self._connection_for_node(p.runtime.node))
         # Default the gather target to "don't poll"; the running branch below
         # overwrites it with the live snapshot. Nothing is gathered off-thread
         # until update_status confirms the container is up. (_monitor_result is
@@ -654,8 +656,12 @@ class MonitorController:
             binary = inst.binary if inst is not None \
                 else self.window._configure_panel.current_profile().runtime.binary
             timeout = inst.stop_timeout if inst is not None else DEFAULT_STOP_TIMEOUT
-            self.window._launch._spawn_async(runtime.stop_argv(name, binary, timeout=timeout),
-                                             on_done=self.update_status)
+            node_name = inst.node if inst is not None \
+                else self.window._configure_panel.current_profile().runtime.node
+            connection = self._connection_for_node(node_name)
+            self.window._launch._spawn_async(
+                runtime.stop_argv(name, binary, timeout=timeout, connection=connection),
+                on_done=self.update_status)
         if self._active_instance is not None and self._active_instance.name == name:
             self._active_instance = None
 
@@ -670,7 +676,11 @@ class MonitorController:
         else:
             binary = inst.binary if inst is not None \
                 else self.window._configure_panel.current_profile().runtime.binary
-            self.window._launch._spawn_async(runtime.rm_argv(name, binary), on_done=self.update_status)
+            node_name = inst.node if inst is not None \
+                else self.window._configure_panel.current_profile().runtime.node
+            connection = self._connection_for_node(node_name)
+            self.window._launch._spawn_async(
+                runtime.rm_argv(name, binary, connection=connection), on_done=self.update_status)
         if self._active_instance is not None and self._active_instance.name == name:
             self._active_instance = None
 
@@ -691,7 +701,7 @@ class MonitorController:
             return stored
         return Profile(
             name=inst.profile, mode=inst.mode,
-            runtime=Runtime(bind_host=inst.host),
+            runtime=Runtime(bind_host=inst.host, node=inst.node),
             settings={"port": inst.port or 8080,
                       "embeddings": inst.embeddings, "reranking": inst.reranking,
                       "metrics": bool(stored.settings.get("metrics")) if stored else False},
@@ -699,6 +709,11 @@ class MonitorController:
 
     def _monitored_container_name(self) -> str:
         return self._active_instance.name if self._active_instance else self.window._container_name()
+
+    def _connection_for_node(self, node_name: str) -> str:
+        """The podman --connection name for a node ('' for local/missing)."""
+        node = get_node(self.window.base_dir(), node_name)
+        return connection_for(node) if node else ""
 
     def instance_summary(self, inst) -> dict:
         """Per-row health + headline stat for one instance. Thin UI-side wrapper
@@ -725,12 +740,18 @@ class MonitorController:
         if not running:
             return {"running": False}
         p = self._monitored_profile()
+        node = get_node(self.window.base_dir(), p.runtime.node)
         host, key, ms, poll = (dial_host(p.runtime.bind_host),
                                self._poll_api_key(p), None, True)
         if p.mode == "router":
             host = self._router_host(p)
             ms = model_scope
             poll = ms is not None
+        if node is not None and node.kind == "remote":
+            # A remote profile's bind_host is typically 0.0.0.0 -> dial_host()
+            # resolves that to 127.0.0.1, which would poll the LOCAL host's
+            # loopback instead of the node the server actually runs on.
+            host = host_of(node)
         return {
             "running": True,
             "port": p.settings.get("port", 8080),
@@ -741,6 +762,7 @@ class MonitorController:
             "kind": self._active_instance.kind if self._active_instance is not None else "container",
             "pid": self._active_instance.pid if self._active_instance is not None else None,
             "gpu_ssh": focused_gpu_ssh(p.runtime.node, self.window.base_dir()),
+            "mon_conn": connection_for(node) if node else "",
         }
 
     def collect_monitor_data(self) -> dict:
@@ -775,9 +797,10 @@ class MonitorController:
             # "no such container" and exits, stranding the logs pane on that error.
             # Skip until it exists; update_status() retries once it's running and
             # `podman logs` replays from the beginning, so no early output is lost.
-            if not runtime.container_exists(name, p.runtime.binary):
+            connection = self._connection_for_node(p.runtime.node)
+            if not runtime.container_exists(name, p.runtime.binary, connection=connection):
                 return
-            argv = runtime.logs_argv(name, p.runtime.binary)
+            argv = runtime.logs_argv(name, p.runtime.binary, connection=connection)
         proc = QProcess(self.window)
         proc.setProcessChannelMode(QProcess.MergedChannels)
         proc.readyReadStandardOutput.connect(

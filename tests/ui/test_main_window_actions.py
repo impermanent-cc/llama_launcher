@@ -57,7 +57,7 @@ def test_on_launch_does_not_follow_logs_before_container_exists(qtbot, monkeypat
     on_launch must NOT start a follower against a not-yet-existing container."""
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     monkeypatch.setattr(mw.terminal, "launch", lambda *a, **k: None)
-    monkeypatch.setattr(mw.runtime, "container_exists", lambda name, binary: False)
+    monkeypatch.setattr(mw.runtime, "container_exists", lambda name, binary, connection="": False)
     w = mw.MainWindow()
     qtbot.addWidget(w)
     w._configure_panel.load_profile(_profile())
@@ -66,18 +66,56 @@ def test_on_launch_does_not_follow_logs_before_container_exists(qtbot, monkeypat
 
 
 def test_start_log_follower_skips_when_container_absent(qtbot, monkeypatch):
-    monkeypatch.setattr(mw.runtime, "container_exists", lambda name, binary: False)
+    monkeypatch.setattr(mw.runtime, "container_exists", lambda name, binary, connection="": False)
     w = mw.MainWindow()
     qtbot.addWidget(w)
     w._monitor._start_log_follower()
     assert w._monitor._log_proc is None
 
 
+def test_start_log_follower_threads_remote_node_connection(qtbot, tmp_path, monkeypatch):
+    """The log-follower for a focused REMOTE instance must query
+    container_exists AND build its logs argv against that node's podman
+    --connection, never local podman -- otherwise it checks LOCAL podman
+    (which never has the remote container) and the logs pane for a remote
+    server never populates."""
+    from llama_launcher.core.instances import Instance
+    from llama_launcher.core.nodes import Node
+    from llama_launcher.core.spec import Profile
+    from llama_launcher.store.nodes import add_node
+
+    monkeypatch.setattr(mw, "base_dir", lambda: tmp_path)
+    add_node(Node(name="box-b", kind="remote", connection="box-b",
+                  ssh_target="me@10.0.0.2"), tmp_path)
+
+    exists_calls = []
+    argv_calls = []
+    monkeypatch.setattr(mw.runtime, "container_exists",
+                        lambda name, binary, connection="": exists_calls.append(connection) or True)
+    monkeypatch.setattr(mw.runtime, "logs_argv",
+                        lambda name, binary, connection="": argv_calls.append(connection) or
+                        ["podman", "--connection", connection, "logs", "-f", name])
+
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    w._monitor._instances = [Instance(
+        name="llama-rem", profile="rem", mode="server", running=True,
+        port=8081, host="10.0.0.2", embeddings=False, reranking=False,
+        stop_timeout=10, binary="podman", node="box-b")]
+    w._monitor._active_instance = w._monitor._instances[0]
+
+    w._monitor._start_log_follower()
+
+    assert exists_calls == ["box-b"]
+    assert argv_calls == ["box-b"]
+
+
 def test_update_status_starts_follower_when_running(qtbot, monkeypatch):
     """Once the container is actually running and no follower is attached, the
     status poll starts one (logs replay from the start, so nothing is missed)."""
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
-    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary, connection="": "running")
     monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
     monkeypatch.setattr(MonitorController, "_log_follower_active", lambda self: False)
     calls = []
@@ -92,7 +130,7 @@ def test_update_status_starts_follower_when_running(qtbot, monkeypatch):
 def test_update_status_does_not_restart_active_follower(qtbot, monkeypatch):
     """A follower already streaming must not be re-spawned on every poll."""
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
-    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary, connection="": "running")
     monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
     monkeypatch.setattr(MonitorController, "_log_follower_active", lambda self: True)
     calls = []

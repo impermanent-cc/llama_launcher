@@ -136,7 +136,7 @@ class LaunchController:
             # Relaunching over a LIVE router would drop a resident model and any
             # in-flight harness requests, so confirm before tearing it down.
             if runtime.container_state(self.window._container_name(),
-                                       p.runtime.binary) == "running":
+                                       p.runtime.binary, connection=connection) == "running":
                 answer = QMessageBox.question(
                     self.window, "Router already running",
                     "This router is already running. Relaunching stops it, "

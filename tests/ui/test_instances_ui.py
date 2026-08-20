@@ -289,6 +289,45 @@ def test_remove_instance_uses_instance_binary(win, monkeypatch):
     assert spawned[0][0] == "docker" and spawned[0][-1] == "llama-dock"
 
 
+def test_stop_instance_threads_remote_node_connection(win, monkeypatch):
+    """A card [Stop] on a REMOTE instance must target that node's podman
+    --connection, never local podman -- otherwise Stop is silently a no-op
+    against the wrong host (or worse, hits a same-named LOCAL container)."""
+    from llama_launcher.core.nodes import Node
+    from llama_launcher.store.nodes import add_node
+    add_node(Node(name="box-b", kind="remote", connection="box-b",
+                  ssh_target="me@10.0.0.2"), win.base_dir())
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    win._monitor._instances = [Instance(
+        name="llama-rem", profile="rem", mode="server", running=True,
+        port=8081, host="10.0.0.2", embeddings=False, reranking=False,
+        stop_timeout=10, binary="podman", node="box-b")]
+    spawned = []
+    monkeypatch.setattr(win._launch, "_spawn_async",
+                        lambda argv, on_done=None, on_error=None: spawned.append(argv))
+    win._monitor._on_instance_stop("llama-rem")
+    assert spawned[0] == ["podman", "--connection", "box-b", "stop", "-t", "10", "llama-rem"]
+
+
+def test_remove_instance_threads_remote_node_connection(win, monkeypatch):
+    """A card [Remove] on a REMOTE instance must target that node's podman
+    --connection, never local podman."""
+    from llama_launcher.core.nodes import Node
+    from llama_launcher.store.nodes import add_node
+    add_node(Node(name="box-b", kind="remote", connection="box-b",
+                  ssh_target="me@10.0.0.2"), win.base_dir())
+    win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    win._monitor._instances = [Instance(
+        name="llama-rem", profile="rem", mode="server", running=False,
+        port=None, host="10.0.0.2", embeddings=False, reranking=False,
+        stop_timeout=10, binary="podman", node="box-b")]
+    spawned = []
+    monkeypatch.setattr(win._launch, "_spawn_async",
+                        lambda argv, on_done=None, on_error=None: spawned.append(argv))
+    win._monitor._on_instance_remove("llama-rem")
+    assert spawned[0] == ["podman", "--connection", "box-b", "rm", "-f", "llama-rem"]
+
+
 def test_stop_unknown_instance_falls_back_to_default_timeout(win, monkeypatch):
     """If the name isn't in the built instances (transient list gap), stop still
     works with the 10s default rather than crashing."""

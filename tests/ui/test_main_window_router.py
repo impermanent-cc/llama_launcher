@@ -532,7 +532,7 @@ def test_relaunch_does_not_force_kill_a_running_router(win, monkeypatch):
     _router_win(win)
     monkeypatch.setattr(win._launch, "_validate_or_warn", lambda: True)
     monkeypatch.setattr("llama_launcher.ui.main_window.runtime.container_state",
-                        lambda name, binary: "running")
+                        lambda name, binary, connection="": "running")
     spawned = []
     monkeypatch.setattr(win._launch, "_spawn_async",
                         lambda argv, on_done=None: spawned.append(argv))

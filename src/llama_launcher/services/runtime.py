@@ -58,13 +58,13 @@ def logs_argv(name: str, binary: str, connection: str = "") -> list[str]:
     return [*_base(binary, connection), "logs", "-f", name]
 
 
-def container_exists(name: str, binary: str) -> bool:
-    return _run([binary, "container", "exists", name]).returncode == 0
+def container_exists(name: str, binary: str, connection: str = "") -> bool:
+    return _run([*_base(binary, connection), "container", "exists", name]).returncode == 0
 
 
-def started_at(name: str, binary: str) -> str | None:
+def started_at(name: str, binary: str, connection: str = "") -> str | None:
     """Return the container's StartedAt timestamp (ISO 8601) or None on failure."""
-    res = _run([binary, "inspect", "-f", "{{.State.StartedAt}}", name])
+    res = _run([*_base(binary, connection), "inspect", "-f", "{{.State.StartedAt}}", name])
     if res.returncode != 0:
         return None
     val = res.stdout.strip()

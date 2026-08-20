@@ -25,15 +25,15 @@ def _hermetic_ui_boundaries(monkeypatch):
     # None), not just on_done.
     monkeypatch.setattr(LaunchController, "_spawn_async",
                         lambda self, argv, on_done=None, on_error=None: None)
-    monkeypatch.setattr(_runtime, "container_state", lambda name, binary: "absent")
+    monkeypatch.setattr(_runtime, "container_state", lambda name, binary, connection="": "absent")
     # The container-runtime binary (podman/docker) is a shutil.which PATH probe --
     # a real external boundary. Default it present so UI tests don't depend on the
     # host/CI image actually having podman installed (a headless CI container has
     # neither); tests that care about the missing-binary path patch it to False.
     monkeypatch.setattr(_runtime, "binary_available", lambda binary: True)
     monkeypatch.setattr(_runtime, "is_rootless", lambda binary: False)
-    monkeypatch.setattr(_runtime, "stats", lambda name, binary: None)
-    monkeypatch.setattr(_runtime, "started_at", lambda name, binary: None)
+    monkeypatch.setattr(_runtime, "stats", lambda name, binary, connection="": None)
+    monkeypatch.setattr(_runtime, "started_at", lambda name, binary, connection="": None)
     monkeypatch.setattr(_runtime, "list_local_images", lambda binary, engine="llama.cpp": [])
     monkeypatch.setattr(_health, "probe_health", lambda port, timeout=1.0, **kw: "down")
     monkeypatch.setattr(_gpu, "query_gpus", lambda ssh_target="": [])
