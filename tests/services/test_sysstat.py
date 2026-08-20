@@ -1,6 +1,7 @@
+import pytest
 from llama_launcher.services.sysstat import (
     parse_proc_stat, cpu_percentages, CpuSampler, parse_meminfo, parse_loadavg,
-    MemStat,
+    MemStat, remote_meminfo_argv,
 )
 
 _STAT_A = ("cpu  100 0 100 800 0 0 0 0 0 0\n"
@@ -58,3 +59,12 @@ def test_parse_meminfo_falls_back_to_memfree():
 def test_parse_loadavg():
     assert parse_loadavg("2.40 1.80 1.50 3/1234 56789") == (2.40, 1.80, 1.50)
     assert parse_loadavg("garbage") == (0.0, 0.0, 0.0)
+
+
+def test_remote_meminfo_argv_builds_guarded_ssh():
+    assert remote_meminfo_argv("user@box2") == ["ssh", "user@box2", "cat", "/proc/meminfo"]
+
+
+def test_remote_meminfo_argv_rejects_flag_injection():
+    with pytest.raises(ValueError):
+        remote_meminfo_argv("-oProxyCommand=evil")

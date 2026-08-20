@@ -4,7 +4,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from llama_launcher.core.spec import (
-    Profile, Mount, LoraRef, Runtime, RouterMember, slugify,
+    Profile, Mount, LoraRef, Runtime, RouterMember, RpcWorker, slugify,
 )
 
 
@@ -18,10 +18,12 @@ def profile_to_dict(p: Profile) -> dict:
 
 
 def profile_from_dict(d: dict) -> Profile:
+    rt = dict(d.get("runtime", {}))
+    rt["rpc_workers"] = [RpcWorker(**w) for w in rt.get("rpc_workers", [])]
     return Profile(
         name=d["name"],
         image=d.get("image", ""),
-        runtime=Runtime(**d.get("runtime", {})),
+        runtime=Runtime(**rt),
         mounts=[Mount(**m) for m in d.get("mounts", [])],
         model=d.get("model", ""),
         mmproj=d.get("mmproj"),

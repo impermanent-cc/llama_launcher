@@ -1,4 +1,7 @@
+import subprocess
 from dataclasses import dataclass
+
+from llama_launcher.core.nodes import valid_ssh_target
 
 
 @dataclass(frozen=True)
@@ -106,3 +109,30 @@ def read_system() -> tuple:
         return stat, mem, load
     except OSError:
         return None, None, None
+
+
+def remote_meminfo_argv(ssh_target: str) -> list:
+    """Build a guarded ssh command to read /proc/meminfo on a remote host.
+
+    Raises ValueError if ssh_target is unsafe (e.g., starts with '-' or contains
+    flag characters), preventing argv-flag injection.
+    """
+    if not valid_ssh_target(ssh_target):
+        raise ValueError(f"unsafe ssh target: {ssh_target!r}")
+    return ["ssh", ssh_target, "cat", "/proc/meminfo"]
+
+
+def read_remote_meminfo(ssh_target: str) -> MemStat | None:
+    """Run remote_meminfo_argv on ssh_target and parse the result.
+
+    Returns parse_meminfo(stdout) on success, or None on any failure
+    (connection error, timeout, bad ssh target, non-zero exit, empty output).
+    """
+    try:
+        res = subprocess.run(remote_meminfo_argv(ssh_target),
+                             capture_output=True, text=True, check=False, timeout=5)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return None
+    if res.returncode != 0 or not res.stdout.strip():
+        return None
+    return parse_meminfo(res.stdout)

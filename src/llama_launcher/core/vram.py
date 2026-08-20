@@ -58,3 +58,23 @@ def available_free_bytes(free_bytes_per_gpu, split_mode: str = "layer",
         idx = main_gpu if 0 <= main_gpu < len(free) else 0
         return free[idx]
     return sum(free)
+
+
+@dataclass
+class PooledFit:
+    fits: bool
+    margin: int
+    vram_bytes: int
+    ram_bytes: int
+
+    @property
+    def total_bytes(self) -> int:
+        return self.vram_bytes + self.ram_bytes
+
+
+def pooled_fit(estimate_bytes, donations) -> PooledFit:
+    vram = sum(int(b) for kind, b in donations if kind == "vram")
+    ram = sum(int(b) for kind, b in donations if kind == "ram")
+    total = vram + ram
+    margin = total - int(estimate_bytes)
+    return PooledFit(fits=margin >= 0, margin=margin, vram_bytes=vram, ram_bytes=ram)

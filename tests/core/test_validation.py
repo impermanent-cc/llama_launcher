@@ -1,5 +1,5 @@
 from llama_launcher.core.command_builder import raw_arg_warnings
-from llama_launcher.core.spec import Profile, Mount, Runtime
+from llama_launcher.core.spec import Profile, Mount, Runtime, RpcWorker
 from llama_launcher.core.validation import validate, Issue
 
 
@@ -415,3 +415,37 @@ def test_container_profile_still_blocked_by_missing_runtime():
     p = _ok_profile()
     errs = [i for i in validate(p, binary_found=False) if i.level == "error"]
     assert any("not found on path" in m.message.lower() for m in errs)
+
+
+def _rpc(workers, settings=None):
+    return Profile(name="pool", image="img", model="/m/x.gguf",
+                   mounts=[Mount(host="/m", container="/m")],
+                   settings=settings or {},
+                   runtime=Runtime(launch_mode="rpc", rpc_workers=workers))
+
+
+def _levels(issues, needle):
+    return [i.level for i in issues if needle in i.message]
+
+
+def test_rpc_empty_pool_is_error():
+    assert "error" in _levels(validate(_rpc([])), "at least one worker")
+
+
+def test_rpc_missing_worker_image_is_error():
+    issues = validate(_rpc([RpcWorker(node="box2")]),
+                      worker_image_present={"box2": False})
+    assert "error" in _levels(issues, "box2")
+
+
+def test_rpc_overcommit_mem_is_warning():
+    issues = validate(_rpc([RpcWorker(node="box2", mem_mb=64000)]),
+                      worker_image_present={"box2": True},
+                      worker_free_mb={"box2": 32000})
+    assert "warning" in _levels(issues, "more than")
+
+
+def test_rpc_cpu_moe_centralizing_warning():
+    issues = validate(_rpc([RpcWorker(node="local")], settings={"cpu-moe": True}),
+                      worker_image_present={"local": True})
+    assert "warning" in _levels(issues, "centralizes")

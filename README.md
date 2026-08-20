@@ -156,6 +156,10 @@ anything starts. A headless server launch runs **detached and persistent**
 (`-d`, no `--rm`), unlike the GUI's foreground `--rm` server, so `--stop` and
 `--health` can address it by container name.
 
+**Native** (self-built binary) and **RPC pool** profiles are GUI-only in this
+version and are refused headlessly (exit 1) with an explanatory message. See
+[`RPC.md`](RPC.md) for building the `GGML_RPC=ON` image an RPC pool needs.
+
 Exit codes:
 
 | code | `--launch` | `--stop` | `--health` |

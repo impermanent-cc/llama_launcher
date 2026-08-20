@@ -187,6 +187,22 @@ def test_launch_dispatches_by_mode(monkeypatch):
     assert calls == ["router", "server"]
 
 
+def test_launch_refuses_native_profile():
+    p = _server()
+    p.runtime.launch_mode = "native"
+    res = headless.launch(p, "/base", "podman")
+    assert res.ok is False
+    assert res.error == "native launch is GUI-only in this version"
+
+
+def test_launch_refuses_rpc_profile():
+    p = _server()
+    p.runtime.launch_mode = "rpc"
+    res = headless.launch(p, "/base", "podman")
+    assert res.ok is False
+    assert res.error == "RPC pool launch is GUI-only in this version"
+
+
 from llama_launcher.core.spec import Profile, Runtime
 from llama_launcher.services import api_key, headless
 

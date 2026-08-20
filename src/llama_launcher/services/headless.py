@@ -90,6 +90,11 @@ def launch(profile, base_dir, binary) -> LaunchResult:
                             profile.runtime.bind_host,
                             profile.settings.get("port", 8080),
                             [], "native launch is GUI-only in this version")
+    if profile.runtime.launch_mode == "rpc":
+        return LaunchResult(False, _container_name(profile),
+                            profile.runtime.bind_host,
+                            profile.settings.get("port", 8080),
+                            [], "RPC pool launch is GUI-only in this version")
     if profile.mode == "router":
         return launch_router(profile, base_dir, binary)
     return launch_server(profile, base_dir, binary)

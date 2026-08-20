@@ -4,7 +4,7 @@ from PySide6.QtWidgets import QMessageBox, QInputDialog
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core import vram
 from llama_launcher.core.nodes import connection_for
-from llama_launcher.services import runtime, terminal, registry, model_info, gpu, native
+from llama_launcher.services import runtime, terminal, registry, model_info, gpu, native, rpc
 from llama_launcher.services import benchmark_store
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.services import api_key as api_key_store
@@ -128,6 +128,22 @@ class LaunchController:
                 self.window._monitor.update_status()
             return
 
+        if p.runtime.launch_mode == "rpc":
+            # Refuse a relaunch over an already-running pool: rpc.launch_pool
+            # starts by tearing down the CURRENT pool's live ssh tunnels
+            # (so a stale one isn't orphaned on relaunch), then the worker
+            # `run` collides on the still-live `llama-<slug>-rpc0` container
+            # name and fails -- leaving a healthy pool degraded with a
+            # confusing error instead of a clean refusal.
+            if runtime.container_state(self.window._container_name(),
+                                       p.runtime.binary, connection="") == "running":
+                self._report_launch_error(
+                    f"An RPC pool for profile '{p.name}' is already "
+                    f"running. Stop it before relaunching.", show_dialog=True)
+                return
+            self._launch_pool(p)
+            return
+
         if p.mode == "router":
             router_host_dir, warnings = self.window.prepare_router_files()
             if warnings:
@@ -210,6 +226,16 @@ class LaunchController:
         # follower once it is actually running (podman logs replays from the
         # start, so no early output is missed).
 
+    def _launch_pool(self, p) -> None:
+        """RPC pool launch: worker(s) + head are started synchronously by the
+        pool orchestrator (each worker's `run -d` returns fast), so there's no
+        async spawn/callback plumbing here -- just report the outcome."""
+        res = rpc.launch_pool(p, self.window.base_dir())
+        if res.ok:
+            self.window._monitor.update_status()
+        else:
+            self._report_launch_error(res.error, show_dialog=True)
+
     def _spawn_async(self, argv: list[str], on_done=None, on_error=None):
         """Run argv in the background via QProcess so the UI thread never blocks.
         Calls on_done() when the process finishes.
@@ -235,11 +261,16 @@ class LaunchController:
         return proc
 
     def on_stop(self):
+        p = self.window._configure_panel.current_profile()
+        if p.runtime.launch_mode == "rpc":
+            rpc.stop_pool(p, self.window.base_dir())
+            self.window._monitor.update_status()
+            return
+
         # Stop the log follower immediately; run `podman stop` asynchronously so a
         # slow stop (podman waits up to its grace period for SIGTERM) never freezes
         # the GUI — which previously made Stop look like it did nothing.
         self.window._monitor._stop_log_follower()
-        p = self.window._configure_panel.current_profile()
         connection = self._connection_for_profile(p)
         self.window.status_label.setText("● stopping…")
         argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary,

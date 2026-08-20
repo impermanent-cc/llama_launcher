@@ -101,6 +101,43 @@ def test_build_instances_data_enriches_rows_with_tok_kv_mode(monkeypatch):
     assert rows["llama-emb"]["kv_pct"] is None
 
 
+def test_build_instances_data_titles_rpc_worker_row(monkeypatch):
+    """A worker container shares its pool head's `llama-launcher.profile` label
+    (Task 4) so it joins to the SAME stored profile as the head -- without a
+    title override its row would show the head's own name/port. The worker
+    row instead gets its own "rpc-worker · <node> · <device>" title and no port."""
+    from llama_launcher.core.spec import RpcWorker
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    profs = [Profile(name="pool", image="img", runtime=Runtime(
+                 launch_mode="rpc", rpc_workers=[RpcWorker(node="box2", device="CUDA0")]),
+             settings={"port": 8080})]
+    monkeypatch.setattr(mc, "list_profiles", lambda base: profs)
+
+    def _containers(binary, connection=""):
+        # The worker's own row is only listed under ITS node's connection
+        # (list_launcher_containers is called once per registered node), so
+        # inst.node ends up "box2" -- exactly like a real remote worker.
+        if connection == "box2":
+            return [{"name": "llama-pool-rpc0", "running": True, "profile": "pool",
+                     "mode": "rpc-worker"}]
+        return [{"name": "llama-pool", "running": True, "profile": "pool", "mode": "server"}]
+    monkeypatch.setattr(mc.runtime, "list_launcher_containers", _containers)
+    monkeypatch.setattr(mc.health, "probe_health", lambda *a, **k: "ready")
+    monkeypatch.setattr(mc.metrics, "fetch_metrics", lambda *a, **k: {})
+    monkeypatch.setattr(mc.metrics, "fetch_slots", lambda *a, **k: [])
+    target = {"binary": "podman", "base_dir": "/b", "router_base_dir": "/r",
+              "nodes": [{"name": "local", "connection": "", "host": "", "binary": "podman", "enabled": True},
+                        {"name": "box2", "connection": "box2", "host": "10.0.0.2",
+                         "binary": "podman", "enabled": True}]}
+    rows = {r["name"]: r for r in mc.build_instances_data(target)["rows"]}
+    worker = rows["llama-pool-rpc0"]
+    assert "rpc-worker" in worker["profile"] and "box2" in worker["profile"]
+    assert "CUDA0" in worker["profile"]
+    assert worker["port"] is None
+    head = rows["llama-pool"]
+    assert head["profile"] == "pool" and head["port"] == 8080   # head's row unaffected
+
+
 def test_build_instances_data_includes_native_rows(tmp_path, monkeypatch):
     """A native (non-container) server registered under base_dir shows up as a
     Monitor card alongside container rows, carrying its own kind/pid."""
@@ -356,6 +393,50 @@ def test_native_instance_stop_sends_sigterm_then_schedules_kill(win, monkeypatch
     win._monitor._on_instance_stop("llama-nat")
     assert signals == [(4242, signal.SIGTERM)]
     assert scheduled["v"] == (4242, 7)
+
+
+def test_stop_head_of_rpc_pool_calls_coordinated_stop_pool(win, monkeypatch):
+    """A card [Stop] on the HEAD of an rpc pool (runtime.launch_mode == "rpc")
+    performs the coordinated pool stop -- head + every worker -- instead of a
+    bare `podman stop` on just the head container."""
+    from llama_launcher.core.spec import RpcWorker
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    store.save_profile(Profile(name="pool", image="img", runtime=Runtime(
+        launch_mode="rpc", rpc_workers=[RpcWorker(node="box2")]),
+        settings={"port": 8080}), win.base_dir())
+    win._monitor._instances = [Instance(
+        name="llama-pool", profile="pool", mode="server", running=True,
+        port=8080, host="127.0.0.1", embeddings=False, reranking=False)]
+    called = {}
+    monkeypatch.setattr(mc.rpc, "stop_pool", lambda p, base, **k: called.setdefault("profile", p))
+    spawned = []
+    monkeypatch.setattr(win._launch, "_spawn_async",
+                        lambda argv, on_done=None, on_error=None: spawned.append(argv))
+    win._monitor._on_instance_stop("llama-pool")
+    assert called["profile"].name == "pool"
+    assert spawned == []           # NOT a bare container stop
+
+
+def test_stop_rpc_worker_instance_stops_only_that_worker(win, monkeypatch):
+    """A card [Stop] on a WORKER instance (mode "rpc-worker") must stop just that
+    one worker container -- never the coordinated pool stop -- even though the
+    worker shares its pool head's profile (and that profile is launch_mode "rpc")."""
+    from llama_launcher.core.spec import RpcWorker
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    store.save_profile(Profile(name="pool", image="img", runtime=Runtime(
+        launch_mode="rpc", rpc_workers=[RpcWorker(node="box2")]),
+        settings={"port": 8080}), win.base_dir())
+    win._monitor._instances = [Instance(
+        name="llama-pool-rpc0", profile="pool", mode="rpc-worker", running=True,
+        port=None, host="127.0.0.1", embeddings=False, reranking=False, node="box2")]
+    pool_called = []
+    monkeypatch.setattr(mc.rpc, "stop_pool", lambda p, base, **k: pool_called.append(p))
+    spawned = []
+    monkeypatch.setattr(win._launch, "_spawn_async",
+                        lambda argv, on_done=None, on_error=None: spawned.append(argv))
+    win._monitor._on_instance_stop("llama-pool-rpc0")
+    assert pool_called == []
+    assert spawned and spawned[0][-1] == "llama-pool-rpc0"
 
 
 def test_sigkill_if_alive_kills_when_still_our_process(monkeypatch):

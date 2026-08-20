@@ -3,10 +3,13 @@
 Ports/endpoints live in the profile, not the container labels, so build_instances
 joins list_launcher_containers() rows with stored profiles by name. Pure module.
 """
+import re
 from dataclasses import dataclass
 
 from llama_launcher.core.spec import DEFAULT_STOP_TIMEOUT, Profile
 from llama_launcher.core.validation import dial_host
+
+_RPC_WORKER_SUFFIX = re.compile(r"-rpc(\d+)$")
 
 
 @dataclass(frozen=True)
@@ -24,6 +27,38 @@ class Instance:
     kind: str = "container"
     pid: int | None = None
     node: str = "local"
+    device: str = ""    # rpc-worker only: resolved from the pool profile's rpc_workers by index
+
+
+def _worker_device(name: str, mode: str, prof: Profile | None) -> str:
+    """The rpc-worker's device (e.g. "CUDA0"), resolved from the pool profile's
+    `rpc_workers` list by matching the container name's `-rpcN` suffix to
+    index N. Workers are labeled with the SAME `llama-launcher.profile` as
+    their pool's head (so the pool joins as one profile), so `prof` here is
+    the head's stored profile. "" when unresolvable (no match, no profile, or
+    the index is out of range)."""
+    if mode != "rpc-worker" or prof is None:
+        return ""
+    m = _RPC_WORKER_SUFFIX.search(name)
+    if not m:
+        return ""
+    idx = int(m.group(1))
+    workers = prof.runtime.rpc_workers
+    return workers[idx].device if 0 <= idx < len(workers) else ""
+
+
+def worker_card_title(inst: Instance) -> str:
+    """Display title for an rpc-worker StatCard: "rpc-worker · <node>[ · <device>]".
+
+    A worker container shares its pool head's `llama-launcher.profile` label
+    (Task 4), so without this it would render with the SAME profile name/port
+    as the head -- indistinguishable cards. This renders the worker's own
+    identity instead.
+    """
+    title = f"rpc-worker · {inst.node}"
+    if inst.device:
+        title += f" · {inst.device}"
+    return title
 
 
 def build_instances(containers: list[dict], profiles: list[Profile],
@@ -36,6 +71,7 @@ def build_instances(containers: list[dict], profiles: list[Profile],
     out: list[Instance] = []
     for c in containers:
         prof = by_name.get(c.get("profile"))
+        mode = c.get("mode", "server")
         if prof is not None:
             port = prof.settings.get("port", 8080)
             host = node_host if (node != "local" and node_host) else dial_host(prof.runtime.bind_host)
@@ -48,9 +84,10 @@ def build_instances(containers: list[dict], profiles: list[Profile],
             host = node_host if (node != "local" and node_host) else "127.0.0.1"
             stop_to, bin_ = DEFAULT_STOP_TIMEOUT, binary
         out.append(Instance(
-            name=c["name"], profile=c.get("profile", ""), mode=c.get("mode", "server"),
+            name=c["name"], profile=c.get("profile", ""), mode=mode,
             running=bool(c.get("running")), port=port, host=host,
             embeddings=emb, reranking=rer, stop_timeout=stop_to, binary=bin_,
-            kind=c.get("kind", "container"), pid=c.get("pid"), node=node))
+            kind=c.get("kind", "container"), pid=c.get("pid"), node=node,
+            device=_worker_device(c["name"], mode, prof)))
     out.sort(key=lambda i: (not i.running, i.name))   # running first, then by name
     return out

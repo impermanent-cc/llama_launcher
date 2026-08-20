@@ -155,7 +155,8 @@ def needs_server_entrypoint(image: str) -> bool:
 
 
 def _run_level_args(profile: Profile, router_host_dir: str = "",
-                    detach: bool = False, connection: str = "") -> list[str]:
+                    detach: bool = False, connection: str = "",
+                    network_host: bool = False) -> list[str]:
     rt = profile.runtime
     is_router = profile.mode == "router"
 
@@ -183,8 +184,11 @@ def _run_level_args(profile: Profile, router_host_dir: str = "",
     if rt.selinux_label_disable:
         argv.append("--security-opt=label=disable")
 
-    port = profile.settings.get("port", 8080)
-    argv += ["-p", f"{rt.bind_host}:{port}:{port}"]
+    if network_host:
+        argv += ["--network", "host"]           # head shares host loopback for --rpc
+    else:
+        port = profile.settings.get("port", 8080)
+        argv += ["-p", f"{rt.bind_host}:{port}:{port}"]
 
     workdir = None
     for m in profile.mounts:
@@ -366,12 +370,60 @@ def raw_arg_warnings(profile: Profile, catalog: dict = CATALOG) -> list[str]:
 
 def build_command(profile: Profile, catalog: dict = CATALOG,
                   router_host_dir: str = "", detach: bool = False,
-                  connection: str = "") -> list[str]:
+                  connection: str = "", rpc_endpoints: str = "") -> list[str]:
     if profile.mode == "router":
         return _run_level_args(profile, router_host_dir, connection=connection) \
             + _router_server_args(profile)
     if profile.runtime.launch_mode == "native":
         return [profile.runtime.native_binary] + _server_args(
             profile, catalog, host=profile.runtime.bind_host)
+    if profile.runtime.launch_mode == "rpc":
+        # Head runs locally (no --connection) and host-networked so it can
+        # reach every worker over 127.0.0.1. --host must stay the profile's
+        # configured bind_host: --network host drops the -p bind_host:port:port
+        # translation, so _server_args' 0.0.0.0 default would otherwise expose
+        # the head API on every interface on the LAN.
+        return _run_level_args(profile, detach=True, connection="", network_host=True) \
+            + _server_args(profile, catalog, host=profile.runtime.bind_host) \
+            + ["--rpc", rpc_endpoints]
     return _run_level_args(profile, detach=detach, connection=connection) \
         + _server_args(profile, catalog)
+
+
+def build_rpc_endpoints(workers, resolve) -> str:
+    """`--rpc` value: comma-joined 127.0.0.1:<port> for each worker.
+
+    `resolve(worker) -> int` gives the head-facing port (local worker's own port,
+    or a remote worker's ssh local-forward port). Loopback throughout because the
+    head runs with --network host and reaches every worker over the host loopback.
+    """
+    return ",".join(f"127.0.0.1:{resolve(w)}" for w in workers)
+
+
+_RPC_ENTRYPOINT = "/app/rpc-server"
+
+
+def build_worker_command(profile, worker, index, connection="", wport=None):
+    """Argv to run one rpc-server worker container. Publishes only to the worker
+    host's loopback (never the LAN); the head reaches it directly (local) or over
+    an ssh -L tunnel (remote)."""
+    rt = profile.runtime
+    port = wport if wport is not None else worker.port
+    argv = [rt.binary]
+    if connection:
+        argv += ["--connection", connection]
+    argv += ["run", "-d", "--name", f"llama-{slugify(profile.name)}-rpc{index}"]
+    argv += ["--label", f"llama-launcher.profile={profile.name}"]
+    argv += ["--label", "llama-launcher.mode=rpc-worker"]
+    argv += ["--label", f"llama-launcher.pool={profile.name}"]
+    if worker.device.upper().startswith("CUDA"):
+        if rt.gpu_mode == "cdi":
+            argv += ["--device", "nvidia.com/gpu=all"]
+        elif rt.gpu_mode == "gpus-all":
+            argv += ["--gpus", "all"]
+    argv += ["-p", f"127.0.0.1:{port}:{port}"]
+    argv += ["--entrypoint", _RPC_ENTRYPOINT, profile.image]
+    argv += ["-H", "0.0.0.0", "-p", str(port), "-d", worker.device]
+    if worker.mem_mb:
+        argv += ["--mem", str(worker.mem_mb)]
+    return argv
