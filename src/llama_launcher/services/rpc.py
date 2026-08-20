@@ -71,6 +71,14 @@ def launch_pool(profile, base_dir, *, run=None, popen=None, connect=None,
     connect = connect or _default_connect
     alloc_port = alloc_port or alloc_local_port
 
+    # A relaunch of the same pool without an intervening stop_pool must not
+    # orphan the previous call's ssh tunnel handles.
+    for t in _TUNNELS.get(profile.name, []):
+        try:
+            t.terminate()
+        except Exception:
+            pass
+
     workers = profile.runtime.rpc_workers
     tunnels = []
     resolved = {}                       # id(worker) -> head-facing port
@@ -82,7 +90,12 @@ def launch_pool(profile, base_dir, *, run=None, popen=None, connect=None,
             return PoolResult(False, f"worker {i} on '{w.node}' failed to start")
         if node.kind == "remote":
             lport = alloc_port()
-            tunnels.append(popen(tunnel_argv(node.ssh_target, lport, w.port)))
+            try:
+                tunnel = popen(tunnel_argv(node.ssh_target, lport, w.port))
+            except ValueError as exc:
+                _teardown(profile, base_dir, workers[:i + 1], tunnels, run)
+                return PoolResult(False, f"worker {i} on '{w.node}': {exc}")
+            tunnels.append(tunnel)
             head_port = lport
         else:
             head_port = w.port
