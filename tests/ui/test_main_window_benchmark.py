@@ -166,7 +166,7 @@ def _ready_status_stubs(monkeypatch):
     """Stub the status-poll dependencies so update_status() reads server/ready
     without touching the network or real container runtime."""
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
-    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary, connection="": "running")
     monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
     monkeypatch.setattr(mw.metrics, "fetch_props", lambda *a, **k: None)
     monkeypatch.setattr(MonitorController, "_log_follower_active", lambda self: True)
@@ -193,7 +193,7 @@ def test_benchmark_run_enabled_when_server_running_and_ready(win, monkeypatch):
 def test_benchmark_run_disabled_when_not_running(win, monkeypatch):
     _load_server_profile(win)
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
-    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "exited")
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary, connection="": "exited")
     # Prove the gate actively disables rather than merely defaulting to off.
     win.benchmark_panel.set_benchmark_available(True)
 
@@ -261,7 +261,7 @@ def test_history_loaded_on_router_launch_reset(win, monkeypatch):
     monkeypatch.setattr(win._launch, "_validate_or_warn", lambda: True)
     monkeypatch.setattr(win._launch, "vram_check", lambda: None)
     monkeypatch.setattr(win._launch, "_spawn_async", lambda argv, on_done=None, on_error=None: None)
-    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "exited")
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary, connection="": "exited")
 
     win._launch.on_launch()
 

@@ -53,6 +53,7 @@ class Runtime:
     stop_timeout: int = DEFAULT_STOP_TIMEOUT  # `podman stop -t` grace before SIGKILL
     launch_mode: str = "container"  # "container" (podman/docker) | "native" (subprocess)
     native_binary: str = ""         # abs path to a prebuilt llama-server (native mode)
+    node: str = "local"             # which registered node this profile launches on
 
 
 @dataclass

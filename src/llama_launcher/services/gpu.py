@@ -2,6 +2,8 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
+from llama_launcher.core.nodes import valid_ssh_target
+
 _QUERY = ("memory.used,memory.total,memory.free,utilization.gpu,"
           "temperature.gpu,power.draw,power.limit,name")
 
@@ -51,14 +53,22 @@ def parse_nvidia_smi(text: str) -> list[GpuStat]:
     return out
 
 
-def query_gpus() -> list[GpuStat]:
-    if shutil.which("nvidia-smi") is None:
+def nvidia_smi_argv(ssh_target: str = "") -> list[str]:
+    cmd = ["nvidia-smi", f"--query-gpu={_QUERY}", "--format=csv,noheader,nounits"]
+    if not ssh_target:
+        return cmd
+    if not valid_ssh_target(ssh_target):
+        raise ValueError(f"unsafe ssh target: {ssh_target!r}")
+    return ["ssh", ssh_target, *cmd]
+
+
+def query_gpus(ssh_target: str = "") -> list[GpuStat]:
+    if not ssh_target and shutil.which("nvidia-smi") is None:
         return []
     try:
-        res = subprocess.run(
-            ["nvidia-smi", f"--query-gpu={_QUERY}", "--format=csv,noheader,nounits"],
-            capture_output=True, text=True, check=False, timeout=5)
-    except (OSError, subprocess.SubprocessError):
+        res = subprocess.run(nvidia_smi_argv(ssh_target),
+                             capture_output=True, text=True, check=False, timeout=5)
+    except (OSError, subprocess.SubprocessError, ValueError):
         return []
     if res.returncode != 0:
         return []

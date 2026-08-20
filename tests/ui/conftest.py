@@ -25,18 +25,18 @@ def _hermetic_ui_boundaries(monkeypatch):
     # None), not just on_done.
     monkeypatch.setattr(LaunchController, "_spawn_async",
                         lambda self, argv, on_done=None, on_error=None: None)
-    monkeypatch.setattr(_runtime, "container_state", lambda name, binary: "absent")
+    monkeypatch.setattr(_runtime, "container_state", lambda name, binary, connection="": "absent")
     # The container-runtime binary (podman/docker) is a shutil.which PATH probe --
     # a real external boundary. Default it present so UI tests don't depend on the
     # host/CI image actually having podman installed (a headless CI container has
     # neither); tests that care about the missing-binary path patch it to False.
     monkeypatch.setattr(_runtime, "binary_available", lambda binary: True)
     monkeypatch.setattr(_runtime, "is_rootless", lambda binary: False)
-    monkeypatch.setattr(_runtime, "stats", lambda name, binary: None)
-    monkeypatch.setattr(_runtime, "started_at", lambda name, binary: None)
+    monkeypatch.setattr(_runtime, "stats", lambda name, binary, connection="": None)
+    monkeypatch.setattr(_runtime, "started_at", lambda name, binary, connection="": None)
     monkeypatch.setattr(_runtime, "list_local_images", lambda binary, engine="llama.cpp": [])
     monkeypatch.setattr(_health, "probe_health", lambda port, timeout=1.0, **kw: "down")
-    monkeypatch.setattr(_gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(_gpu, "query_gpus", lambda ssh_target="": [])
     monkeypatch.setattr(_metrics, "fetch_metrics", lambda port, timeout=1.0, **kw: {})
     monkeypatch.setattr(_metrics, "fetch_slots", lambda port, timeout=1.0, **kw: [])
     monkeypatch.setattr(_metrics, "fetch_metrics_text",
@@ -53,3 +53,13 @@ def _hermetic_ui_boundaries(monkeypatch):
     # a window) during the next test's teardown.
     from PySide6.QtCore import QThreadPool
     QThreadPool.globalInstance().waitForDone(2000)
+
+
+@pytest.fixture
+def main_window(qtbot, tmp_path, monkeypatch):
+    """A MainWindow with an isolated base_dir() (via XDG_CONFIG_HOME), for
+    tests that need a real window + panel tree (e.g. node-selection wiring)."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    w = _mw.MainWindow()
+    qtbot.addWidget(w)
+    return w

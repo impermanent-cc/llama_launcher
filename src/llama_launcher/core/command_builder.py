@@ -155,11 +155,14 @@ def needs_server_entrypoint(image: str) -> bool:
 
 
 def _run_level_args(profile: Profile, router_host_dir: str = "",
-                    detach: bool = False) -> list[str]:
+                    detach: bool = False, connection: str = "") -> list[str]:
     rt = profile.runtime
     is_router = profile.mode == "router"
 
-    argv = [rt.binary, "run"]
+    argv = [rt.binary]
+    if connection:
+        argv += ["--connection", connection]
+    argv += ["run"]
     # A router is a persistent headless host: run it detached, and keep the
     # container after exit so a crash leaves a readable exit code and logs.
     # The headless CLI passes detach=True to give a single-model server the
@@ -362,10 +365,13 @@ def raw_arg_warnings(profile: Profile, catalog: dict = CATALOG) -> list[str]:
 
 
 def build_command(profile: Profile, catalog: dict = CATALOG,
-                  router_host_dir: str = "", detach: bool = False) -> list[str]:
+                  router_host_dir: str = "", detach: bool = False,
+                  connection: str = "") -> list[str]:
     if profile.mode == "router":
-        return _run_level_args(profile, router_host_dir) + _router_server_args(profile)
+        return _run_level_args(profile, router_host_dir, connection=connection) \
+            + _router_server_args(profile)
     if profile.runtime.launch_mode == "native":
         return [profile.runtime.native_binary] + _server_args(
             profile, catalog, host=profile.runtime.bind_host)
-    return _run_level_args(profile, detach=detach) + _server_args(profile, catalog)
+    return _run_level_args(profile, detach=detach, connection=connection) \
+        + _server_args(profile, catalog)

@@ -23,6 +23,7 @@ from llama_launcher.core.spec import (
 from llama_launcher.core.validation import validate, Issue
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import model_info, runtime, native
+from llama_launcher.store.nodes import load_nodes
 from llama_launcher.store.profiles import list_profiles, resolve_member_pairs
 from llama_launcher.ui.widgets.setting_widgets import make_widget, SuggestionDot
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox, NoWheelSpinBox
@@ -129,6 +130,15 @@ class ConfigurePanel(QWidget):
         self.launch_mode_combo.addItem("Native (run a built binary)", "native")
         self.launch_mode_combo.currentIndexChanged.connect(self._on_launch_mode_changed)
 
+        # Which machine (local or a saved remote) runs this profile. NoWheel
+        # for the same reason as the others -- an unfocused scroll must not
+        # silently retarget where the server launches.
+        self.node_combo = NoWheelComboBox()
+        self._populate_node_combo()
+        # Connect AFTER the initial population so building the combo doesn't
+        # itself fire the remote-bind-flip handler below.
+        self.node_combo.currentIndexChanged.connect(self._on_node_changed)
+
         self.native_binary_edit = QLineEdit()
         self.native_binary_edit.setPlaceholderText("/path/to/llama-server")
         self.native_binary_edit.setToolTip(
@@ -200,6 +210,7 @@ class ConfigurePanel(QWidget):
             lambda _r, _c: self._on_edit_member() if _c == 0 else None)
 
         left_form.addRow("Launch mode", self.launch_mode_combo)
+        left_form.addRow("Node", self.node_combo)
         left_form.addRow("Mode", self.mode_combo)
         left_form.addRow("Bind address", self.bind_host_combo)
         left_form.addRow("Stop grace period", self.stop_timeout_spin)
@@ -445,6 +456,31 @@ class ConfigurePanel(QWidget):
         self._update_detached_visibility()
         self.refresh_preview()
 
+    def _populate_node_combo(self) -> None:
+        self.node_combo.clear()
+        for n in load_nodes(self.window.base_dir()):
+            label = n.name if n.kind == "local" else f"{n.name}  ({n.ssh_target})"
+            self.node_combo.addItem(label, n.name)
+
+    def reload_nodes(self) -> None:
+        """Re-read nodes.json (after the Nodes dialog changes them), keeping
+        the current selection if it still exists."""
+        keep = self.node_combo.currentData()
+        self.node_combo.blockSignals(True)
+        self._populate_node_combo()
+        idx = self.node_combo.findData(keep)
+        self.node_combo.setCurrentIndex(idx if idx >= 0 else 0)
+        self.node_combo.blockSignals(False)
+
+    def _on_node_changed(self, *_) -> None:
+        """A remote server must publish on a LAN interface so the GUI host can
+        reach /health and /metrics; loopback would be unreachable. Flip the bind
+        to 0.0.0.0 when a remote node is chosen (the existing exposure warning
+        then requires an API key, keeping it secure)."""
+        name = self.node_combo.currentData()
+        if name and name != "local" and self.bind_host_combo.currentText() in ("127.0.0.1", ""):
+            self.bind_host_combo.setCurrentText("0.0.0.0")
+
     def _apply_engine_enums(self) -> None:
         """Extend/revert -ctk/-ctv enum choices for the current engine."""
         engine = self.engine_combo.currentData() or "llama.cpp"
@@ -624,9 +660,14 @@ class ConfigurePanel(QWidget):
         p = self.current_profile()
         key_present = bool(api_key_store.resolve_api_key(self.window.router_base_dir(), p)) \
             if p.mode == "router" else False
+        connection = self.window._launch._connection_for_profile(p)
+        img_present = True
+        if connection and p.image:
+            img_present = runtime.image_exists(p.image, p.runtime.binary, connection=connection)
         issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
                           members=self.member_pairs(), api_key_present=key_present,
-                          native_binary_ok=native.native_binary_ok_for(p))
+                          native_binary_ok=native.native_binary_ok_for(p),
+                          image_present=img_present)
         for name in self.missing_member_profiles():
             issues.append(Issue(
                 "error",
@@ -722,6 +763,10 @@ class ConfigurePanel(QWidget):
         self.launch_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.native_binary_edit.setText(p.runtime.native_binary)
         self._on_launch_mode_changed()
+        nidx = self.node_combo.findData(p.runtime.node)
+        self.node_combo.blockSignals(True)
+        self.node_combo.setCurrentIndex(nidx if nidx >= 0 else 0)
+        self.node_combo.blockSignals(False)
         self.window._monitor._router_statuses = {}
         self.window._monitor._spec_prev = None
         self.window._monitor._props = None
@@ -762,7 +807,8 @@ class ConfigurePanel(QWidget):
                             engine=self.engine_combo.currentData() or "llama.cpp",
                             stop_timeout=self.stop_timeout_spin.value(),
                             launch_mode=self.launch_mode_combo.currentData() or "container",
-                            native_binary=self.native_binary_edit.text().strip()),
+                            native_binary=self.native_binary_edit.text().strip(),
+                            node=self.node_combo.currentData() or "local"),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,

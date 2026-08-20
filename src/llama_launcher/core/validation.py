@@ -41,7 +41,8 @@ def _under_any_mount(path: str, profile: Profile) -> bool:
 
 def validate(profile: Profile, running_ports: tuple = (),
              binary_found: bool = True, members: tuple = (),
-             api_key_present: bool = False, native_binary_ok: bool = True) -> list[Issue]:
+             api_key_present: bool = False, native_binary_ok: bool = True,
+             image_present: bool = True) -> list[Issue]:
     """`native_binary_ok` mirrors `binary_found`: core stays I/O-free, so the
     caller stats `profile.runtime.native_binary` (e.g. via
     services.native.native_binary_available) and passes the result in."""
@@ -83,6 +84,12 @@ def validate(profile: Profile, running_ports: tuple = (),
             if bool(m.host) != bool(m.container):
                 issues.append(Issue("error",
                                     "Mount row is incomplete (host and container both required)."))
+
+        if profile.image and not image_present:
+            issues.append(Issue(
+                "warning",
+                f"Image {profile.image!r} is not present on the selected node; "
+                f"pull it (or build/copy it there) before launching."))
 
     # Exposure applies to BOTH modes: Runtime.bind_host drives the publish
     # address for every launch, so a single-model server bound past loopback

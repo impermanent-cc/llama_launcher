@@ -23,6 +23,11 @@ def _run(args: list[str], timeout: float = _DEFAULT_TIMEOUT) -> subprocess.Compl
         return subprocess.CompletedProcess(args, returncode=127, stdout="", stderr=str(exc))
 
 
+def _base(binary: str, connection: str = "") -> list[str]:
+    """Command head, with the podman remote-connection flag when set."""
+    return [binary, "--connection", connection] if connection else [binary]
+
+
 def binary_available(binary: str) -> bool:
     return shutil.which(binary) is not None
 
@@ -32,8 +37,8 @@ def is_rootless(binary: str) -> bool:
     return res.stdout.strip() == "true"
 
 
-def container_state(name: str, binary: str) -> str:
-    res = _run([binary, "inspect", "-f", "{{.State.Running}}", name])
+def container_state(name: str, binary: str, connection: str = "") -> str:
+    res = _run([*_base(binary, connection), "inspect", "-f", "{{.State.Running}}", name])
     if res.returncode != 0:
         return "absent"
     return "running" if res.stdout.strip() == "true" else "stopped"
@@ -43,31 +48,31 @@ def stop(name: str, binary: str) -> None:
     _run([binary, "stop", name])
 
 
-def stop_argv(name: str, binary: str, timeout: int = 10) -> list[str]:
+def stop_argv(name: str, binary: str, timeout: int = 10, connection: str = "") -> list[str]:
     """Argv to stop a container with an explicit grace period (for async/QProcess
     use so the UI thread never blocks on podman's stop timeout)."""
-    return [binary, "stop", "-t", str(timeout), name]
+    return [*_base(binary, connection), "stop", "-t", str(timeout), name]
 
 
-def logs_argv(name: str, binary: str) -> list[str]:
-    return [binary, "logs", "-f", name]
+def logs_argv(name: str, binary: str, connection: str = "") -> list[str]:
+    return [*_base(binary, connection), "logs", "-f", name]
 
 
-def container_exists(name: str, binary: str) -> bool:
-    return _run([binary, "container", "exists", name]).returncode == 0
+def container_exists(name: str, binary: str, connection: str = "") -> bool:
+    return _run([*_base(binary, connection), "container", "exists", name]).returncode == 0
 
 
-def started_at(name: str, binary: str) -> str | None:
+def started_at(name: str, binary: str, connection: str = "") -> str | None:
     """Return the container's StartedAt timestamp (ISO 8601) or None on failure."""
-    res = _run([binary, "inspect", "-f", "{{.State.StartedAt}}", name])
+    res = _run([*_base(binary, connection), "inspect", "-f", "{{.State.StartedAt}}", name])
     if res.returncode != 0:
         return None
     val = res.stdout.strip()
     return val if val else None
 
 
-def stats(name: str, binary: str) -> dict | None:
-    res = _run([binary, "stats", "--no-stream", "--format", "json", name])
+def stats(name: str, binary: str, connection: str = "") -> dict | None:
+    res = _run([*_base(binary, connection), "stats", "--no-stream", "--format", "json", name])
     if res.returncode != 0 or not res.stdout.strip():
         return None
     try:
@@ -102,9 +107,9 @@ def parse_images(output: str, engine: str = "llama.cpp") -> list[str]:
     return out
 
 
-def list_local_images(binary: str, engine: str = "llama.cpp") -> list[str]:
+def list_local_images(binary: str, engine: str = "llama.cpp", connection: str = "") -> list[str]:
     """Locally-pulled images for `engine` (`<binary> images`), [] on error."""
-    res = _run([binary, "images", "--format", "{{.Repository}}:{{.Tag}}"])
+    res = _run([*_base(binary, connection), "images", "--format", "{{.Repository}}:{{.Tag}}"])
     if res.returncode != 0:
         return []
     return parse_images(res.stdout, engine)
@@ -156,15 +161,35 @@ def parse_ps_json(output: str) -> list[dict]:
     return rows
 
 
-def list_launcher_containers(binary: str) -> list[dict]:
+def list_launcher_containers(binary: str, connection: str = "") -> list[dict]:
     """Every container this launcher created, running or not."""
-    res = _run([binary, "ps", "-a", "--filter", f"label={_PROFILE_LABEL}",
-                "--format", "json"])
+    res = _run([*_base(binary, connection), "ps", "-a", "--filter",
+                f"label={_PROFILE_LABEL}", "--format", "json"])
     if res.returncode != 0:
         return []
     return parse_ps_json(res.stdout)
 
 
-def rm_argv(name: str, binary: str) -> list[str]:
+def rm_argv(name: str, binary: str, connection: str = "") -> list[str]:
     """Argv to remove a container (for the pre-launch cleanup of a stopped router)."""
-    return [binary, "rm", "-f", name]
+    return [*_base(binary, connection), "rm", "-f", name]
+
+
+def image_exists(image: str, binary: str, connection: str = "") -> bool:
+    return _run([*_base(binary, connection), "image", "exists", image]).returncode == 0
+
+
+def pull_argv(image: str, binary: str, connection: str = "") -> list[str]:
+    return [*_base(binary, connection), "pull", image]
+
+
+def connection_add_argv(name: str, ssh_target: str, binary: str = "podman") -> list[str]:
+    return [binary, "system", "connection", "add", name, f"ssh://{ssh_target}"]
+
+
+def connection_remove_argv(name: str, binary: str = "podman") -> list[str]:
+    return [binary, "system", "connection", "remove", name]
+
+
+def node_reachable(connection: str, binary: str = "podman") -> bool:
+    return _run([*_base(binary, connection), "info", "--format", "{{.Host.Arch}}"]).returncode == 0

@@ -187,13 +187,16 @@ class MainWindow(QMainWindow):
         self.stats_toggle_btn = QPushButton("📊 Stats")
         self.stats_toggle_btn.setCheckable(True)
         self.stats_toggle_btn.setToolTip("Show/hide the live stats panel (Ctrl+Shift+S)")
+        self.nodes_btn = QPushButton("Nodes…")
+        self.nodes_btn.setToolTip("Add/test/remove remote podman-over-SSH nodes")
+        self.nodes_btn.clicked.connect(self.open_nodes_dialog)
         self.status_label = QLabel("● stopped")
         bar.addWidget(QLabel("Name"))
         bar.addWidget(self._configure_panel.name_edit, 1)
         bar.addWidget(self._configure_panel.profile_combo, 1)
         for b in (self._configure_panel.save_btn, self._configure_panel.save_as_btn,
                   self._configure_panel.delete_btn, self._configure_panel.report_btn,
-                  self.stats_toggle_btn):
+                  self.nodes_btn, self.stats_toggle_btn):
             bar.addWidget(b)
         bar.addWidget(self.status_label)
         root.insertLayout(0, bar)
@@ -322,6 +325,17 @@ class MainWindow(QMainWindow):
 
     def router_base_dir(self):
         return base_dir()
+
+    def base_dir(self):
+        """Config-root accessor for panels that need it directly (e.g. the
+        Configure panel's node list, the Nodes… dialog) -- same underlying
+        directory as router_base_dir(), just named for the general case."""
+        return base_dir()
+
+    def open_nodes_dialog(self) -> None:
+        from llama_launcher.ui.dialogs.nodes_dialog import NodesDialog
+        NodesDialog(self.base_dir(), self).exec()
+        self._configure_panel.reload_nodes()
 
     def router_api_key(self) -> str:
         p = self._configure_panel.current_profile()

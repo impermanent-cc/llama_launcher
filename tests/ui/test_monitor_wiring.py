@@ -80,8 +80,9 @@ def test_collect_monitor_data(qtbot, monkeypatch):
                                                          "llamacpp:prompt_tokens_seconds": 200.0})
     monkeypatch.setattr(mw.metrics, "fetch_slots", lambda port, timeout=1.0, **kw:
                         [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
-    monkeypatch.setattr(mw.runtime, "stats", lambda name, b: {"cpu_perc": "9%", "mem_usage": "1G / 16G"})
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
+    monkeypatch.setattr(mw.runtime, "stats",
+                        lambda name, b, connection="": {"cpu_perc": "9%", "mem_usage": "1G / 16G"})
     w = mw.MainWindow()
     qtbot.addWidget(w)
     w._configure_panel.load_profile(_profile())
@@ -97,9 +98,9 @@ def test_collect_monitor_data_reports_speculating(qtbot, monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_slots",
                         lambda *a, **k: [{"speculative": True, "n_ctx": 4096}])
     monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda *a, **k: {})
-    monkeypatch.setattr(mw.runtime, "stats", lambda name, binary: {})
-    monkeypatch.setattr(mw.runtime, "started_at", lambda name, binary: None)
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.runtime, "stats", lambda name, binary, connection="": {})
+    monkeypatch.setattr(mw.runtime, "started_at", lambda name, binary, connection="": None)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     w = mw.MainWindow()
     qtbot.addWidget(w)
     assert w._monitor.collect_monitor_data()["speculating"] is True
@@ -107,7 +108,7 @@ def test_collect_monitor_data_reports_speculating(qtbot, monkeypatch):
 
 def _ready(monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
-    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "running")
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary, connection="": "running")
     monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
     monkeypatch.setattr(MonitorController, "_log_follower_active", lambda self: True)
     monkeypatch.setattr(MonitorController, "_update_spec_stats", lambda self, p: None)
@@ -156,10 +157,10 @@ def test_build_monitor_data_gathers_from_a_plain_target(monkeypatch):
                         lambda *a, **k: {"llamacpp:predicted_tokens_seconds": 50.0})
     monkeypatch.setattr(mw.metrics, "fetch_slots",
                         lambda *a, **k: [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     monkeypatch.setattr(mw.runtime, "stats",
-                        lambda name, b: {"cpu_perc": "9%", "mem_usage": "1G / 16G"})
-    monkeypatch.setattr(mw.runtime, "started_at", lambda name, b: None)
+                        lambda name, b, connection="": {"cpu_perc": "9%", "mem_usage": "1G / 16G"})
+    monkeypatch.setattr(mw.runtime, "started_at", lambda name, b, connection="": None)
     target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
               "key": None, "model_scope": None, "poll": True,
               "name": "llama-x", "binary": "podman"}
@@ -175,9 +176,9 @@ def test_build_monitor_data_prefers_kv_cache_metric(monkeypatch):
                         lambda *a, **k: {"llamacpp:kv_cache_usage_ratio": 0.83})
     monkeypatch.setattr(mw.metrics, "fetch_slots",
                         lambda *a, **k: [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
-    monkeypatch.setattr(mw.runtime, "stats", lambda name, b: {})
-    monkeypatch.setattr(mw.runtime, "started_at", lambda name, b: None)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
+    monkeypatch.setattr(mw.runtime, "stats", lambda name, b, connection="": {})
+    monkeypatch.setattr(mw.runtime, "started_at", lambda name, b, connection="": None)
     target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
               "key": None, "model_scope": None, "poll": True,
               "name": "llama-x", "binary": "podman"}
@@ -190,9 +191,64 @@ def test_build_monitor_data_returns_none_when_not_running(monkeypatch):
     nothing (an idle/stopped server isn't polled off-thread every second)."""
     called = []
     monkeypatch.setattr(mw.runtime, "stats", lambda *a, **k: called.append(1))
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: called.append(1))
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": called.append(1))
     assert mw.build_monitor_data({"running": False}) is None
     assert called == []
+
+
+def test_build_monitor_data_threads_mon_conn_into_stats_and_started_at(monkeypatch):
+    """A target carrying mon_conn (the monitored instance's node connection)
+    must thread it into runtime.stats/started_at -- otherwise a remote
+    instance's CPU/mem/uptime are read from LOCAL podman instead of the node
+    the container actually runs on."""
+    monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda *a, **k: {})
+    monkeypatch.setattr(mw.metrics, "fetch_slots", lambda *a, **k: [])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
+    stats_calls = []
+    started_calls = []
+    monkeypatch.setattr(mw.runtime, "stats",
+                        lambda name, b, connection="": stats_calls.append(connection) or {})
+    monkeypatch.setattr(mw.runtime, "started_at",
+                        lambda name, b, connection="": started_calls.append(connection) or None)
+    target = {"running": True, "port": 8080, "metrics_on": False, "host": "10.0.0.2",
+              "key": None, "model_scope": None, "poll": True,
+              "name": "llama-rem", "binary": "podman", "mon_conn": "box-b"}
+    mw.build_monitor_data(target)
+    assert stats_calls == ["box-b"]
+    assert started_calls == ["box-b"]
+
+
+def test_compute_monitor_target_uses_node_host_and_connection_for_remote(qtbot, monkeypatch):
+    """A focused REMOTE instance's monitor target must poll the node's real
+    host (not 127.0.0.1 from dial_host(0.0.0.0)) and carry the node's
+    connection so container_state/stats/started_at hit the right podman."""
+    from llama_launcher.core.instances import Instance
+    from llama_launcher.core.nodes import Node
+    from llama_launcher.store.nodes import add_node
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    add_node(Node(name="box-b", kind="remote", connection="box-b",
+                  ssh_target="me@10.0.0.2"), w.base_dir())
+    w._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
+    w._monitor._instances = [Instance(
+        name="llama-rem", profile="rem", mode="server", running=True,
+        port=8081, host="0.0.0.0", embeddings=False, reranking=False,
+        stop_timeout=10, binary="podman", node="box-b")]
+    w._monitor._active_instance = w._monitor._instances[0]
+    target = w._monitor._compute_monitor_target(running=True)
+    assert target["host"] == "10.0.0.2"        # node's dial host, not 127.0.0.1
+    assert target["mon_conn"] == "box-b"
+
+
+def test_compute_monitor_target_local_stays_unchanged(qtbot):
+    """A local instance's target keeps its old host/connection shape exactly:
+    dial_host()-derived loopback and an empty mon_conn."""
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._configure_panel.load_profile(_profile())
+    target = w._monitor._compute_monitor_target(running=True)
+    assert target["host"] == "127.0.0.1"
+    assert target["mon_conn"] == ""
 
 
 def test_update_status_populates_monitor_target_off_ui_thread(qtbot, monkeypatch):
@@ -208,7 +264,7 @@ def test_update_status_populates_monitor_target_off_ui_thread(qtbot, monkeypatch
 
 def test_update_status_marks_target_not_running_when_stopped(qtbot, monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
-    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary: "stopped")
+    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary, connection="": "stopped")
     w = mw.MainWindow()
     qtbot.addWidget(w)
     w._monitor.update_status()

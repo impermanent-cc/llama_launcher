@@ -23,10 +23,12 @@ class Instance:
     binary: str = "podman"
     kind: str = "container"
     pid: int | None = None
+    node: str = "local"
 
 
 def build_instances(containers: list[dict], profiles: list[Profile],
-                    binary: str = "podman") -> list[Instance]:
+                    binary: str = "podman", node: str = "local",
+                    node_host: str = "") -> list[Instance]:
     """`binary` is the container binary these rows were listed with; it's the
     fallback for an unmatched container (profile deleted) whose own binary is
     unknown. A matched container is controlled with its profile's binary."""
@@ -36,18 +38,19 @@ def build_instances(containers: list[dict], profiles: list[Profile],
         prof = by_name.get(c.get("profile"))
         if prof is not None:
             port = prof.settings.get("port", 8080)
-            host = dial_host(prof.runtime.bind_host)
+            host = node_host if (node != "local" and node_host) else dial_host(prof.runtime.bind_host)
             emb = bool(prof.settings.get("embeddings"))
             rer = bool(prof.settings.get("reranking"))
             stop_to = prof.runtime.stop_timeout
             bin_ = prof.runtime.binary
         else:
-            port, host, emb, rer = None, "127.0.0.1", False, False
+            port, emb, rer = None, False, False
+            host = node_host if (node != "local" and node_host) else "127.0.0.1"
             stop_to, bin_ = DEFAULT_STOP_TIMEOUT, binary
         out.append(Instance(
             name=c["name"], profile=c.get("profile", ""), mode=c.get("mode", "server"),
             running=bool(c.get("running")), port=port, host=host,
             embeddings=emb, reranking=rer, stop_timeout=stop_to, binary=bin_,
-            kind=c.get("kind", "container"), pid=c.get("pid")))
+            kind=c.get("kind", "container"), pid=c.get("pid"), node=node))
     out.sort(key=lambda i: (not i.running, i.name))   # running first, then by name
     return out
