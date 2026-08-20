@@ -56,7 +56,12 @@ class _PoolWorker(QRunnable):
             res = self._work()
         except Exception as e:            # noqa: BLE001 - worker must never raise
             res = rpc.PoolResult(False, str(e))
-        self._signaller.done.emit(res)
+        try:
+            self._signaller.done.emit(res)
+        except RuntimeError:
+            # The signaller's C++ object was deleted (window torn down while a
+            # slow op was still running). Nothing to deliver to -- drop it.
+            pass
 
 
 class LaunchController:
@@ -121,6 +126,13 @@ class LaunchController:
             else:
                 w.terminate()
                 w.wait(100)
+
+        # Await this controller's own in-flight pool worker (launch/stop runs on
+        # the global pool). Idempotent -- a no-op when the pool is already idle
+        # (e.g. MonitorController.drain() drained it first). Ceiling'd, so a
+        # worker hung on an unreachable node can't block shutdown forever; the
+        # unparented signaller + guarded emit make outliving this wait safe.
+        QThreadPool.globalInstance().waitForDone(3000)
 
     # -- launch / stop / restart ----------------------------------------------
     def _connection_for_profile(self, profile) -> str:
@@ -294,7 +306,11 @@ class LaunchController:
         """Run the blocking pool orchestrator `work` on the global thread pool,
         delivering its result to `on_done` back on the UI thread. Overridden in
         tests to run synchronously."""
-        signaller = _PoolSignaller(self.window)
+        # No parent: created on the UI thread it keeps UI-thread affinity (so the
+        # cross-thread emit is queued to the UI event loop), but its lifetime is
+        # Python-ref-controlled -- window teardown won't delete it out from under
+        # a worker still blocked on a slow/unreachable node past the drain ceiling.
+        signaller = _PoolSignaller()
         signaller.done.connect(on_done)
         self._pool_signaller = signaller     # keep alive until the emit lands
         QThreadPool.globalInstance().start(_PoolWorker(work, signaller))

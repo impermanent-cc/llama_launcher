@@ -275,3 +275,56 @@ def test_run_pool_async_runs_work_off_thread_and_delivers_on_ui_thread(main_wind
     assert delivered.get("res") == "RESULT"
     assert info["work_thread"] != ui_thread, "work must run off the UI thread"
     assert delivered["done_thread"] == ui_thread, "on_done must run on the UI thread"
+
+
+def test_run_pool_async_signaller_not_parented_to_window(main_window):
+    """The result carrier must NOT be a child of the window: a worker still
+    running past the drain ceiling (e.g. blocked on an unreachable node ~55s)
+    would otherwise emit onto a C++ object deleted with the window."""
+    ctl = main_window._launch
+    ctl._run_pool_async(lambda: "x", lambda res: None)
+    assert ctl._pool_signaller is not None
+    assert ctl._pool_signaller.parent() is None
+
+
+def test_run_pool_async_delivers_worker_exception_as_failure(main_window):
+    """A raise inside the orchestrator must not escape the pool thread -- it is
+    delivered to on_done as a failed PoolResult."""
+    ctl = main_window._launch
+
+    def work():
+        raise RuntimeError("kaboom")
+
+    delivered = {}
+    ctl._run_pool_async(work, lambda res: delivered.setdefault("res", res))
+
+    QThreadPool.globalInstance().waitForDone(3000)
+    for _ in range(200):
+        if "res" in delivered:
+            break
+        QCoreApplication.processEvents()
+
+    res = delivered["res"]
+    assert res.ok is False
+    assert "kaboom" in res.error
+
+
+def test_drain_awaits_inflight_pool_worker(main_window):
+    """LaunchController.drain() must wait for its own in-flight pool worker to
+    finish rather than leaving it running against a torn-down window."""
+    ctl = main_window._launch
+    proceed = threading.Event()
+    ran = {"done": False}
+
+    def work():
+        proceed.wait(3.0)
+        ran["done"] = True
+        return "ok"
+
+    ctl._run_pool_async(work, lambda res: None)
+    # Release the worker shortly after drain() starts blocking on it.
+    threading.Timer(0.1, proceed.set).start()
+
+    ctl.drain()
+
+    assert ran["done"] is True, "drain() must wait for the in-flight pool worker"
