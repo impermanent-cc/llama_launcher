@@ -27,6 +27,7 @@ from llama_launcher.store.nodes import load_nodes
 from llama_launcher.store.profiles import list_profiles, resolve_member_pairs
 from llama_launcher.ui.widgets.setting_widgets import make_widget, SuggestionDot
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox, NoWheelSpinBox
+from llama_launcher.ui.widgets.rpc_workers_table import RpcWorkersTable
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
 from llama_launcher.ui.widgets.collapsible import CollapsibleSection
@@ -128,6 +129,7 @@ class ConfigurePanel(QWidget):
         self.launch_mode_combo = NoWheelComboBox()
         self.launch_mode_combo.addItem("Container (podman/docker)", "container")
         self.launch_mode_combo.addItem("Native (run a built binary)", "native")
+        self.launch_mode_combo.addItem("RPC pool (multi-node)", "rpc")
         self.launch_mode_combo.currentIndexChanged.connect(self._on_launch_mode_changed)
 
         # Which machine (local or a saved remote) runs this profile. NoWheel
@@ -145,6 +147,17 @@ class ConfigurePanel(QWidget):
             "Path to a prebuilt llama-server executable (mainline or ik_llama.cpp). "
             "The launcher runs it directly as a managed background process.")
         self.native_binary_edit.textChanged.connect(self.refresh_preview)
+
+        # RPC pool: one row per --rpc worker (node/device/mem/port). The head
+        # server that owns this profile always runs locally in this mode (see
+        # _on_launch_mode_changed), so the head Node dropdown above is disabled
+        # rather than removed -- only where each *worker* runs is per-row here.
+        self.rpc_workers_table = RpcWorkersTable(node_names=self._node_names())
+        self.rpc_workers_table.changed.connect(self.refresh_preview)
+        self.rpc_workers_table.setToolTip(
+            "rpc-server workers this profile's head connects to (--rpc host:port,…). "
+            "Each row is a worker: which node it runs on, which device it exposes, "
+            "an optional --mem budget, and its rpc-server port.")
 
         # `podman stop -t` grace period for the Stop button. Large MoE models can
         # need more than podman's 10s default to unload cleanly before SIGKILL.
@@ -222,6 +235,7 @@ class ConfigurePanel(QWidget):
         left_form.addRow("Runtime", self.binary_combo)
         self._native_binary_row = self._native_binary_field_with_browse()
         left_form.addRow("llama-server binary", self._native_binary_row)
+        left_form.addRow("RPC workers", self.rpc_workers_table)
         left_form.addRow("GPU", self.gpu_combo)
 
         # mounts editor
@@ -444,7 +458,9 @@ class ConfigurePanel(QWidget):
         self.detached_check.setVisible(not is_router and not is_native)
 
     def _on_launch_mode_changed(self, *_) -> None:
-        native = self.launch_mode_combo.currentData() == "native"
+        mode = self.launch_mode_combo.currentData()
+        native = mode == "native"
+        rpc = mode == "rpc"
         # Native shows the binary path; hides everything container-only.
         self._left_form.setRowVisible(self._native_binary_row, native)
         self._left_form.setRowVisible(self._image_row, not native)
@@ -453,8 +469,20 @@ class ConfigurePanel(QWidget):
         self._left_form.setRowVisible(self.mounts_panel, not native)
         self._left_form.setRowVisible(self.extra_args_edit, not native)
         self._left_form.setRowVisible(self.selinux_check, not native)
+        # RPC pool shows the workers table; its head always runs locally, so
+        # the head Node dropdown is force-disabled rather than hidden -- it
+        # still shows "local" so the choice isn't a mystery.
+        self._left_form.setRowVisible(self.rpc_workers_table, rpc)
+        self.node_combo.setEnabled(not rpc)
         self._update_detached_visibility()
         self.refresh_preview()
+
+    def _rpc_workers_row_visible(self) -> bool:
+        index = self._left_form.getWidgetPosition(self.rpc_workers_table)[0]
+        return index >= 0 and self._left_form.isRowVisible(index)
+
+    def _node_names(self) -> list[str]:
+        return [n.name for n in load_nodes(self.window.base_dir())]
 
     def _populate_node_combo(self) -> None:
         self.node_combo.clear()
@@ -471,6 +499,7 @@ class ConfigurePanel(QWidget):
         idx = self.node_combo.findData(keep)
         self.node_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.node_combo.blockSignals(False)
+        self.rpc_workers_table.set_node_names(self._node_names())
 
     def _on_node_changed(self, *_) -> None:
         """A remote server must publish on a LAN interface so the GUI host can
@@ -762,6 +791,7 @@ class ConfigurePanel(QWidget):
         idx = self.launch_mode_combo.findData(p.runtime.launch_mode)
         self.launch_mode_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.native_binary_edit.setText(p.runtime.native_binary)
+        self.rpc_workers_table.set_workers(p.runtime.rpc_workers)
         self._on_launch_mode_changed()
         nidx = self.node_combo.findData(p.runtime.node)
         self.node_combo.blockSignals(True)
@@ -793,6 +823,8 @@ class ConfigurePanel(QWidget):
                 settings[key] = w.value()
         # port is always stored
         settings["port"] = self._widgets["port"].value()
+        launch_mode = self.launch_mode_combo.currentData() or "container"
+        is_rpc = launch_mode == "rpc"
         return Profile(
             name=self._profile_name(),
             image=self.image_edit.text(),
@@ -806,9 +838,12 @@ class ConfigurePanel(QWidget):
                             router_key_mode=self.api_key_box._current_scope(),
                             engine=self.engine_combo.currentData() or "llama.cpp",
                             stop_timeout=self.stop_timeout_spin.value(),
-                            launch_mode=self.launch_mode_combo.currentData() or "container",
+                            launch_mode=launch_mode,
                             native_binary=self.native_binary_edit.text().strip(),
-                            node=self.node_combo.currentData() or "local"),
+                            # RPC pool: the head always runs locally (node_combo
+                            # is force-disabled in _on_launch_mode_changed).
+                            node="local" if is_rpc else (self.node_combo.currentData() or "local"),
+                            rpc_workers=self.rpc_workers_table.workers() if is_rpc else []),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
