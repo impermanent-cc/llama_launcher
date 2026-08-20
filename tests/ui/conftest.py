@@ -53,3 +53,13 @@ def _hermetic_ui_boundaries(monkeypatch):
     # a window) during the next test's teardown.
     from PySide6.QtCore import QThreadPool
     QThreadPool.globalInstance().waitForDone(2000)
+
+
+@pytest.fixture
+def main_window(qtbot, tmp_path, monkeypatch):
+    """A MainWindow with an isolated base_dir() (via XDG_CONFIG_HOME), for
+    tests that need a real window + panel tree (e.g. node-selection wiring)."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    w = _mw.MainWindow()
+    qtbot.addWidget(w)
+    return w

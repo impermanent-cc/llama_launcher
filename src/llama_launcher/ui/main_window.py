@@ -323,6 +323,12 @@ class MainWindow(QMainWindow):
     def router_base_dir(self):
         return base_dir()
 
+    def base_dir(self):
+        """Config-root accessor for panels that need it directly (e.g. the
+        Configure panel's node list, the Nodes… dialog) -- same underlying
+        directory as router_base_dir(), just named for the general case."""
+        return base_dir()
+
     def router_api_key(self) -> str:
         p = self._configure_panel.current_profile()
         return (api_key_store.resolve_api_key(self.router_base_dir(), p)
