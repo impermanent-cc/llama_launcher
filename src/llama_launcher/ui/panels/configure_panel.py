@@ -1,7 +1,7 @@
 import os
 import posixpath
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QRunnable, QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QCheckBox,
     QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
@@ -12,6 +12,7 @@ from llama_launcher.core.capabilities import (
     describe_relevance, Tier, suggestions as compute_suggestions,
 )
 from llama_launcher.core.command_builder import build_command
+from llama_launcher.core.nodes import LOCAL_NODE, connection_for
 from llama_launcher.core.pathmap import host_to_container, container_to_host
 from llama_launcher.core.settings_catalog import (
     CATALOG, member_catalog, router_catalog, for_engine,
@@ -20,10 +21,11 @@ from llama_launcher.core.settings_catalog import (
 from llama_launcher.core.spec import (
     DEFAULT_STOP_TIMEOUT, Profile, Runtime, RouterMember, member_model_id,
 )
+from llama_launcher.core import vram
 from llama_launcher.core.validation import validate, Issue
 from llama_launcher.services import api_key as api_key_store
-from llama_launcher.services import model_info, runtime, native
-from llama_launcher.store.nodes import load_nodes
+from llama_launcher.services import model_info, runtime, native, pool_preflight
+from llama_launcher.store.nodes import load_nodes, get_node
 from llama_launcher.store.profiles import list_profiles, resolve_member_pairs
 from llama_launcher.ui.widgets.setting_widgets import make_widget, SuggestionDot
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox, NoWheelSpinBox
@@ -40,6 +42,64 @@ _ENGINE_DEFAULT_IMAGE = {
     "llama.cpp": "ghcr.io/ggml-org/llama.cpp:server-cuda",
     "ik_llama.cpp": "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
 }
+
+
+def _gather_check_fit(profile: Profile, base_dir, estimate_bytes: int):
+    """Off-UI-thread body of the RPC "Check fit" preflight: probe every
+    worker's node for free VRAM/RAM + image presence, build the headline, and
+    run `validate()` with those probes wired in so Task 7's per-node RPC
+    warnings (image missing, a --mem pledge exceeding what's free) surface.
+    Returns (headline_text, [Issue, ...]).
+    """
+    gpus_reader = pool_preflight.default_gpus_reader(base_dir)
+    ram_reader = pool_preflight.default_ram_reader(base_dir)
+    donations = pool_preflight.gather_donations(
+        profile, base_dir, gpus=gpus_reader, ram=ram_reader)
+    headline_text = pool_preflight.headline(estimate_bytes, donations)
+
+    worker_free_mb: dict = {}
+    worker_image_present: dict = {}
+    for w in profile.runtime.rpc_workers:
+        is_vram = (w.device or "").upper().startswith("CUDA")
+        free_bytes = gpus_reader(w.node) if is_vram else ram_reader(w.node)
+        worker_free_mb[w.node] = int(free_bytes // (1024 * 1024))
+        node = get_node(base_dir, w.node) or LOCAL_NODE
+        worker_image_present[w.node] = (
+            runtime.image_exists(profile.image, profile.runtime.binary,
+                                 connection_for(node))
+            if profile.image else True)
+
+    issues = validate(profile, binary_found=runtime.binary_available(profile.runtime.binary),
+                      native_binary_ok=native.native_binary_ok_for(profile),
+                      worker_image_present=worker_image_present,
+                      worker_free_mb=worker_free_mb)
+    return headline_text, issues
+
+
+class _CheckFitGather(QRunnable):
+    """Run `_gather_check_fit` off the UI thread on the global thread pool.
+
+    Same delivery model MonitorController's `_MonitorGather`/`_InstancesGather`
+    use: write the result onto a plain attribute of the owning ConfigurePanel
+    (assignment is atomic under the GIL) instead of a cross-thread Qt signal,
+    and hold a reference to the panel so it can't be garbage-collected
+    mid-gather. `_poll_check_fit` (a short-interval QTimer.singleShot loop)
+    renders the result once `_check_fit_inflight` flips back to False.
+    """
+    def __init__(self, owner, profile, base_dir, estimate_bytes):
+        super().__init__()
+        self._owner = owner
+        self._profile = profile
+        self._base_dir = base_dir
+        self._estimate_bytes = estimate_bytes
+
+    def run(self):
+        try:
+            result = _gather_check_fit(self._profile, self._base_dir, self._estimate_bytes)
+        except Exception:            # noqa: BLE001 - worker must never raise
+            result = None
+        self._owner._check_fit_result = result
+        self._owner._check_fit_inflight = False
 
 
 class ConfigurePanel(QWidget):
@@ -159,6 +219,27 @@ class ConfigurePanel(QWidget):
             "Each row is a worker: which node it runs on, which device it exposes, "
             "an optional --mem budget, and its rpc-server port.")
 
+        # "Check fit" preflight: probes each worker's node for free VRAM/RAM
+        # (or trusts its --mem pledge when set) and reports whether the pool
+        # covers the selected model, plus any RPC validation warnings (image
+        # missing on a node, a pledge exceeding what's actually free there).
+        # RPC-mode only -- toggled alongside rpc_workers_table below.
+        self.check_fit_btn = QPushButton("Check fit")
+        self.check_fit_btn.setToolTip(
+            "Probe each RPC worker's node for free VRAM/RAM and check whether the "
+            "pool can hold the selected model.")
+        self.check_fit_btn.clicked.connect(self._on_check_fit)
+        self.check_fit_label = QLabel("")
+        self.check_fit_label.setWordWrap(True)
+        check_fit_row = QHBoxLayout()
+        check_fit_row.setContentsMargins(0, 0, 0, 0)
+        check_fit_row.addWidget(self.check_fit_btn)
+        check_fit_row.addWidget(self.check_fit_label, 1)
+        self._check_fit_widget = QWidget()
+        self._check_fit_widget.setLayout(check_fit_row)
+        self._check_fit_result = None
+        self._check_fit_inflight = False
+
         # `podman stop -t` grace period for the Stop button. Large MoE models can
         # need more than podman's 10s default to unload cleanly before SIGKILL.
         self.stop_timeout_spin = NoWheelSpinBox()
@@ -236,6 +317,7 @@ class ConfigurePanel(QWidget):
         self._native_binary_row = self._native_binary_field_with_browse()
         left_form.addRow("llama-server binary", self._native_binary_row)
         left_form.addRow("RPC workers", self.rpc_workers_table)
+        left_form.addRow("", self._check_fit_widget)
         left_form.addRow("GPU", self.gpu_combo)
 
         # mounts editor
@@ -473,6 +555,9 @@ class ConfigurePanel(QWidget):
         # the head Node dropdown is force-disabled rather than hidden -- it
         # still shows "local" so the choice isn't a mystery.
         self._left_form.setRowVisible(self.rpc_workers_table, rpc)
+        self._left_form.setRowVisible(self._check_fit_widget, rpc)
+        if not rpc:
+            self.check_fit_label.setText("")
         self.node_combo.setEnabled(not rpc)
         self._update_detached_visibility()
         self.refresh_preview()
@@ -480,6 +565,57 @@ class ConfigurePanel(QWidget):
     def _rpc_workers_row_visible(self) -> bool:
         index = self._left_form.getWidgetPosition(self.rpc_workers_table)[0]
         return index >= 0 and self._left_form.isRowVisible(index)
+
+    def _check_fit_row_visible(self) -> bool:
+        index = self._left_form.getWidgetPosition(self._check_fit_widget)[0]
+        return index >= 0 and self._left_form.isRowVisible(index)
+
+    # -- RPC pool "Check fit" preflight ---------------------------------------
+    def _on_check_fit(self) -> None:
+        p = self.current_profile()
+        if not p.runtime.rpc_workers:
+            self.check_fit_label.setText("Add at least one RPC worker first.")
+            return
+        if not p.model:
+            self.check_fit_label.setText("Select a model first.")
+            return
+        estimate_bytes = self._model_estimate_bytes(p)
+        self.check_fit_label.setText("Checking fit…")
+        self.check_fit_btn.setEnabled(False)
+        self._check_fit_result = None
+        self._check_fit_inflight = True
+        QThreadPool.globalInstance().start(
+            _CheckFitGather(self, p, self.window.base_dir(), estimate_bytes))
+        QTimer.singleShot(150, self._poll_check_fit)
+
+    def _model_estimate_bytes(self, p: Profile) -> int:
+        """Same weights+KV-cache estimate LaunchController.vram_check() uses
+        for the single-node preflight, reused here for the pooled one."""
+        meta, weights, _caps = model_info.inspect_model(p.model, self.mounts_panel.mounts())
+        if meta is None or not meta.n_layers or not meta.n_embd:
+            return int(weights or 0)
+        ctx = p.settings.get("ctx-size") or meta.ctx_train or 4096
+        est = vram.estimate(
+            n_layers=meta.n_layers, n_head=meta.n_head or 1,
+            n_head_kv=meta.n_head_kv or meta.n_head or 1, n_embd=meta.n_embd, ctx=ctx,
+            k_quant=p.settings.get("cache-type-k", "f16"),
+            v_quant=p.settings.get("cache-type-v", "f16"),
+            weights_bytes=weights or 0,
+        )
+        return est.total_bytes
+
+    def _poll_check_fit(self) -> None:
+        if not self._check_fit_inflight:
+            self.check_fit_btn.setEnabled(True)
+            headline_text, issues = self._check_fit_result or (
+                "Check fit failed (see logs).", [])
+            lines = [headline_text]
+            for issue in issues:
+                prefix = "Error" if issue.level == "error" else "Warning"
+                lines.append(f"{prefix}: {issue.message}")
+            self.check_fit_label.setText("\n".join(lines))
+            return
+        QTimer.singleShot(150, self._poll_check_fit)
 
     def _node_names(self) -> list[str]:
         return [n.name for n in load_nodes(self.window.base_dir())]
