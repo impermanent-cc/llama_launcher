@@ -42,10 +42,15 @@ def _under_any_mount(path: str, profile: Profile) -> bool:
 def validate(profile: Profile, running_ports: tuple = (),
              binary_found: bool = True, members: tuple = (),
              api_key_present: bool = False, native_binary_ok: bool = True,
-             image_present: bool = True) -> list[Issue]:
+             image_present: bool = True, worker_image_present: dict = None,
+             worker_free_mb: dict = None) -> list[Issue]:
     """`native_binary_ok` mirrors `binary_found`: core stays I/O-free, so the
     caller stats `profile.runtime.native_binary` (e.g. via
-    services.native.native_binary_available) and passes the result in."""
+    services.native.native_binary_available) and passes the result in.
+
+    `worker_image_present`/`worker_free_mb` are the RPC-pool equivalents:
+    dependency-injected {node: value} maps for `_validate_rpc`, populated by a
+    caller that has actually probed the worker nodes."""
     issues: list[Issue] = []
     is_native = profile.runtime.launch_mode == "native"
 
@@ -186,9 +191,41 @@ def validate(profile: Profile, running_ports: tuple = (),
                                 "Sampling parameters are ignored in embedding mode "
                                 f"(changed: {', '.join(changed)})."))
 
+    if profile.runtime.launch_mode == "rpc":
+        issues += _validate_rpc(profile, worker_image_present or {}, worker_free_mb or {})
+
     for w in raw_arg_warnings(profile):
         issues.append(Issue("warning", w))
 
+    return issues
+
+
+_CENTRALIZING = ("cpu-moe", "n-cpu-moe", "no-kv-offload", "override-tensor")
+
+
+def _validate_rpc(profile: Profile, worker_image_present: dict,
+                  worker_free_mb: dict) -> list[Issue]:
+    issues: list[Issue] = []
+    if profile.mode == "router":
+        issues.append(Issue("error", "RPC pooling does not support router mode."))
+    workers = profile.runtime.rpc_workers
+    if not workers:
+        issues.append(Issue("error", "An RPC pool needs at least one worker."))
+    for w in workers:
+        if worker_image_present.get(w.node) is False:
+            issues.append(Issue("error",
+                f"RPC image {profile.image!r} is not present on node '{w.node}'; "
+                f"build or copy the GGML_RPC image there before launching."))
+        free = worker_free_mb.get(w.node)
+        if free is not None and w.mem_mb and w.mem_mb > free:
+            issues.append(Issue("warning",
+                f"Worker on '{w.node}' donates {w.mem_mb} MB but only {free} MB is "
+                f"free; more than the node has risks the head crashing mid-upload."))
+    if any(profile.settings.get(k) for k in _CENTRALIZING):
+        issues.append(Issue("warning",
+            "A memory-centralizing flag (cpu-moe/n-cpu-moe/no-kv-offload/"
+            "override-tensor) centralizes on the head; prefer -ngl spread across "
+            "the pool for RPC."))
     return issues
 
 
