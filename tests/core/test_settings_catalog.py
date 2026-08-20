@@ -47,6 +47,33 @@ def test_speculative_decoding_group():
         assert CATALOG[k].group == "Speculative Decoding", k
 
 
+def test_chat_template_kwargs_present():
+    s = CATALOG["chat-template-kwargs"]
+    assert s.flag == "--chat-template-kwargs"
+    assert s.type == "string"
+    assert s.default == ""
+    assert s.group == "Server & Tools"
+
+
+def test_reasoning_budget_message_present():
+    s = CATALOG["reasoning-budget-message"]
+    assert s.flag == "--reasoning-budget-message"
+    assert s.type == "string"
+    assert s.default == ""
+    assert s.group == "Server & Tools"
+
+
+def test_spec_draft_backend_sampling_present_as_negatable_bool():
+    # Upstream default is enabled; represented like cors-credentials -- a bool
+    # defaulting False whose flag is the --no- form, so checking it emits the
+    # disable flag and leaving it unchecked emits nothing.
+    s = CATALOG["spec-draft-backend-sampling"]
+    assert s.flag == "--no-spec-draft-backend-sampling"
+    assert s.type == "bool"
+    assert s.default is False
+    assert s.group == "Speculative Decoding"
+
+
 def test_gpu_additions_and_split_mode_tensor():
     from llama_launcher.core.settings_catalog import CATALOG
     assert CATALOG["no-mmproj-offload"].type == "bool"

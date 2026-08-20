@@ -158,6 +158,29 @@ def test_numa_value_and_server_round_out_render():
     assert "--dry-sequence-breaker none" in text
 
 
+def test_chat_template_kwargs_json_value_reaches_argv_intact():
+    p = _golden_profile()
+    p.settings["chat-template-kwargs"] = '{"enable_thinking":false}'
+    argv = build_command(p)
+    i = argv.index("--chat-template-kwargs")
+    assert argv[i + 1] == '{"enable_thinking":false}'
+
+
+def test_reasoning_budget_message_reaches_argv():
+    p = _golden_profile()
+    p.settings["reasoning-budget-message"] = "Thinking budget reached."
+    argv = build_command(p)
+    i = argv.index("--reasoning-budget-message")
+    assert argv[i + 1] == "Thinking budget reached."
+
+
+def test_spec_draft_backend_sampling_emits_no_flag_only_when_checked():
+    p = _golden_profile()
+    assert "--no-spec-draft-backend-sampling" not in build_command(p)
+    p.settings["spec-draft-backend-sampling"] = True
+    assert "--no-spec-draft-backend-sampling" in build_command(p)
+
+
 def _embed_profile(**settings):
     return Profile(
         name="embed", image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
