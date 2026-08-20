@@ -375,3 +375,13 @@ def build_command(profile: Profile, catalog: dict = CATALOG,
             profile, catalog, host=profile.runtime.bind_host)
     return _run_level_args(profile, detach=detach, connection=connection) \
         + _server_args(profile, catalog)
+
+
+def build_rpc_endpoints(workers, resolve) -> str:
+    """`--rpc` value: comma-joined 127.0.0.1:<port> for each worker.
+
+    `resolve(worker) -> int` gives the head-facing port (local worker's own port,
+    or a remote worker's ssh local-forward port). Loopback throughout because the
+    head runs with --network host and reaches every worker over the host loopback.
+    """
+    return ",".join(f"127.0.0.1:{resolve(w)}" for w in workers)
