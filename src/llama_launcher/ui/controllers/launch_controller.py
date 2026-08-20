@@ -1,4 +1,6 @@
-from PySide6.QtCore import QThread, QTimer, Signal
+from PySide6.QtCore import (
+    QObject, QRunnable, QThread, QThreadPool, QTimer, Signal,
+)
 from PySide6.QtWidgets import QMessageBox, QInputDialog
 
 from llama_launcher.core.command_builder import build_command
@@ -30,6 +32,38 @@ class _UpdateWorker(QThread):
             self.failed.emit(str(e))
 
 
+class _PoolSignaller(QObject):
+    """UI-thread-resident carrier for a pool op's result. The worker runs on a
+    pool thread and emits `done`; because the signaller lives on the UI thread,
+    Qt queues the emit and the connected slot runs on the UI thread -- safe for
+    QMessageBox / update_status."""
+    done = Signal(object)
+
+
+class _PoolWorker(QRunnable):
+    """Run a blocking pool orchestrator call off the UI thread on the global
+    pool, then emit its result via a UI-thread signaller. A pooled QRunnable
+    (not a persistent QThread) sidesteps the C++-object-deleted-mid-run abort a
+    long-lived worker risks on window teardown -- same reason MonitorController
+    gathers on the pool rather than a persistent thread."""
+    def __init__(self, work, signaller):
+        super().__init__()
+        self._work = work
+        self._signaller = signaller
+
+    def run(self):
+        try:
+            res = self._work()
+        except Exception as e:            # noqa: BLE001 - worker must never raise
+            res = rpc.PoolResult(False, str(e))
+        try:
+            self._signaller.done.emit(res)
+        except RuntimeError:
+            # The signaller's C++ object was deleted (window torn down while a
+            # slow op was still running). Nothing to deliver to -- drop it.
+            pass
+
+
 class LaunchController:
     """Owns launch/stop/restart/enable-metrics + image fetch/detect/update behavior.
 
@@ -50,6 +84,14 @@ class LaunchController:
         self._stop_proc = None
         self._fetch_worker = None
         self._update_worker = None
+
+        # RPC pool lifecycle runs off the UI thread (a remote worker's podman
+        # run/stop is an ssh round-trip, and wait_ready can block ~55s on a node
+        # that never comes up). `_pool_inflight` guards a second Launch/Stop
+        # during the async window; `_pool_signaller` keeps the result carrier
+        # alive until its queued emit is delivered.
+        self._pool_inflight = False
+        self._pool_signaller = None
 
         # The update-check timer. A singleShot fired 3s after construction so
         # the window (image field etc.) is fully built by the time it runs --
@@ -84,6 +126,13 @@ class LaunchController:
             else:
                 w.terminate()
                 w.wait(100)
+
+        # Await this controller's own in-flight pool worker (launch/stop runs on
+        # the global pool). Idempotent -- a no-op when the pool is already idle
+        # (e.g. MonitorController.drain() drained it first). Ceiling'd, so a
+        # worker hung on an unreachable node can't block shutdown forever; the
+        # unparented signaller + guarded emit make outliving this wait safe.
+        QThreadPool.globalInstance().waitForDone(3000)
 
     # -- launch / stop / restart ----------------------------------------------
     def _connection_for_profile(self, profile) -> str:
@@ -227,14 +276,44 @@ class LaunchController:
         # start, so no early output is missed).
 
     def _launch_pool(self, p) -> None:
-        """RPC pool launch: worker(s) + head are started synchronously by the
-        pool orchestrator (each worker's `run -d` returns fast), so there's no
-        async spawn/callback plumbing here -- just report the outcome."""
-        res = rpc.launch_pool(p, self.window.base_dir())
+        """RPC pool launch, off the UI thread. The orchestrator blocks on each
+        worker's podman run (an ssh round-trip when remote), the readiness gate
+        (up to ~55s for a worker that never comes up) and the head's run -- all
+        of which would freeze the GUI if run inline. Dispatch it to a pool
+        thread and report the outcome back on the UI thread."""
+        if self._pool_inflight:
+            return
+        self._pool_inflight = True
+        self.window.status_label.setText("● starting pool…")
+        base = self.window.base_dir()
+        self._run_pool_async(lambda: rpc.launch_pool(p, base), self._on_pool_result)
+
+    def _on_pool_result(self, res) -> None:
+        """UI-thread completion for a pool launch."""
+        self._pool_inflight = False
         if res.ok:
             self.window._monitor.update_status()
         else:
             self._report_launch_error(res.error, show_dialog=True)
+
+    def _on_pool_stopped(self, _res) -> None:
+        """UI-thread completion for a pool stop (result ignored -- stop_pool is
+        best-effort, so just refresh status either way)."""
+        self._pool_inflight = False
+        self.window._monitor.update_status()
+
+    def _run_pool_async(self, work, on_done) -> None:
+        """Run the blocking pool orchestrator `work` on the global thread pool,
+        delivering its result to `on_done` back on the UI thread. Overridden in
+        tests to run synchronously."""
+        # No parent: created on the UI thread it keeps UI-thread affinity (so the
+        # cross-thread emit is queued to the UI event loop), but its lifetime is
+        # Python-ref-controlled -- window teardown won't delete it out from under
+        # a worker still blocked on a slow/unreachable node past the drain ceiling.
+        signaller = _PoolSignaller()
+        signaller.done.connect(on_done)
+        self._pool_signaller = signaller     # keep alive until the emit lands
+        QThreadPool.globalInstance().start(_PoolWorker(work, signaller))
 
     def _spawn_async(self, argv: list[str], on_done=None, on_error=None):
         """Run argv in the background via QProcess so the UI thread never blocks.
@@ -263,8 +342,14 @@ class LaunchController:
     def on_stop(self):
         p = self.window._configure_panel.current_profile()
         if p.runtime.launch_mode == "rpc":
-            rpc.stop_pool(p, self.window.base_dir())
-            self.window._monitor.update_status()
+            # stop_pool does a `podman stop` per worker (an ssh round-trip when
+            # remote) plus tunnel teardown -- off the UI thread, same as launch.
+            if self._pool_inflight:
+                return
+            self._pool_inflight = True
+            self.window.status_label.setText("● stopping pool…")
+            base = self.window.base_dir()
+            self._run_pool_async(lambda: rpc.stop_pool(p, base), self._on_pool_stopped)
             return
 
         # Stop the log follower immediately; run `podman stop` asynchronously so a
