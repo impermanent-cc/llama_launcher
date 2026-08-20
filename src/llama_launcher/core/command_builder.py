@@ -155,7 +155,8 @@ def needs_server_entrypoint(image: str) -> bool:
 
 
 def _run_level_args(profile: Profile, router_host_dir: str = "",
-                    detach: bool = False, connection: str = "") -> list[str]:
+                    detach: bool = False, connection: str = "",
+                    network_host: bool = False) -> list[str]:
     rt = profile.runtime
     is_router = profile.mode == "router"
 
@@ -183,8 +184,11 @@ def _run_level_args(profile: Profile, router_host_dir: str = "",
     if rt.selinux_label_disable:
         argv.append("--security-opt=label=disable")
 
-    port = profile.settings.get("port", 8080)
-    argv += ["-p", f"{rt.bind_host}:{port}:{port}"]
+    if network_host:
+        argv += ["--network", "host"]           # head shares host loopback for --rpc
+    else:
+        port = profile.settings.get("port", 8080)
+        argv += ["-p", f"{rt.bind_host}:{port}:{port}"]
 
     workdir = None
     for m in profile.mounts:
@@ -366,13 +370,22 @@ def raw_arg_warnings(profile: Profile, catalog: dict = CATALOG) -> list[str]:
 
 def build_command(profile: Profile, catalog: dict = CATALOG,
                   router_host_dir: str = "", detach: bool = False,
-                  connection: str = "") -> list[str]:
+                  connection: str = "", rpc_endpoints: str = "") -> list[str]:
     if profile.mode == "router":
         return _run_level_args(profile, router_host_dir, connection=connection) \
             + _router_server_args(profile)
     if profile.runtime.launch_mode == "native":
         return [profile.runtime.native_binary] + _server_args(
             profile, catalog, host=profile.runtime.bind_host)
+    if profile.runtime.launch_mode == "rpc":
+        # Head runs locally (no --connection) and host-networked so it can
+        # reach every worker over 127.0.0.1. --host must stay the profile's
+        # configured bind_host: --network host drops the -p bind_host:port:port
+        # translation, so _server_args' 0.0.0.0 default would otherwise expose
+        # the head API on every interface on the LAN.
+        return _run_level_args(profile, detach=True, connection="", network_host=True) \
+            + _server_args(profile, catalog, host=profile.runtime.bind_host) \
+            + ["--rpc", rpc_endpoints]
     return _run_level_args(profile, detach=detach, connection=connection) \
         + _server_args(profile, catalog)
 
