@@ -23,6 +23,14 @@ class LoraRef:
     scale: float = 1.0
 
 
+@dataclass(frozen=True)
+class RpcWorker:
+    node: str
+    device: str = "CPU"      # "CPU" | "CUDA0" | "CUDA1" | ...
+    mem_mb: int = 0          # --mem budget (0 = let rpc-server decide)
+    port: int = 50052        # rpc-server port on the worker host
+
+
 @dataclass
 class RouterMember:
     """One model served by a router profile.
@@ -51,9 +59,10 @@ class Runtime:
     router_key_mode: str = "global"  # "global" (shared key) | "own" (per-profile key)
     engine: str = "llama.cpp"     # "llama.cpp" | "ik_llama.cpp"
     stop_timeout: int = DEFAULT_STOP_TIMEOUT  # `podman stop -t` grace before SIGKILL
-    launch_mode: str = "container"  # "container" (podman/docker) | "native" (subprocess)
+    launch_mode: str = "container"  # "container" (podman/docker) | "native" (subprocess) | "rpc"
     native_binary: str = ""         # abs path to a prebuilt llama-server (native mode)
     node: str = "local"             # which registered node this profile launches on
+    rpc_workers: list = field(default_factory=list)  # list[RpcWorker], RPC mode only
 
 
 @dataclass

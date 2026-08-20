@@ -139,3 +139,20 @@ def test_legacy_profile_defaults_to_container():
     out = profile_from_dict(legacy)
     assert out.runtime.launch_mode == "container"
     assert out.runtime.native_binary == ""
+
+
+def test_rpc_workers_round_trip():
+    from llama_launcher.core.spec import RpcWorker
+    p = Profile(name="pool", runtime=Runtime(
+        launch_mode="rpc",
+        rpc_workers=[RpcWorker(node="local", device="CUDA0", mem_mb=8000, port=50052),
+                     RpcWorker(node="box2", device="CPU", mem_mb=32000, port=50052)]))
+    back = profile_from_dict(profile_to_dict(p))
+    assert back.runtime.launch_mode == "rpc"
+    assert back.runtime.rpc_workers == p.runtime.rpc_workers
+    assert isinstance(back.runtime.rpc_workers[0], RpcWorker)
+
+
+def test_container_profile_round_trip_unchanged():
+    p = Profile(name="plain", runtime=Runtime())
+    assert profile_from_dict(profile_to_dict(p)).runtime.rpc_workers == []
