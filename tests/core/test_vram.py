@@ -1,5 +1,5 @@
 from llama_launcher.core.vram import (
-    bytes_per_elem, kv_cache_bytes, estimate, fits, VramEstimate,
+    bytes_per_elem, kv_cache_bytes, estimate, fits, VramEstimate, pooled_fit,
 )
 
 
@@ -59,3 +59,17 @@ def test_available_free_bytes_uses_main_gpu_when_split_none():
 def test_available_free_bytes_empty():
     from llama_launcher.core.vram import available_free_bytes
     assert available_free_bytes([], "layer", 0) == 0
+
+
+def test_pooled_fit_sums_vram_and_ram_and_reports_margin():
+    gb = 1024 ** 3
+    r = pooled_fit(120 * gb, [("vram", 48 * gb), ("ram", 96 * gb)])
+    assert r.fits is True
+    assert r.vram_bytes == 48 * gb and r.ram_bytes == 96 * gb
+    assert r.total_bytes == 144 * gb and r.margin == 24 * gb
+
+
+def test_pooled_fit_does_not_fit_is_negative_margin():
+    gb = 1024 ** 3
+    r = pooled_fit(200 * gb, [("vram", 48 * gb), ("ram", 96 * gb)])
+    assert r.fits is False and r.margin == -56 * gb
