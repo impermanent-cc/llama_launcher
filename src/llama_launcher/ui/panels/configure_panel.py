@@ -660,9 +660,14 @@ class ConfigurePanel(QWidget):
         p = self.current_profile()
         key_present = bool(api_key_store.resolve_api_key(self.window.router_base_dir(), p)) \
             if p.mode == "router" else False
+        connection = self.window._launch._connection_for_profile(p)
+        img_present = True
+        if connection and p.image:
+            img_present = runtime.image_exists(p.image, p.runtime.binary, connection=connection)
         issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
                           members=self.member_pairs(), api_key_present=key_present,
-                          native_binary_ok=native.native_binary_ok_for(p))
+                          native_binary_ok=native.native_binary_ok_for(p),
+                          image_present=img_present)
         for name in self.missing_member_profiles():
             issues.append(Issue(
                 "error",

@@ -3,11 +3,13 @@ from PySide6.QtWidgets import QMessageBox, QInputDialog
 
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core import vram
+from llama_launcher.core.nodes import connection_for
 from llama_launcher.services import runtime, terminal, registry, model_info, gpu, native
 from llama_launcher.services import benchmark_store
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.store.profiles import default_base_dir, load_config
+from llama_launcher.store.nodes import get_node
 
 
 class _UpdateWorker(QThread):
@@ -84,10 +86,16 @@ class LaunchController:
                 w.wait(100)
 
     # -- launch / stop / restart ----------------------------------------------
+    def _connection_for_profile(self, profile) -> str:
+        """The podman --connection name for this profile's node ('' = local)."""
+        node = get_node(self.window.base_dir(), profile.runtime.node)
+        return connection_for(node) if node else ""
+
     def on_launch(self):
         if not self._validate_or_warn():
             return
         p = self.window._configure_panel.current_profile()
+        connection = self._connection_for_profile(p)
 
         if p.runtime.launch_mode == "native":
             # Refuse a relaunch over an already-running native instance for
@@ -124,7 +132,7 @@ class LaunchController:
             router_host_dir, warnings = self.window.prepare_router_files()
             if warnings:
                 QMessageBox.warning(self.window, "Preset warnings", "\n".join(warnings))
-            argv = build_command(p, router_host_dir=router_host_dir)
+            argv = build_command(p, router_host_dir=router_host_dir, connection=connection)
             # Relaunching over a LIVE router would drop a resident model and any
             # in-flight harness requests, so confirm before tearing it down.
             if runtime.container_state(self.window._container_name(),
@@ -172,7 +180,7 @@ class LaunchController:
             bool(p.settings.get("reranking")),
         )
         if p.runtime.detached:
-            argv = build_command(p, detach=True)
+            argv = build_command(p, detach=True, connection=connection)
             # Detached drops --rm, so a stale stopped container of this name
             # would block the run with "name already in use". Remove it first,
             # then chain the run (mirrors the router branch above). on_error
@@ -186,7 +194,7 @@ class LaunchController:
                     on_error=lambda e=None: self._report_launch_error(
                         e, show_dialog=True)))
         else:
-            argv = build_command(p)
+            argv = build_command(p, connection=connection)
             # A `terminal` config value overrides detection; otherwise auto-detect
             # an installed terminal (konsole on KDE, ptyxis/gnome-terminal on GNOME,
             # ...). A missing terminal raises instead of crashing the launch.
@@ -230,17 +238,19 @@ class LaunchController:
         # the GUI — which previously made Stop look like it did nothing.
         self.window._monitor._stop_log_follower()
         p = self.window._configure_panel.current_profile()
+        connection = self._connection_for_profile(p)
         self.window.status_label.setText("● stopping…")
         argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary,
-                                 timeout=p.runtime.stop_timeout)
+                                 timeout=p.runtime.stop_timeout, connection=connection)
         self._stop_proc = self._spawn_async(argv, on_done=self.window._monitor.update_status)
 
     def on_restart(self):
         self.window._monitor._stop_log_follower()
         p = self.window._configure_panel.current_profile()
+        connection = self._connection_for_profile(p)
         self.window.status_label.setText("● restarting…")
         argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary,
-                                 timeout=p.runtime.stop_timeout)
+                                 timeout=p.runtime.stop_timeout, connection=connection)
         # Launch only after the stop completes, so the new container's --name/port
         # don't collide with the one being torn down.
         self._stop_proc = self._spawn_async(argv, on_done=self.on_launch)
