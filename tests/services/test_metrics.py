@@ -2,14 +2,57 @@ import llama_launcher.services.metrics as met
 from llama_launcher.services.metrics import kv_usage_ratio, kv_ratio
 
 
-def test_kv_usage_ratio():
-    slots = [{"n_ctx": 100, "n_prompt_tokens_processed": 20},
-             {"n_ctx": 100, "n_prompt_tokens_processed": 30}]
-    assert abs(kv_usage_ratio(slots) - 0.25) < 1e-9
+def test_kv_usage_ratio_takes_busiest_slot_not_summed():
+    # KV% is a per-slot occupancy, so it reports the fullest slot -- NOT the old
+    # behaviour of summing tokens over one denominator of all slots' ctx summed.
+    slots = [{"n_ctx": 100, "n_prompt_tokens": 20},
+             {"n_ctx": 100, "n_prompt_tokens": 30}]
+    assert abs(kv_usage_ratio(slots) - 0.30) < 1e-9
+
+
+def test_kv_usage_ratio_active_slot_not_diluted_by_idle_ctx():
+    # The old code summed every slot's n_ctx into the denominator, so three idle
+    # slots dragged a half-full active slot's KV% down toward 0. It must instead
+    # report the active (is_processing) slot's own occupancy.
+    slots = [
+        {"n_ctx": 4096, "is_processing": False},
+        {"n_ctx": 4096, "is_processing": False},
+        {"n_ctx": 4096, "is_processing": False},
+        {"n_ctx": 4096, "is_processing": True, "n_prompt_tokens": 2048},
+    ]
+    assert abs(kv_usage_ratio(slots) - 0.50) < 1e-9
+
+
+def test_kv_usage_ratio_uses_full_sequence_length():
+    # Occupancy is the whole resident sequence (n_prompt_tokens), not just the
+    # tokens newly processed this turn (n_prompt_tokens_processed reads ~0 once
+    # prefill is done and the slot is generating).
+    slots = [{"n_ctx": 100, "is_processing": True,
+              "n_prompt_tokens": 80, "n_prompt_tokens_processed": 3}]
+    assert abs(kv_usage_ratio(slots) - 0.80) < 1e-9
 
 
 def test_kv_usage_ratio_empty():
     assert kv_usage_ratio([]) is None
+
+
+def test_decode_rate_computes_live_tok_s():
+    # Δ(n_decode_total)/Δt is the live generation rate: 23 tokens over 1.0s = 23 tok/s.
+    assert abs(met.decode_rate((100, 10.0), (123, 11.0)) - 23.0) < 1e-9
+
+
+def test_decode_rate_none_without_prior_read():
+    assert met.decode_rate(None, (5, 1.0)) is None
+
+
+def test_decode_rate_none_when_counter_did_not_move():
+    # Idle server: the counter is static, so there is no rate to report (not 0).
+    assert met.decode_rate((50, 1.0), (50, 2.0)) is None
+
+
+def test_decode_rate_none_on_counter_reset():
+    # Server restarted -> counter went backwards; don't report a negative rate.
+    assert met.decode_rate((900, 1.0), (5, 2.0)) is None
 
 
 def test_kv_ratio_prefers_metric_over_slots():

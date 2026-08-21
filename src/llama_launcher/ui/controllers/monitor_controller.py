@@ -1,4 +1,5 @@
 import datetime
+import time
 
 from PySide6.QtCore import QRunnable, QThread, QThreadPool, QTimer, Signal
 
@@ -75,7 +76,7 @@ def build_monitor_data(target: dict) -> dict | None:
     """
     if not target.get("running"):
         return None
-    from llama_launcher.services.metrics import kv_ratio
+    from llama_launcher.services.metrics import kv_ratio, decode_rate
     port, host, key = target["port"], target["host"], target["key"]
     model_scope, poll = target["model_scope"], target["poll"]
     name, binary = target["name"], target["binary"]
@@ -83,6 +84,13 @@ def build_monitor_data(target: dict) -> dict | None:
          if target["metrics_on"] and poll else {})
     slots = (metrics.fetch_slots(port, model=model_scope, api_key=key, host=host)
              if poll else [])
+    # Live generation tok/s from the n_decode_total counter delta -- the
+    # predicted_tokens_seconds gauge only updates at request completion, so it
+    # reads 0 during an in-flight generation. decode_now is handed back so the
+    # controller can feed it in as decode_prev next tick.
+    nd = m.get("llamacpp:n_decode_total")
+    decode_now = (nd, time.monotonic()) if nd is not None else None
+    gen_tok_s_live = decode_rate(target.get("decode_prev"), decode_now)
     if target.get("kind") == "native" and target.get("pid"):
         st = native.proc_stats(target["pid"]) or {}
         uptime = ""     # native uptime is not tracked in v1
@@ -92,6 +100,8 @@ def build_monitor_data(target: dict) -> dict | None:
         uptime = _fmt_uptime(runtime.started_at(name, binary, connection=mon_conn))
     return {
         "tok_s": m.get("llamacpp:predicted_tokens_seconds"),
+        "gen_tok_s_live": gen_tok_s_live,
+        "decode_now": decode_now,
         "prompt_tok_s": m.get("llamacpp:prompt_tokens_seconds"),
         "kv_pct": kv_ratio(m, slots),
         "speculating": any(s.get("speculative") for s in slots),
@@ -308,6 +318,7 @@ class MonitorController:
         # -- router / props / spec-decode caches (cleared on profile load) --
         self._router_statuses: dict = {}
         self._spec_prev = None      # previous /metrics spec-decode counter read
+        self._decode_prev = None    # previous (n_decode_total, monotonic) for live tok/s
         self._props = None          # cached /props for the current model load
         self._props_model = None    # router-polled model id the cache is keyed on
 
@@ -551,6 +562,7 @@ class MonitorController:
             self.window.benchmark_panel.set_benchmark_available(False)
             self._monitor_target = {"running": False}
             self._monitor_result = None
+            self._decode_prev = None
             return
         name = self._monitored_container_name()
         state = runtime.container_state(name, p.runtime.binary,
@@ -578,10 +590,14 @@ class MonitorController:
             # _router_pollable_model() once. Render the previous tick's result
             # (up to one tick stale) and dispatch a fresh gather unless one is
             # already in flight (so a slow podman stats can't pile up).
-            self._monitor_target = self._compute_monitor_target(
-                running=True, model_scope=router_model_key)
+            # Render the previous gather, then advance the decode baseline to
+            # ITS reading before snapshotting the next target -- so the gather
+            # dispatched below measures the rate over the gap to that reading.
             if self._monitor_result is not None:
                 self.window.monitor_panel.update_stats(self._monitor_result)
+                self._decode_prev = self._monitor_result.get("decode_now")
+            self._monitor_target = self._compute_monitor_target(
+                running=True, model_scope=router_model_key)
             if not self._monitor_inflight:
                 self._monitor_inflight = True
                 QThreadPool.globalInstance().start(
@@ -589,8 +605,11 @@ class MonitorController:
             self._update_spec_stats(p)
         else:
             # Nothing running: drop the last gather so a stale summary isn't
-            # rendered on the next start before a fresh gather completes.
+            # rendered on the next start before a fresh gather completes, and
+            # drop the decode baseline so the first rate after the next start
+            # isn't measured across the downtime.
             self._monitor_result = None
+            self._decode_prev = None
         if p.mode == "router":
             if state == "running":
                 self.refresh_router_models()
@@ -803,6 +822,7 @@ class MonitorController:
             "pid": self._active_instance.pid if self._active_instance is not None else None,
             "gpu_ssh": focused_gpu_ssh(p.runtime.node, self.window.base_dir()),
             "mon_conn": connection_for(node) if node else "",
+            "decode_prev": self._decode_prev,
         }
 
     def collect_monitor_data(self) -> dict:

@@ -1,4 +1,5 @@
 import llama_launcher.ui.main_window as mw
+import llama_launcher.ui.controllers.monitor_controller as mc
 from llama_launcher.core.spec import Profile, Mount, Runtime
 from llama_launcher.core.props import PropsInfo
 from llama_launcher.ui.controllers.launch_controller import LaunchController
@@ -106,6 +107,43 @@ def test_collect_monitor_data_reports_speculating(qtbot, monkeypatch):
     assert w._monitor.collect_monitor_data()["speculating"] is True
 
 
+def test_compute_monitor_target_carries_decode_prev(qtbot, monkeypatch):
+    """The target snapshot must carry the previous decode read so the off-thread
+    gather can compute the live rate against it."""
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._monitor._decode_prev = (42.0, 3.0)
+    t = w._monitor._compute_monitor_target(running=True)
+    assert t["decode_prev"] == (42.0, 3.0)
+
+
+def test_update_status_advances_decode_prev_from_result(qtbot, monkeypatch):
+    """Each rendered gather result advances _decode_prev to its decode_now, so
+    the next tick measures the rate over the interval between the two reads."""
+    _ready(monkeypatch)
+    monkeypatch.setattr(mw.metrics, "fetch_props", lambda *a, **k: None)
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._monitor._monitor_inflight = True     # block a fresh async gather from overwriting
+    w._monitor._monitor_result = {"decode_now": (9.0, 2.0), "metrics_on": True}
+    w._monitor.update_status()
+    assert w._monitor._decode_prev == (9.0, 2.0)
+
+
+def test_decode_prev_cleared_when_not_running(qtbot, monkeypatch):
+    """A stopped server clears the decode baseline so the first rate after the
+    next start isn't computed across the downtime (a huge bogus spike)."""
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    monkeypatch.setattr(mw.runtime, "container_state", lambda *a, **k: "stopped")
+    monkeypatch.setattr(mw.health, "probe_health", lambda *a, **k: "down")
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._monitor._decode_prev = (5.0, 1.0)
+    w._monitor.update_status()
+    assert w._monitor._decode_prev is None
+
+
 def _ready(monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
     monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary, connection="": "running")
@@ -167,6 +205,45 @@ def test_build_monitor_data_gathers_from_a_plain_target(monkeypatch):
     d = mw.build_monitor_data(target)
     assert d["tok_s"] == 50.0 and d["cpu"] == "9%"
     assert abs(d["kv_pct"] - 0.40) < 1e-9
+
+
+def test_build_monitor_data_computes_live_gen_tok_s_from_decode_delta(monkeypatch):
+    """gen tok/s must be the live n_decode_total delta rate: llama.cpp's
+    predicted_tokens_seconds gauge reads 0 during an in-flight generation, so
+    the counter delta between two polls is the only live throughput signal."""
+    monkeypatch.setattr(mw.metrics, "fetch_metrics",
+                        lambda *a, **k: {"llamacpp:n_decode_total": 123.0,
+                                         "llamacpp:predicted_tokens_seconds": 0.0})
+    monkeypatch.setattr(mw.metrics, "fetch_slots", lambda *a, **k: [])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
+    monkeypatch.setattr(mw.runtime, "stats", lambda *a, **k: {})
+    monkeypatch.setattr(mw.runtime, "started_at", lambda *a, **k: None)
+    monkeypatch.setattr(mc.time, "monotonic", lambda: 11.0)
+    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
+              "key": None, "model_scope": None, "poll": True,
+              "name": "llama-x", "binary": "podman",
+              "decode_prev": (100.0, 10.0)}          # 100 decodes at t=10.0
+    d = mw.build_monitor_data(target)
+    assert abs(d["gen_tok_s_live"] - 23.0) < 1e-9    # (123-100)/(11.0-10.0)
+    assert d["decode_now"] == (123.0, 11.0)          # handed to the next tick as prev
+
+
+def test_build_monitor_data_live_gen_none_on_first_poll(monkeypatch):
+    """With no prior decode read, there's no rate yet -- but the current read is
+    still returned so the NEXT poll can compute one."""
+    monkeypatch.setattr(mw.metrics, "fetch_metrics",
+                        lambda *a, **k: {"llamacpp:n_decode_total": 77.0})
+    monkeypatch.setattr(mw.metrics, "fetch_slots", lambda *a, **k: [])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
+    monkeypatch.setattr(mw.runtime, "stats", lambda *a, **k: {})
+    monkeypatch.setattr(mw.runtime, "started_at", lambda *a, **k: None)
+    monkeypatch.setattr(mc.time, "monotonic", lambda: 5.0)
+    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
+              "key": None, "model_scope": None, "poll": True,
+              "name": "llama-x", "binary": "podman"}   # no decode_prev
+    d = mw.build_monitor_data(target)
+    assert d["gen_tok_s_live"] is None
+    assert d["decode_now"] == (77.0, 5.0)
 
 
 def test_build_monitor_data_prefers_kv_cache_metric(monkeypatch):

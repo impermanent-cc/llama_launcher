@@ -43,12 +43,15 @@ class MonitorPanel(QWidget):
         self.summary = QLabel("No server running.")
         self.summary.setWordWrap(True)
         # Persistent one-line key for the throughput/KV figures, which otherwise
-        # read as bare numbers. gen/prompt come from llama.cpp's per-request
-        # gauges, so they legitimately show 0 on an idle server between requests.
-        # Kept as a hover tooltip + on-demand InfoButton popover instead of an
-        # always-visible label, to avoid cluttering the tab with reminder text.
-        _legend = ("gen / prompt = generation / prefill tok/s of the last request "
-                   "(0 when idle between requests)  ·  KV = KV-cache used")
+        # read as bare numbers. gen is a live rate (from the n_decode_total
+        # counter delta) so it tracks an in-flight generation; prompt is the
+        # last request's prefill gauge (llama.cpp only updates it at completion),
+        # so it legitimately reads 0 on an idle server. Kept as a hover tooltip +
+        # on-demand InfoButton popover instead of an always-visible label, to
+        # avoid cluttering the tab with reminder text.
+        _legend = ("gen = live generation tok/s (0 when idle)  ·  "
+                   "prompt = prefill tok/s of the last request  ·  "
+                   "KV = KV-cache used (approx, from slots)")
         # Deliberately NOT a tooltip on `summary`: the summary spans the whole
         # bar, so a tooltip there fires on hover anywhere along it, duplicating
         # the info button. The legend lives only on the compact ⓘ button.
@@ -133,12 +136,17 @@ class MonitorPanel(QWidget):
     def update_stats(self, data: dict):
         metrics_on = bool(data.get("metrics_on"))
         self.enable_metrics_btn.setVisible(not metrics_on)
+        # Prefer the live n_decode_total rate over the predicted_tokens_seconds
+        # gauge: the gauge only updates at request completion, so it reads 0 for
+        # the whole of an in-flight generation. Fall back to the gauge (the last
+        # request's rate) when nothing is generating.
+        live = data.get("gen_tok_s_live")
+        gen = live if live is not None else data.get("tok_s")
         if not metrics_on:
             speed = "throughput: (enable --metrics to see tok/s)"
         else:
-            tok = data.get("tok_s")
             ptok = data.get("prompt_tok_s")
-            speed = f"gen {tok:.1f} tok/s" if tok is not None else "gen –"
+            speed = f"gen {gen:.1f} tok/s" if gen is not None else "gen –"
             if ptok is not None:
                 speed += f"  ·  prompt {ptok:.0f} tok/s"
         kv = data.get("kv_pct")
@@ -154,10 +162,9 @@ class MonitorPanel(QWidget):
             parts.append(f"uptime {data['uptime']}")
         self._last = "    ".join(parts)
         self.summary.setText(self._last)
-        tok = data.get("tok_s")
-        if metrics_on and tok is not None:
-            self._tok_history.append(tok)
-            self.throughput_label.setText(f"gen tok/s  {sparkline(self._tok_history)}  {tok:.0f}")
+        if metrics_on and gen is not None:
+            self._tok_history.append(gen)
+            self.throughput_label.setText(f"gen tok/s  {sparkline(self._tok_history)}  {gen:.0f}")
             self.throughput_label.setVisible(True)
         else:
             self.throughput_label.setVisible(False)
