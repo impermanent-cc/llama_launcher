@@ -1,18 +1,23 @@
 # Llama Launcher
 
 A PySide6/Qt6 desktop app that builds a `podman`/`docker` `llama-server` command from a GUI
-and launches it in a terminal (konsole, foreground so `Ctrl-C` works), then observes the named
-container from outside. Tabbed **Configure / Monitor** UI with profiles, a curated `llama-server`
-settings catalog (plus a raw-args escape hatch), typed mounts, mmproj/LoRA/draft-model pickers,
-model-aware capability detection, VRAM preflight, a live throughput/MTP monitor, and a
-repeatable speed benchmark for A/B-ing config changes.
+and launches it in a terminal (an auto-detected emulator, foreground so `Ctrl-C` works), then
+observes the named container from outside. Tabbed **Configure / Monitor** UI with profiles, a
+curated `llama-server` settings catalog (plus a raw-args escape hatch), typed mounts,
+mmproj/LoRA/draft-model pickers, model-aware capability detection, VRAM preflight, a live
+throughput/MTP monitor, and a repeatable speed benchmark for A/B-ing config changes.
+
+Beyond single-container launches it can also run a **prebuilt binary natively** (no container),
+drive **remote machines** over podman-over-SSH, **pool VRAM+RAM across nodes** via llama.cpp
+RPC, and show a live **CPU/GPU/memory stats dock**.
 
 ## Requirements
 
 - Python ≥ 3.13
 - `podman` (or `docker`) on `PATH`
 - An NVIDIA GPU with the driver + [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-container-toolkit) installed
-- A terminal emulator (konsole by default)
+- A terminal emulator for foreground launches (auto-detected: konsole, gnome-terminal,
+  ptyxis, kgx, … — override with the `terminal` config key)
 
 ## Install & run
 
@@ -70,8 +75,55 @@ Images live at `ghcr.io/ikawrakow/ik-llama-cpp` — use the `*-server` tag for s
 server mode and the `*-swap` tag for router mode (e.g. `cu12-server`, `cpu-server`).
 **Detect** lists your locally-pulled ik images when this engine is selected.
 
-Self-built (native, non-container) launch is not yet supported for either engine —
-run via Podman or Docker for now.
+Either engine can also be run from a self-built binary — see **Native launch** below.
+
+## Native (non-container) launch
+
+To run a prebuilt `llama-server` binary directly instead of pulling an image, set
+Configure → **Launch mode** to **Native (run a built binary)**. A **llama-server binary**
+row appears — type the path or use **Browse…** to point at your executable (mainline or
+ik_llama.cpp). Selecting native hides all container-only controls (Image, Runtime, GPU mode,
+Folders/mounts, Extra podman args, SELinux, and Run detached), since none apply.
+
+The launcher runs the binary as a managed background process (its own session), streams its
+output to a per-profile log file, and tracks it by PID — so **Stop**, **Remove**, logs, and
+the live monitor work just as they do for a container. GPU visibility, threads, and paths are
+whatever the binary itself sees on the host; there are no mounts to configure.
+
+Constraints: native mode is **GUI-only** (headless `--launch` refuses it) and **does not
+support router mode** — use a container runtime for routers. Validation requires the path to
+exist and be executable before anything starts.
+
+## Remote nodes (multi-machine)
+
+Drive `llama-server` on other machines from this one GUI, over podman-over-SSH (for capacity
+and experimentation — not for speeding up a single model). Click **Nodes…** in the top bar to
+open the **Nodes** manager: give each machine a **Name**, an **SSH target** (`user@host[:port]`
+or a bare `host`), and its container **Binary** (podman/docker), then **Add**. **Test** reports
+whether the node is reachable and whether its GPUs are visible; **Remove** deletes it. Nodes
+persist across sessions (the name `local` is reserved for this machine).
+
+To run a profile on a registered machine, pick it in the Configure → **Node** dropdown.
+Selecting a remote node flips the bind address to `0.0.0.0` automatically so the GUI host can
+reach the server's `/health` and `/metrics` — which means the exposure guard then requires an
+**API key** (see below). The **Monitor** tab fans out across every enabled node: each running
+instance is shown as its own card, tagged `· <node>` for remotes, and its logs/stats are read
+over that node's connection. One unreachable node degrades to zero cards for itself without
+blanking the rest.
+
+## RPC pool — pool VRAM+RAM across machines
+
+To run a model larger than any single machine's memory, set Configure → **Launch mode** to
+**RPC pool (multi-node)**. This pools VRAM+RAM across several machines using llama.cpp's
+`rpc-server`: an **RPC workers** table appears (columns **Node · Device · Contribution MB ·
+Port**, one row per worker; **+ Add worker** / **- Remove**), and the head `llama-server` runs
+locally. **Check fit** probes each worker's node for free VRAM/RAM and reports whether the pool
+can hold the selected model, with any per-node warnings. At launch the workers start first
+(SSH-tunnelled when remote), and once ready the head connects to them; the Monitor shows each
+worker as its own `rpc-worker · <node>` card.
+
+RPC pool mode is **GUI-only** (headless refuses it) and needs a `GGML_RPC=ON` image the
+prebuilt tags don't include. See [`RPC.md`](RPC.md) for the build recipe and full details.
 
 ## Family presets
 
@@ -119,6 +171,27 @@ latest run shows a **delta** versus the previous one (e.g. `Δ pp +8% · gen +3%
 so changing a flag and re-running tells you immediately whether it helped. Works
 for both single-model **server** and **router** profiles (router scopes the
 request to the loaded model).
+
+## Stats dock (live CPU / GPU / memory)
+
+Toggle the **📊 Stats** button in the top bar (or `Ctrl+Shift+S`) to show a dockable live
+stats panel on the side. It samples once a second **only while visible** and shows three
+groups:
+
+- **GPU** — per-card name, utilisation % (with a sparkline), VRAM used/total, temperature, and
+  power draw (via `nvidia-smi`; shows *unavailable* when there's no GPU).
+- **System** — overall CPU % and per-core sparklines, RAM used/total, and 1/5/15-minute load.
+- **Container** — the monitored server's name, CPU %, and memory use.
+
+The dock's open/closed state and width are remembered between sessions.
+
+## Stop grace period
+
+Each profile has a **Stop grace period** spin box (Configure tab, default **10 s**, range
+1–300). It's the time **Stop** waits after `SIGTERM` before force-killing (`SIGKILL`) — i.e.
+`podman stop -t <n>`. Raise it if a large model needs longer to unload cleanly. The same value
+is reused for native-process and RPC-pool teardown; router *members* have their own per-row
+stop timeout in the Router members table.
 
 ## Router API key
 
