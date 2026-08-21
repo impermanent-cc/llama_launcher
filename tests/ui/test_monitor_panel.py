@@ -108,6 +108,40 @@ def test_throughput_sparkline_appears(qtbot):
     assert "tok/s" in p.throughput_label.text()
 
 
+def test_update_stats_prefers_live_gen_over_gauge(qtbot):
+    # The predicted_tokens_seconds gauge reads 0 mid-generation; the live
+    # n_decode_total rate must win so the user sees real throughput, not 0.
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.update_stats({"tok_s": 0.0, "gen_tok_s_live": 30.0, "prompt_tok_s": None,
+                    "kv_pct": None, "gpus": [], "cpu": "", "mem": "", "uptime": "",
+                    "metrics_on": True})
+    assert "gen 30.0" in p._summary_text()
+    assert "gen 0.0" not in p._summary_text()
+
+
+def test_update_stats_falls_back_to_gauge_when_no_live(qtbot):
+    # Idle between requests: no live rate, so show the last request's gauge value.
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.update_stats({"tok_s": 25.0, "gen_tok_s_live": None, "prompt_tok_s": None,
+                    "kv_pct": None, "gpus": [], "cpu": "", "mem": "", "uptime": "",
+                    "metrics_on": True})
+    assert "gen 25.0" in p._summary_text()
+
+
+def test_throughput_bar_uses_live_gen(qtbot):
+    # The sparkline/number must track the live rate, not the frozen 0 gauge.
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    base = {"tok_s": 0.0, "prompt_tok_s": None, "kv_pct": None, "gpus": [],
+            "cpu": "", "mem": "", "uptime": "", "metrics_on": True}
+    p.update_stats({**base, "gen_tok_s_live": 40.0})
+    p.update_stats({**base, "gen_tok_s_live": 42.0})
+    assert not p.throughput_label.isHidden()
+    assert "42" in p.throughput_label.text()
+
+
 def test_throughput_hidden_without_metrics(qtbot):
     p = MonitorPanel()
     qtbot.addWidget(p)
