@@ -113,3 +113,50 @@ def test_estimate_for_model_returns_weights_when_meta_insufficient():
     assert estimate_for_model(_meta(n_layers=0), 1234) == 1234
     assert estimate_for_model(_meta(n_embd=0), 1234) == 1234
     assert estimate_for_model(None, None) == 0
+
+
+# -- fit_summary: the one shared estimate-vs-free computation ----------------
+
+def test_fit_summary_fits_with_margin():
+    from llama_launcher.core.vram import fit_summary
+    est = estimate_for_model(_meta(), 1000, ctx_size=100)
+    s = fit_summary(_meta(), 1000, settings={"ctx-size": 100},
+                    free_bytes_per_gpu=[est + 5, est + 5])
+    assert s.fits and s.margin == est + 10 and s.est_bytes == est
+    assert s.free_bytes == 2 * est + 10
+
+
+def test_fit_summary_over_budget_negative_margin():
+    from llama_launcher.core.vram import fit_summary
+    est = estimate_for_model(_meta(), 10_000, ctx_size=100)
+    s = fit_summary(_meta(), 10_000, settings={"ctx-size": 100},
+                    free_bytes_per_gpu=[est - 7])
+    assert not s.fits and s.margin == -7
+
+
+def test_fit_summary_split_none_uses_main_gpu_only():
+    from llama_launcher.core.vram import fit_summary
+    est = estimate_for_model(_meta(), 0, ctx_size=100)
+    s = fit_summary(_meta(), 0, settings={"ctx-size": 100, "split-mode": "none",
+                                          "main-gpu": 1},
+                    free_bytes_per_gpu=[0, est + 3])
+    assert s.fits and s.free_bytes == est + 3
+
+
+def test_fit_summary_honors_kv_quant():
+    from llama_launcher.core.vram import fit_summary
+    f16 = fit_summary(_meta(), 0, settings={"ctx-size": 4096},
+                      free_bytes_per_gpu=[10**12])
+    q8 = fit_summary(_meta(), 0, settings={"ctx-size": 4096,
+                                           "cache-type-k": "q8_0",
+                                           "cache-type-v": "q8_0"},
+                     free_bytes_per_gpu=[10**12])
+    assert q8.est_bytes < f16.est_bytes
+
+
+def test_fit_summary_none_when_unknowable():
+    from llama_launcher.core.vram import fit_summary
+    assert fit_summary(None, 1000, settings={}, free_bytes_per_gpu=[10**9]) is None
+    assert fit_summary(_meta(n_layers=0), 1000, settings={},
+                       free_bytes_per_gpu=[10**9]) is None
+    assert fit_summary(_meta(), 1000, settings={}, free_bytes_per_gpu=[]) is None
