@@ -1,11 +1,38 @@
 [project]
 name = "llama-launcher"
 version = "0.1.0"
-requires-python = ">=3.13"
+description = "PySide6 desktop GUI to build and launch llama.cpp llama-server via podman/docker, with remote multi-node and RPC pooling"
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+# The codebase's true floor is 3.10 (PEP 604 unions), but only 3.12/3.13 are
+# CI-tested; declare the conservative CI-backed floor rather than the
+# theoretical one. See README "Requirements".
+requires-python = ">=3.12"
+keywords = ["llama-cpp", "llama-server", "gui", "desktop", "pyside6",
+            "inference", "llm", "container", "podman", "docker", "rpc"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: X11 Applications :: Qt",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Science/Research",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3 :: Only",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: System :: Distributed Computing",
+]
 dependencies = ["PySide6>=6.7", "requests>=2.31"]
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0", "pytest-qt>=4.4"]
+
+[project.urls]
+Homepage = "https://github.com/impermanent-cc/llama_launcher"
+Repository = "https://github.com/impermanent-cc/llama_launcher.git"
+Issues = "https://github.com/impermanent-cc/llama_launcher/issues"
 
 [project.scripts]
 llama-launcher = "llama_launcher.app:main"

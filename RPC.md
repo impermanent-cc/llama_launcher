@@ -10,8 +10,8 @@ but it lets a model that doesn't fit on any single node's VRAM load at all.
 
 The prebuilt `ghcr.io/ggml-org/llama.cpp` images are **not** built with
 `GGML_RPC=ON`, so they contain neither the `--rpc` flag on `llama-server` nor
-the `rpc-server` binary. There is no supported prebuilt RPC image as of this
-writing (spike-verified 2026-08-20) — you must build one yourself.
+the `rpc-server` binary. There is no supported prebuilt RPC image — you must
+build one yourself.
 
 One image serves double duty: it runs `llama-server` (the pool **head**) on
 one node and `rpc-server` (a pool **worker**) on every other node. Build it
@@ -129,8 +129,10 @@ cause of an RPC pool that connects but fails or misbehaves mid-load.
 
 A pool can "start" (workers up, head running) and still not actually be
 pooling, or fail subtly mid-load. Use these signals to tell the difference.
-(Written after a CPU-only local dry-run on 2026-08-20 that validated the
-wiring end-to-end; a real GPU-worker run is the remaining acceptance step.)
+
+> **Note:** the RPC pool has been validated end-to-end against CPU-only
+> workers; a run against real GPU workers has not yet been exercised, so
+> treat GPU pooling as experimental and report issues.
 
 ### Success signals — the head log at load time
 
