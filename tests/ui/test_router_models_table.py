@@ -1,5 +1,15 @@
 from llama_launcher.core.router_models import RouterModel
+from llama_launcher.ui.widgets.info_button import InfoButton
 from llama_launcher.ui.widgets.router_models_table import RouterModelsTable
+
+
+def test_models_window_has_info_popover(qtbot):
+    """The 'Model id' window carries an ⓘ describing what the ids are for."""
+    t = RouterModelsTable()
+    qtbot.addWidget(t)
+    assert isinstance(t.info, InfoButton)
+    assert "model id" in t.info.info_text.lower()
+    t.info.click()   # popover must not raise
 
 
 def test_table_populates(qtbot):

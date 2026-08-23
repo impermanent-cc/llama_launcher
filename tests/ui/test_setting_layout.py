@@ -1,7 +1,21 @@
 from PySide6.QtWidgets import QGridLayout
 
 from llama_launcher.core.settings_catalog import CATALOG
+from llama_launcher.ui.main_window import MainWindow
 from llama_launcher.ui.widgets.setting_widgets import make_widget
+
+
+def _row_label(panel, key):
+    form, widget = panel._setting_rows[key]
+    return form.labelForField(widget)
+
+
+def test_deprecated_row_shows_marker_in_panel(qtbot):
+    w = MainWindow()
+    qtbot.addWidget(w)
+    panel = w._configure_panel
+    assert "*deprecated" in _row_label(panel, "no-mmap").text()
+    assert "*deprecated" not in _row_label(panel, "ctx-size").text()
 
 
 def test_editor_widths_are_capped(qtbot):

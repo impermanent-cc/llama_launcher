@@ -83,6 +83,31 @@ def test_gpu_additions_and_split_mode_tensor():
     assert CATALOG["split-mode"].enum == ("none", "layer", "row", "tensor")
 
 
+def test_legacy_load_flags_are_marked_deprecated():
+    # Upstream (v0.2.0 era) now emits DEPRECATED warnings for these and steers
+    # users to --load-mode; we keep them for older images but flag them.
+    assert CATALOG["no-mmap"].deprecated is True
+    assert CATALOG["mlock"].deprecated is True
+    # --load-mode is the replacement and must NOT be marked deprecated.
+    assert CATALOG["load-mode"].deprecated is False
+
+
+def test_most_settings_are_not_deprecated():
+    deprecated = [k for k, s in CATALOG.items() if s.deprecated]
+    assert set(deprecated) == {"no-mmap", "mlock"}
+
+
+def test_mmproj_device_present():
+    # New llama-server flag in the v0.1.x -> v0.2.0 window: pick the device the
+    # multimodal projector runs on.
+    s = CATALOG["mmproj-device"]
+    assert s.flag == "--mmproj-device"
+    assert s.type == "string"
+    assert s.default == ""
+    assert s.group == "GPU & Memory"
+    assert "-mmdev" in s.aliases
+
+
 def test_context_and_caching_additions():
     from llama_launcher.core.settings_catalog import CATALOG
     assert CATALOG["swa-full"].type == "bool"

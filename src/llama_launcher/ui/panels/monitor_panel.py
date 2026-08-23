@@ -38,7 +38,26 @@ class MonitorPanel(QWidget):
         # of collapsing when the log view claims the vertical space.
         self._cards_scroll.setMinimumHeight(150)
         self._cards_scroll.setMaximumHeight(175)
-        layout.insertWidget(0, self._cards_scroll)
+        # Wrap a compact header (title + ⓘ) above the strip into one block so the
+        # rest of __init__ can keep treating the cards area as a single top widget
+        # (later insertWidget indices depend on that).
+        cards_header = QHBoxLayout()
+        cards_header.setContentsMargins(0, 0, 0, 0)
+        cards_header.addWidget(QLabel("Instances"))
+        self.cards_info = InfoButton(
+            "Live per-server stats — one card per running instance (gen tok/s, "
+            "KV-cache use). Click a card to focus its details; use its buttons to "
+            "stop or remove that server."
+        )
+        cards_header.addWidget(self.cards_info)
+        cards_header.addStretch(1)
+        cards_block = QWidget()
+        cards_block_layout = QVBoxLayout(cards_block)
+        cards_block_layout.setContentsMargins(0, 0, 0, 0)
+        cards_block_layout.setSpacing(2)
+        cards_block_layout.addLayout(cards_header)
+        cards_block_layout.addWidget(self._cards_scroll)
+        layout.insertWidget(0, cards_block)
 
         self.summary = QLabel("No server running.")
         self.summary.setWordWrap(True)

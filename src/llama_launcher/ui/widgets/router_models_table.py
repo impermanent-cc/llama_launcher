@@ -1,8 +1,10 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QHeaderView, QPushButton, QTableWidget, QTableWidgetItem,
+    QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
+
+from llama_launcher.ui.widgets.info_button import InfoButton
 
 
 def _status_text(model) -> str:
@@ -26,6 +28,17 @@ class RouterModelsTable(QWidget):
         self._unload_buttons: dict = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        header.addWidget(QLabel("Models"))
+        self.info = InfoButton(
+            "Model ids the router exposes — each row's Model id is what API "
+            "clients request. Load or unload a member model here; Status shows "
+            "whether it's currently up."
+        )
+        header.addWidget(self.info)
+        header.addStretch(1)
+        root.addLayout(header)
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Model id", "Status", ""])
         self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)

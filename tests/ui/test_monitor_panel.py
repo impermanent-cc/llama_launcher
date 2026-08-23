@@ -32,6 +32,15 @@ def test_append_log(qtbot):
     assert "loaded model" in p.log_view.toPlainText()
 
 
+def test_instances_window_has_info_popover(qtbot):
+    """The instance cards strip carries an ⓘ describing what the cards show."""
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    assert isinstance(p.cards_info, InfoButton)
+    assert "instance" in p.cards_info.info_text.lower()
+    p.cards_info.click()   # popover must not raise
+
+
 def test_enable_metrics_button_shown_when_metrics_off(qtbot):
     """'Enable --metrics & relaunch' button is shown (not hidden) when metrics_on is False."""
     p = MonitorPanel()
