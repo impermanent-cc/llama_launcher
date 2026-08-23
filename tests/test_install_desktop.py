@@ -75,3 +75,25 @@ def test_uninstall_removes_entry_and_icon(tmp_path):
     desktop, icon = _paths(tmp_path)
     assert not desktop.exists()
     assert not icon.exists()
+
+
+@pytest.mark.skipif(not SCRIPT.exists(), reason="install script missing")
+def test_desktop_exec_quotes_python_path_with_spaces(tmp_path):
+    """A venv path containing a space must stay one token in Exec= per the
+    Desktop Entry spec, or the menu entry silently fails to launch."""
+    env = dict(os.environ)
+    env["HOME"] = str(tmp_path / "home")
+    env["XDG_DATA_HOME"] = str(tmp_path / "data")
+    env["PATH"] = f"{_stub_dir(tmp_path)}:{env['PATH']}"
+    venv_py = tmp_path / "my venv" / "bin" / "python"
+    venv_py.parent.mkdir(parents=True)
+    venv_py.write_text("#!/usr/bin/env bash\nexit 0\n")
+    venv_py.chmod(0o755)
+    env["LLAMA_LAUNCHER_VENV_PY"] = str(venv_py)
+    r = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    desktop, _ = _paths(tmp_path)
+    text = desktop.read_text()
+    # The spec quotes an executable path containing spaces with double quotes.
+    assert f'Exec="{venv_py}" -m llama_launcher.app' in text, \
+        f"Exec line not spec-quoted for a spaced path:\n{text}"

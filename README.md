@@ -13,16 +13,44 @@ RPC, and show a live **CPU/GPU/memory stats dock**.
 
 ## Requirements
 
-- Python ≥ 3.13
-- `podman` (or `docker`) on `PATH`
-- An NVIDIA GPU with the driver + [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-container-toolkit) installed
+- **Python ≥ 3.12.** Developed and CI-tested on 3.12 and 3.13; the code itself only
+  needs 3.10+, but 3.10/3.11 are untested. On Ubuntu you may also need
+  `sudo apt install python3-venv` before creating a virtualenv.
+- `podman` (or `docker`) on `PATH`. See [podman vs docker](#podman-vs-docker) below —
+  local single-server launches work with either; remote multi-node currently requires podman.
+- **A GPU is optional.** An NVIDIA GPU (driver +
+  [NVIDIA Container Toolkit](https://github.com/NVIDIA/nvidia-container-toolkit)) unlocks GPU
+  offload; without one, set GPU mode to **None** and use a CPU image to run CPU-only. AMD
+  (ROCm) is not yet wired up — see [AMD GPUs](#amd-gpus-help-wanted).
 - A terminal emulator for foreground launches (auto-detected: konsole, gnome-terminal,
-  ptyxis, kgx, … — override with the `terminal` config key)
+  ptyxis, kgx, foot, … — override with the `terminal` config key)
+- For **remote nodes / RPC pools**: `openssh-client` (`ssh`) on `PATH`.
+
+## Quickstart — your first running model
+
+After installing (below), the GUI opens on the **Configure** tab:
+
+1. **Point at your models.** In the **Folders** row, add a mount whose *host* path is the
+   directory holding your `.gguf` files (e.g. `/home/you/models`) and whose *container* path
+   is something like `/models`. This makes the host directory visible inside the container.
+2. **Pick a model.** Use the **Model** row's **Browse…** to select a `.gguf` under that mount.
+   The launcher reads its metadata and shows a live VRAM-fit estimate.
+3. **Set the image.** Click **Detect** to list llama.cpp images you've already pulled, or type
+   one — e.g. `ghcr.io/ggml-org/llama.cpp:server-cuda` (GPU) or a CPU-tagged build for
+   CPU-only (see [Running without a GPU](#running-without-a-gpu)).
+4. **Choose GPU mode** (Runtime section): **CDI** for NVIDIA (see [GPU passthrough](#gpu-passthrough)),
+   or **None** for CPU-only.
+5. **Save** the profile (give it a name), then **Launch**. A terminal window opens and streams
+   `llama-server`; when it's ready, the **Monitor** tab shows live throughput and the **Open Web
+   UI** button opens the server.
+
+The command being built is always visible in the preview strip at the bottom — nothing is
+hidden. `--dry-run` (below) prints it without launching.
 
 ## Install & run
 
 ```bash
-python -m venv .venv
+python3 -m venv .venv
 .venv/bin/pip install -e ".[dev]"
 
 .venv/bin/llama-launcher                                   # GUI
@@ -35,7 +63,7 @@ python -m venv .venv
 Or with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-uv venv                                # create .venv (Python ≥ 3.13)
+uv venv                                # create .venv (Python ≥ 3.12)
 uv pip install -e ".[dev]"
 
 uv run llama-launcher                  # GUI  (NOT `llama_launcher.app` -- that's a module, not a command)
@@ -46,11 +74,43 @@ uv run pytest -q                       # test suite
 
 ## GPU passthrough
 
-The launcher offers two GPU modes (Configure tab → **Runtime**):
+The launcher offers three GPU modes (Configure tab → **Runtime**):
 
-- **CDI — `--device nvidia.com/gpu=all`** (recommended) — uses the NVIDIA Container Device
-  Interface spec.
+- **CDI — `--device nvidia.com/gpu=all`** (recommended for NVIDIA) — uses the NVIDIA Container
+  Device Interface spec.
 - **Legacy — `--gpus all`** — the older runtime hook; doesn't read the CDI spec.
+- **None** — no GPU passthrough; the model runs CPU-only. See
+  [Running without a GPU](#running-without-a-gpu).
+
+### First-time CDI setup
+
+A freshly installed NVIDIA Container Toolkit has **no** CDI spec until you generate one once:
+
+```bash
+sudo nvidia-ctk cdi generate --output=/etc/cdi/nvidia.yaml
+```
+
+Without this, a CDI-mode launch fails with `crun: cannot stat /usr/lib/libnvidia-*.so` or
+`unresolvable CDI devices`. Re-run the same command after a driver update (the spec references
+exact driver library paths and goes stale). Docker users configure GPU access differently — see
+below.
+
+### Running without a GPU
+
+No NVIDIA card? Set **GPU mode → None** and use a CPU-tagged image (for mainline llama.cpp,
+a `server`/`full`-family CPU build rather than the `-cuda` tag). Everything else works the
+same; the VRAM-fit estimate and GPU stats simply stay empty. CPU inference is slower — small
+or heavily quantized models are the practical choice.
+
+### podman vs docker
+
+Local single-server launches work with either runtime (pick it in the Runtime section or the
+Nodes dialog). Two caveats:
+
+- **GPU setup differs.** The CDI instructions above are the podman path. For docker, use
+  `sudo nvidia-ctk runtime configure --runtime=docker && sudo systemctl restart docker`, then
+  Legacy (`--gpus all`) mode.
+- **Remote nodes currently require podman** (they use podman's `--connection`/SSH transport).
 
 ### Run detached (no terminal window)
 
@@ -303,3 +363,23 @@ single card, put e.g. `nvidia.com/gpu=1` in the launcher's extra run args instea
 > **Rule of thumb:** run `sudo nvidia-ctk cdi generate` any time the GPU hardware or the NVIDIA
 > driver changes. As a temporary workaround you can switch the GPU mode to **Legacy — `--gpus all`**,
 > which doesn't use the CDI spec — but regenerating the spec is the real fix.
+
+### `could not load the Qt platform plugin "xcb"`
+
+On a minimal or server-style install the system Qt libraries the GUI needs may be missing.
+Installing the platform plugin dependencies fixes it — on Debian/Ubuntu that's typically
+`sudo apt install libxcb-cursor0 libxkbcommon0`, and on a Wayland session also
+`qt6-wayland` (or your distro's equivalent). A full desktop install usually already has these.
+
+## AMD GPUs (help wanted)
+
+AMD/ROCm GPU offload is **not implemented** — the VRAM/stats probing is NVIDIA-only
+(`nvidia-smi`). CPU-only mode works on any machine. If you have AMD hardware and want to
+add `rocm-smi` support (GPU stats + VRAM-fit estimation), contributions are very welcome;
+the GPU-probing code lives in `src/llama_launcher/services/gpu.py`.
+
+## License
+
+MIT — see [LICENSE](LICENSE). Depends on [PySide6](https://doc.qt.io/qtforpython/) (LGPL-3.0),
+installed separately via pip and subject to its own terms, including your right to modify or
+replace it.

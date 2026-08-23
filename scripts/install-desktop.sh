@@ -6,7 +6,7 @@
 #   ./scripts/install-desktop.sh --uninstall
 #
 # It points the launcher at THIS repo's .venv, so create the venv first:
-#   python -m venv .venv && .venv/bin/pip install -e .
+#   python3 -m venv .venv && .venv/bin/pip install -e .
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -28,7 +28,7 @@ fi
 
 if [[ ! -x "$VENV_PY" ]]; then
     echo "ERROR: $VENV_PY not found." >&2
-    echo "Create the venv first:  python -m venv .venv && .venv/bin/pip install -e ." >&2
+    echo "Create the venv first:  python3 -m venv .venv && .venv/bin/pip install -e ." >&2
     exit 1
 fi
 
@@ -41,7 +41,7 @@ Type=Application
 Name=Llama Launcher
 GenericName=Local LLM launcher
 Comment=Build and launch local llama.cpp servers in a terminal
-Exec=$VENV_PY -m llama_launcher.app
+Exec="$VENV_PY" -m llama_launcher.app
 Path=$REPO
 Icon=$ICON_FILE
 Terminal=false
