@@ -195,8 +195,9 @@ class LaunchController:
 
         if p.mode == "router":
             router_host_dir, warnings = self.window.prepare_router_files()
-            if warnings:
-                QMessageBox.warning(self.window, "Preset warnings", "\n".join(warnings))
+            if warnings and not self._warn_and_confirm(
+                    "Preset warnings", "\n".join(warnings)):
+                return
             argv = build_command(p, router_host_dir=router_host_dir, connection=connection)
             # Relaunching over a LIVE router would drop a resident model and any
             # in-flight harness requests, so confirm before tearing it down.
@@ -235,8 +236,8 @@ class LaunchController:
             return
 
         warn = self.vram_check()
-        if warn:
-            QMessageBox.warning(self.window, "VRAM check", warn)
+        if warn and not self._warn_and_confirm("VRAM check", warn):
+            return
         self.window.monitor_panel.reset()
         self.window.benchmark_panel.reset()
         self.window.benchmark_panel.set_benchmark_history(
@@ -379,6 +380,16 @@ class LaunchController:
         self.on_restart()
 
     # -- validation / vram / error reporting ----------------------------------
+    def _warn_and_confirm(self, title: str, text: str) -> bool:
+        """Pre-launch warning with a way out: Abort backs out of the launch,
+        Ignore proceeds anyway. Abort is the default button so Enter cancels --
+        when the user already suspects it won't fit, they shouldn't have to
+        watch it OOM before trying a different configuration."""
+        answer = QMessageBox.warning(
+            self.window, title, text + "\n\nLaunch anyway?",
+            QMessageBox.Abort | QMessageBox.Ignore, QMessageBox.Abort)
+        return answer == QMessageBox.Ignore
+
     def _validate_or_warn(self) -> bool:
         p = self.window._configure_panel.current_profile()
         # The key must exist before the exposure rule is evaluated: a router
@@ -393,7 +404,7 @@ class LaunchController:
             return False
         warns = [i for i in issues if i.level == "warning"]
         if warns:
-            QMessageBox.warning(self.window, "Warnings", "\n".join(i.message for i in warns))
+            return self._warn_and_confirm("Warnings", "\n".join(i.message for i in warns))
         return True
 
     def vram_check(self) -> str | None:
