@@ -75,7 +75,9 @@ def build_monitor_data(target: dict) -> dict | None:
     """
     if not target.get("running"):
         return None
-    from llama_launcher.services.metrics import kv_ratio, decode_rate
+    from llama_launcher.services.metrics import (
+        kv_ratio, decode_rate, counter_rate, prompt_progress,
+    )
     port, host, key = target["port"], target["host"], target["key"]
     model_scope, poll = target["model_scope"], target["poll"]
     name, binary = target["name"], target["binary"]
@@ -90,6 +92,12 @@ def build_monitor_data(target: dict) -> dict | None:
     nd = m.get("llamacpp:n_decode_total")
     decode_now = (nd, time.monotonic()) if nd is not None else None
     gen_tok_s_live = decode_rate(target.get("decode_prev"), decode_now)
+    # Live prompt tok/s the same way: the prompt_tokens_seconds gauge reads 0
+    # mid-prefill; the processing slot's n_prompt_tokens_processed grows batch
+    # by batch, so its delta is the live prefill rate.
+    pp = prompt_progress(slots)
+    prompt_now = (pp, time.monotonic()) if pp is not None else None
+    prompt_tok_s_live = counter_rate(target.get("prompt_prev"), prompt_now)
     if target.get("kind") == "native" and target.get("pid"):
         st = native.proc_stats(target["pid"]) or {}
         uptime = ""     # native uptime is not tracked in v1
@@ -102,6 +110,8 @@ def build_monitor_data(target: dict) -> dict | None:
         "gen_tok_s_live": gen_tok_s_live,
         "decode_now": decode_now,
         "prompt_tok_s": m.get("llamacpp:prompt_tokens_seconds"),
+        "prompt_tok_s_live": prompt_tok_s_live,
+        "prompt_now": prompt_now,
         "kv_pct": kv_ratio(m, slots),
         "speculating": any(s.get("speculative") for s in slots),
         "gpus": gpu.query_gpus(target.get("gpu_ssh", "")),
@@ -123,11 +133,16 @@ def _instance_api_key_from(inst, by_name: dict, router_base_dir: str) -> str | N
     return (stored.settings.get("api-key") or None) if stored else None
 
 
-def _instance_summary_data(inst, by_name: dict, router_base_dir: str) -> dict:
+def _instance_summary_data(inst, by_name: dict, router_base_dir: str,
+                           decode_prev: tuple | None = None) -> dict:
     """Per-row health + headline stat + structured tok_s/kv_pct for one instance
     (pure; blocking I/O). An embedding/rerank server has no tok/s (headline "ready");
-    a generation server reports predicted-tokens/sec + KV% from /metrics + /slots.
-    Uses the profiles snapshot for key resolution instead of a per-row disk scan."""
+    a generation server reports live n_decode_total-delta tok/s (falling back to
+    the completion gauge when idle, so the card still shows the last run's rate)
+    + KV% from /metrics + /slots. `decode_prev` is this row's previous
+    (n_decode_total, monotonic) read; `decode_now` is handed back so the caller
+    can feed it in next tick. Uses the profiles snapshot for key resolution
+    instead of a per-row disk scan."""
     if not inst.running or inst.port is None:
         return {"health": "down", "stat": "", "tok_s": None, "kv_pct": None}
     hstatus = health.probe_health(inst.port, host=inst.host)
@@ -137,10 +152,14 @@ def _instance_summary_data(inst, by_name: dict, router_base_dir: str) -> dict:
     key = _instance_api_key_from(inst, by_name, router_base_dir)
     m = metrics.fetch_metrics(inst.port, host=inst.host, api_key=key)
     slots = metrics.fetch_slots(inst.port, host=inst.host, api_key=key)
-    tok = m.get("llamacpp:predicted_tokens_seconds")
+    nd = m.get("llamacpp:n_decode_total")
+    decode_now = (nd, time.monotonic()) if nd is not None else None
+    live = metrics.counter_rate(decode_prev, decode_now)
+    tok = live if live is not None else m.get("llamacpp:predicted_tokens_seconds")
     kv = metrics.kv_ratio(m, slots)
     stat = f"{tok:.0f} tok/s" if tok else ("ready" if hstatus == "ready" else "")
-    return {"health": hstatus, "stat": stat, "tok_s": tok, "kv_pct": kv}
+    return {"health": hstatus, "stat": stat, "tok_s": tok, "kv_pct": kv,
+            "decode_now": decode_now}
 
 
 def build_instances_data(target: dict) -> dict:
@@ -191,6 +210,8 @@ def build_instances_data(target: dict) -> dict:
             container_rows + native_rows, profiles, binary,
             node=node_name, node_host=nd.get("host", "")))
     instances.sort(key=lambda i: (not i.running, i.node, i.name))
+    decode_prev_by_key = target.get("decode_prev_by_key") or {}
+    decode_now_by_key = {}
     rows = []
     for inst in instances:
         # An rpc-worker container shares its pool head's `llama-launcher.profile`
@@ -208,14 +229,19 @@ def build_instances_data(target: dict) -> dict:
                     "stat": "", "tok_s": None, "kv_pct": None}
             profile_disp, port_disp, node_disp = worker_card_title(inst), None, "local"
         else:
-            summ = _instance_summary_data(inst, by_name, target["router_base_dir"])
+            rate_key = f"{inst.node}/{inst.name}"
+            summ = _instance_summary_data(inst, by_name, target["router_base_dir"],
+                                          decode_prev=decode_prev_by_key.get(rate_key))
+            if summ.get("decode_now") is not None:
+                decode_now_by_key[rate_key] = summ["decode_now"]
             profile_disp, port_disp, node_disp = inst.profile, inst.port, inst.node
         rows.append({"name": inst.name, "profile": profile_disp, "port": port_disp,
                      "running": inst.running, "health": summ["health"],
                      "stat": summ["stat"], "tok_s": summ["tok_s"],
                      "kv_pct": summ["kv_pct"], "embeddings": inst.embeddings,
                      "reranking": inst.reranking, "mode": inst.mode, "node": node_disp})
-    return {"instances": instances, "rows": rows}
+    return {"instances": instances, "rows": rows,
+            "decode_now_by_key": decode_now_by_key}
 
 
 class _MonitorGather(QRunnable):
@@ -318,6 +344,8 @@ class MonitorController:
         self._router_statuses: dict = {}
         self._spec_prev = None      # previous /metrics spec-decode counter read
         self._decode_prev = None    # previous (n_decode_total, monotonic) for live tok/s
+        self._prompt_prev = None    # previous (prompt_progress, monotonic) for live prefill tok/s
+        self._cards_decode_prev = {}   # per-card "node/name" -> (n_decode_total, monotonic)
         self._props = None          # cached /props for the current model load
         self._props_model = None    # router-polled model id the cache is keyed on
 
@@ -562,6 +590,7 @@ class MonitorController:
             self._monitor_target = {"running": False}
             self._monitor_result = None
             self._decode_prev = None
+            self._prompt_prev = None
             return
         name = self._monitored_container_name()
         state = runtime.container_state(name, p.runtime.binary,
@@ -595,6 +624,7 @@ class MonitorController:
             if self._monitor_result is not None:
                 self.window.monitor_panel.update_stats(self._monitor_result)
                 self._decode_prev = self._monitor_result.get("decode_now")
+                self._prompt_prev = self._monitor_result.get("prompt_now")
             self._monitor_target = self._compute_monitor_target(
                 running=True, model_scope=router_model_key)
             if not self._monitor_inflight:
@@ -609,6 +639,7 @@ class MonitorController:
             # isn't measured across the downtime.
             self._monitor_result = None
             self._decode_prev = None
+            self._prompt_prev = None
         if p.mode == "router":
             if state == "running":
                 self.refresh_router_models()
@@ -645,6 +676,7 @@ class MonitorController:
         return {"binary": self.window._configure_panel.current_profile().runtime.binary,
                 "base_dir": base_dir(),
                 "router_base_dir": self.window.router_base_dir(),
+                "decode_prev_by_key": dict(self._cards_decode_prev),
                 "nodes": [
                     {"name": n.name, "connection": connection_for(n), "host": host_of(n),
                      "binary": n.binary, "enabled": n.enabled}
@@ -656,6 +688,11 @@ class MonitorController:
         if result is None:
             return
         self._instances = result["instances"]
+        # Advance the per-card decode baselines to THIS result's readings so the
+        # next gather measures each card's live rate over the gap to them
+        # (mirrors the focused monitor's decode_prev handling). Idempotent when
+        # the same result is re-rendered while a gather is in flight.
+        self._cards_decode_prev = result.get("decode_now_by_key", {})
         # Auto-clear a monitored instance whose container has dropped out of the
         # fresh list (crash / external stop) so the Monitor falls back to the form
         # profile and retargets the log follower instead of stranding on a dead
@@ -822,6 +859,7 @@ class MonitorController:
             "gpu_ssh": focused_gpu_ssh(p.runtime.node, self.window.base_dir()),
             "mon_conn": connection_for(node) if node else "",
             "decode_prev": self._decode_prev,
+            "prompt_prev": self._prompt_prev,
         }
 
     def collect_monitor_data(self) -> dict:

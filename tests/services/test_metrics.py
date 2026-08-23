@@ -184,3 +184,30 @@ def test_fetch_props_none_on_connection_error(monkeypatch):
         raise requests.RequestException("refused")
     monkeypatch.setattr(metrics.requests, "get", boom)
     assert metrics.fetch_props(8080) is None
+
+
+def test_counter_rate_is_the_generic_delta_rate():
+    """decode_rate's counter-delta math, exposed generically so the live
+    prompt rate (prefill progress counter) shares one implementation."""
+    assert abs(met.counter_rate((0, 0.0), (10, 2.0)) - 5.0) < 1e-9
+    assert met.counter_rate(None, (10, 2.0)) is None
+    assert met.counter_rate((10, 1.0), (10, 2.0)) is None
+
+
+def test_prompt_progress_takes_processing_slot():
+    slots = [{"is_processing": True, "n_prompt_tokens_processed": 1200},
+             {"is_processing": False, "n_prompt_tokens_processed": 50}]
+    assert met.prompt_progress(slots) == 1200
+
+
+def test_prompt_progress_max_across_processing_slots():
+    slots = [{"is_processing": True, "n_prompt_tokens_processed": 300},
+             {"is_processing": True, "n_prompt_tokens_processed": 900}]
+    assert met.prompt_progress(slots) == 900
+
+
+def test_prompt_progress_none_when_nothing_processing():
+    assert met.prompt_progress([]) is None
+    assert met.prompt_progress([{"is_processing": False,
+                                 "n_prompt_tokens_processed": 50}]) is None
+    assert met.prompt_progress([{"is_processing": True}]) is None

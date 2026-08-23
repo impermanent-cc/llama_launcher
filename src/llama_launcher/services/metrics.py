@@ -105,16 +105,10 @@ def kv_usage_ratio(slots: list) -> float | None:
     return max(resident) if resident else None
 
 
-def decode_rate(prev: tuple | None, cur: tuple | None) -> float | None:
-    """Live generation tok/s from two (n_decode_total, monotonic_time) reads.
-
-    llama.cpp's `predicted_tokens_seconds` gauge (and `tokens_predicted_total`)
-    only update when a request COMPLETES, so they read 0 throughout an in-flight
-    generation. `n_decode_total` instead increments ~1 per generated token in
-    real time, so the delta between two reads is a live throughput. None when
-    there's no prior read, no forward movement (idle), or the counter went
-    backwards (server restarted).
-    """
+def counter_rate(prev: tuple | None, cur: tuple | None) -> float | None:
+    """Live rate from two (counter, monotonic_time) reads. None when there's
+    no prior read, no forward movement (idle), or the counter went backwards
+    (server restarted / a per-request counter reset between requests)."""
     if prev is None or cur is None:
         return None
     (prev_count, prev_t), (cur_count, cur_t) = prev, cur
@@ -122,6 +116,31 @@ def decode_rate(prev: tuple | None, cur: tuple | None) -> float | None:
     if d_count <= 0 or d_t <= 0:
         return None
     return d_count / d_t
+
+
+def decode_rate(prev: tuple | None, cur: tuple | None) -> float | None:
+    """Live generation tok/s from two (n_decode_total, monotonic_time) reads.
+
+    llama.cpp's `predicted_tokens_seconds` gauge (and `tokens_predicted_total`)
+    only update when a request COMPLETES, so they read 0 throughout an in-flight
+    generation. `n_decode_total` instead increments ~1 per generated token in
+    real time, so the delta between two reads is a live throughput.
+    """
+    return counter_rate(prev, cur)
+
+
+def prompt_progress(slots: list) -> int | None:
+    """Prefill progress counter: the busiest PROCESSING slot's
+    `n_prompt_tokens_processed`. It grows batch by batch through a prefill
+    (and reads ~0 once generation starts), so the delta between two reads is
+    a live prompt tok/s -- the `prompt_tokens_seconds` gauge only updates at
+    request completion. None when nothing is processing (its per-request reset
+    would otherwise register as a bogus negative delta).
+    """
+    vals = [s.get("n_prompt_tokens_processed") for s in slots
+            if s.get("is_processing")]
+    vals = [v for v in vals if v is not None]
+    return max(vals) if vals else None
 
 
 def kv_ratio(m: dict, slots: list) -> float | None:

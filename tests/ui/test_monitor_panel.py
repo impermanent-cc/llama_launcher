@@ -366,3 +366,22 @@ def test_monitor_stats_legend_explains_gen_prompt_kv(qtbot):
     t = btn.info_text.lower()
     assert "gen" in t and "prompt" in t and "kv" in t
     assert "idle" in t          # explains why they can read 0 while running
+
+
+def test_update_stats_prefers_live_prompt_rate(qtbot):
+    """Mid-prefill the completion gauge holds the LAST request's rate; the live
+    slot-delta rate is the current one and must win when present."""
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.update_stats({"metrics_on": True, "prompt_tok_s": 12.0,
+                    "prompt_tok_s_live": 812.0})
+    assert "prompt 812" in p.summary.text()
+    assert "prompt 12 " not in p.summary.text()
+
+
+def test_update_stats_prompt_falls_back_to_gauge(qtbot):
+    p = MonitorPanel()
+    qtbot.addWidget(p)
+    p.update_stats({"metrics_on": True, "prompt_tok_s": 12.0,
+                    "prompt_tok_s_live": None})
+    assert "prompt 12" in p.summary.text()

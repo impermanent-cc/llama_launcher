@@ -531,3 +531,49 @@ def test_on_launch_foreground_reports_when_no_terminal(qtbot, monkeypatch):
 def _router_profile():
     from llama_launcher.core.spec import Profile, Runtime
     return Profile(name="r", image="img", mode="router", runtime=Runtime())
+
+
+def test_build_monitor_data_computes_live_prompt_tok_s_from_slot_delta(monkeypatch):
+    """prompt tok/s must be live during prefill: the prompt_tokens_seconds
+    gauge only updates at request completion (0 through a 27k-token prefill),
+    but the processing slot's n_prompt_tokens_processed grows batch by batch,
+    so its delta between two polls is a live prefill rate."""
+    monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda *a, **k: {})
+    monkeypatch.setattr(mw.metrics, "fetch_slots",
+                        lambda *a, **k: [{"is_processing": True, "n_ctx": 32768,
+                                          "n_prompt_tokens_processed": 5000}])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
+    monkeypatch.setattr(mw.runtime, "stats", lambda *a, **k: {})
+    monkeypatch.setattr(mw.runtime, "started_at", lambda *a, **k: None)
+    monkeypatch.setattr(mc.time, "monotonic", lambda: 11.0)
+    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
+              "key": None, "model_scope": None, "poll": True,
+              "name": "llama-x", "binary": "podman",
+              "prompt_prev": (1000, 10.0)}
+    d = mw.build_monitor_data(target)
+    assert abs(d["prompt_tok_s_live"] - 4000.0) < 1e-9   # (5000-1000)/1.0
+    assert d["prompt_now"] == (5000, 11.0)
+
+
+def test_build_monitor_data_prompt_live_none_when_not_prefilling(monkeypatch):
+    monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda *a, **k: {})
+    monkeypatch.setattr(mw.metrics, "fetch_slots",
+                        lambda *a, **k: [{"is_processing": False,
+                                          "n_prompt_tokens_processed": 5000}])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
+    monkeypatch.setattr(mw.runtime, "stats", lambda *a, **k: {})
+    monkeypatch.setattr(mw.runtime, "started_at", lambda *a, **k: None)
+    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
+              "key": None, "model_scope": None, "poll": True,
+              "name": "llama-x", "binary": "podman",
+              "prompt_prev": (1000, 10.0)}
+    d = mw.build_monitor_data(target)
+    assert d["prompt_tok_s_live"] is None
+    assert d["prompt_now"] is None
+
+
+def test_compute_monitor_target_carries_prompt_prev(qtbot):
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    w._monitor._prompt_prev = (1000, 10.0)
+    t = w._monitor._compute_monitor_target(running=True)
+    assert t["prompt_prev"] == (1000, 10.0)

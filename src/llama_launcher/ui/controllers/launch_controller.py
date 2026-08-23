@@ -228,6 +228,7 @@ class LaunchController:
                 benchmark_store.load(default_base_dir(), p.name))
             self.window._monitor._spec_prev = None
             self.window._monitor._decode_prev = None
+            self.window._monitor._prompt_prev = None
             self.window._monitor._props = None
             self.window._monitor._props_model = None
             self._spawn_async(
