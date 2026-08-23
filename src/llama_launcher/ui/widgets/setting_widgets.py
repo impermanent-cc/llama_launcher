@@ -1,6 +1,6 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QGridLayout, QCheckBox, QLineEdit, QToolButton
+    QWidget, QHBoxLayout, QGridLayout, QCheckBox, QLabel, QLineEdit, QToolButton
 )
 
 from llama_launcher.core.settings_catalog import Setting
@@ -224,3 +224,20 @@ class SettingWidget(QWidget):
 
 def make_widget(setting: Setting) -> SettingWidget:
     return SettingWidget(setting)
+
+
+def make_row_label(setting: Setting) -> QLabel:
+    """Form-row label for a setting: the flag name, plus a muted '*deprecated'
+    marker for flags upstream is retiring (kept working for older images). The
+    tooltip points at the replacement so users know where to go."""
+    label = QLabel(setting.flag)
+    if setting.deprecated:
+        label.setText(
+            f"{setting.flag} "
+            "<span style='color: palette(mid); font-size: 90%;'>*deprecated</span>"
+        )
+        label.setToolTip(
+            "Deprecated upstream in favor of --load-mode; still works on older "
+            "images. See this row's control for details."
+        )
+    return label

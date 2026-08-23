@@ -19,6 +19,7 @@ class Setting:
     option_help: tuple = ()   # multiselect only: ((option, help_text), ...)
     suggestions: tuple = ()   # int only: preset values offered in an editable combo
     engine: str = "any"       # "any" | "ik_llama.cpp"  (which engine surfaces this flag)
+    deprecated: bool = False  # upstream emits DEPRECATED warnings; kept for old images
 
 
 KV_CACHE_TYPES = ("f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1")
@@ -83,11 +84,11 @@ _ALL = [
                     "it's never swapped; dio uses DirectIO if available. Set to anything "
                     "other than mmap and the legacy no-mmap/mlock flags below are ignored. "
                     "Needs an image new enough to know --load-mode."),
-    Setting("no-mmap", "--no-mmap", "bool", False, "GPU & Memory", (),
+    Setting("no-mmap", "--no-mmap", "bool", False, "GPU & Memory", (), deprecated=True,
             tooltip="Legacy (deprecated upstream in favor of --load-mode, but works on "
                     "all image versions). Disable memory-mapping of the model file, loading "
                     "it fully into RAM instead. Ignored when load-mode is set."),
-    Setting("mlock", "--mlock", "bool", False, "GPU & Memory", (),
+    Setting("mlock", "--mlock", "bool", False, "GPU & Memory", (), deprecated=True,
             tooltip="Legacy (deprecated upstream in favor of --load-mode, but works on all "
                     "image versions). Lock the model in RAM so the OS never swaps it out. "
                     "Needs enough RAM and the privilege to lock memory. Ignored when "
@@ -113,6 +114,11 @@ _ALL = [
             tooltip="Keep the multimodal (vision/audio) projector on the CPU instead of the "
                     "GPU. llama.cpp offloads it by default; enable this to save VRAM for the "
                     "main model."),
+    Setting("mmproj-device", "--mmproj-device", "string", "", "GPU & Memory", ("-mmdev",),
+            tooltip="Which device runs the multimodal (vision/audio) projector, e.g. "
+                    "'CUDA0'. 'none' keeps it on the CPU (like --no-mmproj-offload); empty "
+                    "lets llama.cpp choose (auto). Run llama-server with --list-devices to "
+                    "see the names. Newer llama.cpp only."),
     Setting("override-tensor", "--override-tensor", "string", "", "GPU & Memory", ("-ot",),
             tooltip="Map tensor-name patterns to buffer types, e.g. keep MoE experts on CPU "
                     "with 'exps=CPU'. Comma-separated for multiple. Empty = no override."),

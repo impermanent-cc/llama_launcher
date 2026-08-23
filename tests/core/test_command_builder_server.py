@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 from llama_launcher.core.spec import Profile, Mount, Runtime, LoraRef
 from llama_launcher.core.command_builder import build_command
 
@@ -59,6 +61,15 @@ def test_changed_settings_rendered():
     # bool flags are bare
     assert "--no-mmap" in argv
     assert "--jinja" in argv
+
+
+def test_mmproj_device_string_flag():
+    p = _golden_profile()
+    argv = build_command(replace(p, settings={**p.settings, "mmproj-device": "CUDA0"}))
+    assert argv[argv.index("--mmproj-device") + 1] == "CUDA0"
+    # empty string is omitted, like other string flags
+    argv2 = build_command(replace(p, settings={**p.settings, "mmproj-device": ""}))
+    assert "--mmproj-device" not in argv2
 
 
 def test_settings_emitted_in_catalog_order():

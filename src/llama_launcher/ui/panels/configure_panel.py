@@ -27,7 +27,9 @@ from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import model_info, runtime, native, pool_preflight
 from llama_launcher.store.nodes import load_nodes, get_node
 from llama_launcher.store.profiles import list_profiles, resolve_member_pairs
-from llama_launcher.ui.widgets.setting_widgets import make_widget, SuggestionDot
+from llama_launcher.ui.widgets.setting_widgets import (
+    make_row_label, make_widget, SuggestionDot,
+)
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox, NoWheelSpinBox
 from llama_launcher.ui.widgets.rpc_workers_table import RpcWorkersTable
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
@@ -400,7 +402,7 @@ class ConfigurePanel(QWidget):
             w = make_widget(setting)
             w.changed.connect(self.refresh_preview)
             self._widgets[key] = w
-            groups[setting.group].addRow(setting.flag, w)
+            groups[setting.group].addRow(make_row_label(setting), w)
             self._setting_rows[key] = (groups[setting.group], w)
         # When load-mode is active it supersedes --no-mmap/--mlock (see
         # command_builder), so gray those legacy checkboxes out to signal they're
