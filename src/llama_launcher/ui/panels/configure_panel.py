@@ -974,6 +974,7 @@ class ConfigurePanel(QWidget):
         self.window._monitor._router_statuses = {}
         self.window._monitor._spec_prev = None
         self.window._monitor._decode_prev = None
+        self.window._monitor._prompt_prev = None
         self.window._monitor._props = None
         self.window._monitor._props_model = None
         self.members_list.setRowCount(0)

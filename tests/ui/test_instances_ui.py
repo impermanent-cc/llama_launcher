@@ -518,3 +518,60 @@ def test_native_instance_remove_calls_native(win, monkeypatch):
     monkeypatch.setattr(mc.native, "remove_native", lambda name, base: removed.append(name))
     win._monitor._on_instance_remove("llama-nat")
     assert removed == ["llama-nat"]
+
+
+def test_build_instances_data_live_headline_from_decode_delta(monkeypatch):
+    """Card headlines must go live: with a decode baseline for the row, the
+    n_decode_total delta rate wins over the completion gauge (which reads 0
+    for the whole of an in-flight generation)."""
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    profs = [Profile(name="gen", image="img", settings={"port": 8080})]
+    monkeypatch.setattr(mc, "list_profiles", lambda base: profs)
+    monkeypatch.setattr(mc.runtime, "list_launcher_containers", lambda b: [
+        {"name": "llama-gen", "running": True, "profile": "gen", "mode": "server"}])
+    monkeypatch.setattr(mc.health, "probe_health", lambda *a, **k: "ready")
+    monkeypatch.setattr(mc.metrics, "fetch_metrics",
+                        lambda *a, **k: {"llamacpp:n_decode_total": 123.0,
+                                         "llamacpp:predicted_tokens_seconds": 0.0})
+    monkeypatch.setattr(mc.metrics, "fetch_slots", lambda *a, **k: [])
+    monkeypatch.setattr(mc.time, "monotonic", lambda: 11.0)
+    target = {"binary": "podman", "base_dir": "/b", "router_base_dir": "/r",
+              "decode_prev_by_key": {"local/llama-gen": (100.0, 10.0)}}
+    data = mc.build_instances_data(target)
+    rows = {r["name"]: r for r in data["rows"]}
+    assert rows["llama-gen"]["stat"] == "23 tok/s"
+    assert rows["llama-gen"]["tok_s"] == 23.0
+    assert data["decode_now_by_key"]["local/llama-gen"] == (123.0, 11.0)
+
+
+def test_build_instances_data_headline_falls_back_to_gauge_when_idle(monkeypatch):
+    """No counter movement (idle) -> show the last completed request's gauge,
+    so an idle card still tells the user how fast the last run was."""
+    from llama_launcher.ui.controllers import monitor_controller as mc
+    profs = [Profile(name="gen", image="img", settings={"port": 8080})]
+    monkeypatch.setattr(mc, "list_profiles", lambda base: profs)
+    monkeypatch.setattr(mc.runtime, "list_launcher_containers", lambda b: [
+        {"name": "llama-gen", "running": True, "profile": "gen", "mode": "server"}])
+    monkeypatch.setattr(mc.health, "probe_health", lambda *a, **k: "ready")
+    monkeypatch.setattr(mc.metrics, "fetch_metrics",
+                        lambda *a, **k: {"llamacpp:n_decode_total": 100.0,
+                                         "llamacpp:predicted_tokens_seconds": 64.0})
+    monkeypatch.setattr(mc.metrics, "fetch_slots", lambda *a, **k: [])
+    monkeypatch.setattr(mc.time, "monotonic", lambda: 11.0)
+    target = {"binary": "podman", "base_dir": "/b", "router_base_dir": "/r",
+              "decode_prev_by_key": {"local/llama-gen": (100.0, 10.0)}}
+    rows = {r["name"]: r for r in mc.build_instances_data(target)["rows"]}
+    assert rows["llama-gen"]["stat"] == "64 tok/s"
+
+
+def test_instances_target_carries_decode_baselines(win):
+    win._monitor._cards_decode_prev = {"local/llama-gen": (100.0, 10.0)}
+    t = win._monitor._instances_target()
+    assert t["decode_prev_by_key"] == {"local/llama-gen": (100.0, 10.0)}
+
+
+def test_render_instances_advances_decode_baselines(win):
+    win._monitor._instances_result = {"instances": [], "rows": [],
+                                      "decode_now_by_key": {"local/x": (5.0, 1.0)}}
+    win._monitor._render_instances()
+    assert win._monitor._cards_decode_prev == {"local/x": (5.0, 1.0)}

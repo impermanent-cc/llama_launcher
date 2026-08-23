@@ -164,7 +164,10 @@ class MonitorPanel(QWidget):
         if not metrics_on:
             speed = "throughput: (enable --metrics to see tok/s)"
         else:
-            ptok = data.get("prompt_tok_s")
+            # Same preference for prompt: the completion gauge holds the LAST
+            # request's prefill rate; the live slot-delta rate is the current one.
+            plive = data.get("prompt_tok_s_live")
+            ptok = plive if plive is not None else data.get("prompt_tok_s")
             speed = f"gen {gen:.1f} tok/s" if gen is not None else "gen –"
             if ptok is not None:
                 speed += f"  ·  prompt {ptok:.0f} tok/s"
