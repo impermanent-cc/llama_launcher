@@ -1,5 +1,7 @@
+import html as _html
 import os
 import posixpath
+import time
 
 from PySide6.QtCore import Qt, QRunnable, QThreadPool, QTimer
 from PySide6.QtWidgets import (
@@ -24,8 +26,9 @@ from llama_launcher.core.spec import (
 from llama_launcher.core import vram
 from llama_launcher.core.validation import validate, Issue
 from llama_launcher.services import api_key as api_key_store
+from llama_launcher.services import gpu as gpu_svc
 from llama_launcher.services import model_info, runtime, native, pool_preflight
-from llama_launcher.store.nodes import load_nodes, get_node
+from llama_launcher.store.nodes import load_nodes, get_node, gpu_ssh_target
 from llama_launcher.store.profiles import list_profiles, resolve_member_pairs
 from llama_launcher.ui.widgets.setting_widgets import (
     make_row_label, make_widget, SuggestionDot,
@@ -104,6 +107,30 @@ class _CheckFitGather(QRunnable):
         self._owner._check_fit_inflight = False
 
 
+_FIT_GPU_TTL = 5.0    # seconds a free-VRAM probe stays fresh for the fit readout
+
+
+class _FitGpusGather(QRunnable):
+    """Off-thread GPU probe for the live fit readout -- nvidia-smi is a
+    subprocess (an ssh round-trip for a remote node), so it must not run on
+    the UI thread. Same attribute-write + singleShot-poll delivery as
+    _CheckFitGather above."""
+    def __init__(self, owner, ssh_target: str):
+        super().__init__()
+        self._owner = owner
+        self._ssh = ssh_target
+
+    def run(self):
+        try:
+            gpus = gpu_svc.query_gpus(self._ssh)
+        except Exception:            # noqa: BLE001 - worker must never raise
+            gpus = []
+        self._owner._fit_gpus = gpus
+        self._owner._fit_gpus_ssh = self._ssh
+        self._owner._fit_gpus_at = time.monotonic()
+        self._owner._fit_gather_inflight = False
+
+
 class ConfigurePanel(QWidget):
     """The Configure tab body: environment fields, members, settings form,
     command preview + api-key box. Owns all Configure-tab widgets. Holds a
@@ -116,6 +143,21 @@ class ConfigurePanel(QWidget):
         self.configure_tab = self
         self._profile = Profile(name="New Profile")
         self._last_caps = None
+        # Live fit readout state: model meta cached per apply_model_caps, GPU
+        # probe cached per ssh-target with a short TTL, refresh debounced so
+        # keystrokes in ctx-size don't each cost a probe.
+        self._fit_meta = None
+        self._fit_weights = None
+        self._meta_text = ""
+        self._fit_line = ""
+        self._fit_gpus = None
+        self._fit_gpus_ssh = None
+        self._fit_gpus_at = 0.0
+        self._fit_gather_inflight = False
+        self._fit_timer = QTimer(self)
+        self._fit_timer.setSingleShot(True)
+        self._fit_timer.setInterval(400)
+        self._fit_timer.timeout.connect(self._refresh_fit_line)
 
         body = QHBoxLayout(self)
         # Trim the body's own margins so the Environment/Settings columns get a
@@ -640,6 +682,7 @@ class ConfigurePanel(QWidget):
         name = self.node_combo.currentData()
         if name and name != "local" and self.bind_host_combo.currentText() in ("127.0.0.1", ""):
             self.bind_host_combo.setCurrentText("0.0.0.0")
+        self._schedule_fit_refresh()    # the fit budget is the new node's GPUs
 
     def _apply_engine_enums(self) -> None:
         """Extend/revert -ctk/-ctv enum choices for the current engine."""
@@ -1007,6 +1050,7 @@ class ConfigurePanel(QWidget):
 
     def refresh_preview(self) -> None:
         self.preview.setPlainText(self.preview_text())
+        self._schedule_fit_refresh()
 
     def apply_model_caps(self) -> None:
         p = self.current_profile()
@@ -1014,7 +1058,10 @@ class ConfigurePanel(QWidget):
         if p.model:
             meta, size, caps = model_info.inspect_model(p.model, self.mounts_panel.mounts())
         self._last_caps = caps
-        self.model_meta_label.setText(self._meta_caps_text(meta, size, caps))
+        self._fit_meta, self._fit_weights = meta, size
+        self._meta_text = self._meta_caps_text(meta, size, caps)
+        self._set_fit_line("")      # model changed: never show the OLD model's fit
+        self._schedule_fit_refresh()
 
         described = describe_relevance(caps) if caps else {}
         sugg_by_key, reason_by_key = self._suggestion_index(caps)   # concrete-value suggestions
@@ -1023,6 +1070,63 @@ class ConfigurePanel(QWidget):
             self._apply_dot(widget, key, described, sugg_by_key, reason_by_key)
         self._apply_field_dot(self._mmproj_dot, "mmproj", described, sugg_by_key, reason_by_key)
         self._apply_field_dot(self._draft_model_dot, "draft_model", described, sugg_by_key, reason_by_key)
+
+    # -- live fit readout -----------------------------------------------------
+    def _schedule_fit_refresh(self) -> None:
+        """Debounced: restarting the single-shot timer coalesces a burst of
+        field edits into one refresh 400ms after the last one."""
+        self._fit_timer.start()
+
+    def _refresh_fit_line(self) -> None:
+        if self._fit_meta is None:
+            self._set_fit_line("")
+            return
+        ssh = gpu_ssh_target(self.window.base_dir(),
+                             self.node_combo.currentData() or "local")
+        fresh = (self._fit_gpus is not None and self._fit_gpus_ssh == ssh
+                 and time.monotonic() - self._fit_gpus_at < _FIT_GPU_TTL)
+        if fresh:
+            self._render_fit_line()
+            return
+        if self._fit_gather_inflight:
+            return
+        self._fit_gather_inflight = True
+        QThreadPool.globalInstance().start(_FitGpusGather(self, ssh))
+        QTimer.singleShot(150, self._poll_fit_gather)
+
+    def _poll_fit_gather(self) -> None:
+        if self._fit_gather_inflight:
+            QTimer.singleShot(150, self._poll_fit_gather)
+            return
+        self._render_fit_line()
+
+    def _render_fit_line(self) -> None:
+        mib = 1024 * 1024
+        s = vram.fit_summary(
+            self._fit_meta, self._fit_weights or 0,
+            settings=self.current_profile().settings,
+            free_bytes_per_gpu=[g.mem_free_mib * mib
+                                for g in (self._fit_gpus or [])])
+        gib = 1024 ** 3
+        if s is None:
+            line = ""
+        elif s.fits:
+            line = (f"fit: est ~{s.est_bytes/gib:.1f} / ~{s.free_bytes/gib:.1f} "
+                    f"GiB free (margin {s.margin/gib:.1f} GiB) ✓")
+        else:
+            line = (f'<span style="color:#c62828">may not fit: est '
+                    f"~{s.est_bytes/gib:.1f} GiB &gt; ~{s.free_bytes/gib:.1f} GiB "
+                    f"free (short {-s.margin/gib:.1f} GiB)</span>")
+        self._set_fit_line(line)
+
+    def _set_fit_line(self, line: str) -> None:
+        """Compose meta/caps text + fit line into the one label. The fit line
+        may carry a styled span, so the whole label goes through rich text with
+        the plain meta part escaped."""
+        self._fit_line = line
+        base = _html.escape(self._meta_text) if self._meta_text else ""
+        sep = "<br>" if base and line else ""
+        self.model_meta_label.setText(base + sep + line)
 
     def _suggestion_index(self, caps):
         """key -> (Suggestion, reason). A multi-key suggestion indexes each key."""

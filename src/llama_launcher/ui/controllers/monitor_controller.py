@@ -59,9 +59,8 @@ def _fmt_uptime(started_at: str | None) -> str:
 
 def focused_gpu_ssh(node_name: str, base_dir) -> str:
     """SSH target for the node a monitored instance runs on ('' for local/missing)."""
-    from pathlib import Path
-    node = get_node(Path(base_dir), node_name)
-    return node.ssh_target if node and node.kind == "remote" else ""
+    from llama_launcher.store.nodes import gpu_ssh_target
+    return gpu_ssh_target(base_dir, node_name)
 
 
 def build_monitor_data(target: dict) -> dict | None:

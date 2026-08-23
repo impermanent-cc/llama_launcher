@@ -81,6 +81,40 @@ def available_free_bytes(free_bytes_per_gpu, split_mode: str = "layer",
 
 
 @dataclass
+class FitSummary:
+    est_bytes: int
+    free_bytes: int
+    free_per_gpu: tuple
+    fits: bool
+    margin: int
+
+
+def fit_summary(meta, weights_bytes, *, settings: dict,
+                free_bytes_per_gpu) -> FitSummary | None:
+    """The single estimate-vs-free computation behind every single-node VRAM
+    preflight (the launch-time vram_check dialog and the Configure tab's live
+    fit readout), so they can never disagree. `settings` is a profile settings
+    dict; placement (split-mode/main-gpu) picks the free-VRAM budget the same
+    way llama.cpp will place the model. None when the answer is unknowable --
+    metadata too thin for a KV estimate, or no GPU info -- so callers show
+    nothing rather than wrong numbers.
+    """
+    if meta is None or not meta.n_layers or not meta.n_embd or not free_bytes_per_gpu:
+        return None
+    free = available_free_bytes(free_bytes_per_gpu,
+                                settings.get("split-mode", "layer"),
+                                settings.get("main-gpu", 0))
+    est = estimate_for_model(meta, weights_bytes,
+                             ctx_size=settings.get("ctx-size"),
+                             k_quant=settings.get("cache-type-k", "f16"),
+                             v_quant=settings.get("cache-type-v", "f16"))
+    ok, margin = fits(est, free)
+    return FitSummary(est_bytes=est, free_bytes=free,
+                      free_per_gpu=tuple(int(b) for b in free_bytes_per_gpu),
+                      fits=ok, margin=margin)
+
+
+@dataclass
 class PooledFit:
     fits: bool
     margin: int

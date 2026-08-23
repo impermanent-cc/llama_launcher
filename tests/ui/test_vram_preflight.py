@@ -20,7 +20,7 @@ def test_vram_check_warns_when_over(qtbot, monkeypatch):
         lambda path: GgufMeta(arch="llama", n_layers=80, n_head=64, n_head_kv=8,
                               n_embd=8192, ctx_train=131072, quant="Q8_0"))
     monkeypatch.setattr(mw.model_info, "file_size", lambda path: 20 * 1024**3)
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [_gpu(1024)])  # ~1 GiB free
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(1024)])  # ~1 GiB free
     w = mw.MainWindow(); qtbot.addWidget(w)
     w._configure_panel.load_profile(_profile(131072))
     msg = w._launch.vram_check()
@@ -29,7 +29,7 @@ def test_vram_check_warns_when_over(qtbot, monkeypatch):
 
 def test_vram_check_none_when_unknown(qtbot, monkeypatch):
     monkeypatch.setattr(mw.model_info, "read_gguf_meta", lambda path: None)
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda: [])
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     w = mw.MainWindow(); qtbot.addWidget(w)
     w._configure_panel.load_profile(_profile(4096))
     assert w._launch.vram_check() is None
@@ -45,7 +45,7 @@ def test_vram_check_sums_free_across_two_gpus(qtbot, monkeypatch):
                               n_embd=64, ctx_train=4096, quant="Q8_0"))
     monkeypatch.setattr(mw.model_info, "file_size", lambda path: int(20.0 * gib))
     monkeypatch.setattr(mw.gpu, "query_gpus",
-        lambda: [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
+        lambda ssh_target="": [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
     w = mw.MainWindow(); qtbot.addWidget(w)
     w._configure_panel.load_profile(_profile(4096))               # default split-mode -> summed
     assert w._launch.vram_check() is None                # ~22 GiB free covers ~20 GiB
@@ -61,7 +61,7 @@ def test_vram_check_split_none_uses_single_gpu(qtbot, monkeypatch):
                               n_embd=64, ctx_train=4096, quant="Q8_0"))
     monkeypatch.setattr(mw.model_info, "file_size", lambda path: int(20.0 * gib))
     monkeypatch.setattr(mw.gpu, "query_gpus",
-        lambda: [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
+        lambda ssh_target="": [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
     w = mw.MainWindow(); qtbot.addWidget(w)
     w._configure_panel.load_profile(_profile(4096, **{"split-mode": "none"}))
     msg = w._launch.vram_check()
@@ -78,8 +78,36 @@ def test_vram_check_shows_per_gpu_breakdown(qtbot, monkeypatch):
                               n_embd=8192, ctx_train=131072, quant="Q8_0"))
     monkeypatch.setattr(mw.model_info, "file_size", lambda path: 40 * gib)
     monkeypatch.setattr(mw.gpu, "query_gpus",
-        lambda: [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
+        lambda ssh_target="": [_gpu(int(14.7 * 1024)), _gpu(int(7.3 * 1024), total_mib=12288)])
     w = mw.MainWindow(); qtbot.addWidget(w)
     w._configure_panel.load_profile(_profile(131072))
     msg = w._launch.vram_check()
     assert msg is not None and "across 2 GPUs" in msg and "+" in msg
+
+
+def test_vram_check_uses_profile_nodes_gpus(main_window, monkeypatch):
+    """A profile pinned to a remote node must be judged against THAT node's
+    free VRAM (ssh nvidia-smi), not the local cards."""
+    from llama_launcher.core.nodes import Node
+    from llama_launcher.core.spec import Profile, Mount, Runtime
+    from llama_launcher.store.nodes import add_node
+    add_node(Node(name="box-b", kind="remote", connection="box-b",
+                  ssh_target="me@10.0.0.2"), main_window.base_dir())
+    main_window._configure_panel.reload_nodes()   # combo predates the add
+    monkeypatch.setattr(mw.model_info, "read_gguf_meta",
+        lambda path: GgufMeta(arch="llama", n_layers=80, n_head=64, n_head_kv=8,
+                              n_embd=8192, ctx_train=131072, quant="Q8_0"))
+    monkeypatch.setattr(mw.model_info, "file_size", lambda path: 20 * 1024**3)
+    seen = {}
+    def _query(ssh_target=""):
+        seen["ssh"] = ssh_target
+        return [_gpu(1024)]
+    monkeypatch.setattr(mw.gpu, "query_gpus", _query)
+    p = Profile(name="v", image="img",
+                runtime=Runtime(binary="podman", node="box-b"),
+                mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
+                model="/models/m.gguf",
+                settings={"port": 8080, "ctx-size": 131072})
+    main_window._configure_panel.load_profile(p)
+    assert main_window._launch.vram_check() is not None
+    assert seen["ssh"] == "me@10.0.0.2"

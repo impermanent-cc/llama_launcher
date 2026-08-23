@@ -58,3 +58,9 @@ def add_node(node: Node, base_dir: Path) -> None:
 
 def remove_node(name: str, base_dir: Path) -> None:
     save_nodes([n for n in _remotes(base_dir) if n.name != name], base_dir)
+
+
+def gpu_ssh_target(base_dir: Path, name: str) -> str:
+    """SSH target for GPU/memory probes on node `name` ('' = local/missing)."""
+    node = get_node(Path(base_dir), name or "local")
+    return node.ssh_target if node and node.kind == "remote" else ""
