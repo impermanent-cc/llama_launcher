@@ -7,6 +7,7 @@ from llama_launcher.core.command_builder import build_command
 from llama_launcher.core import vram
 from llama_launcher.core.nodes import connection_for
 from llama_launcher.services import runtime, terminal, registry, model_info, gpu, native, rpc
+from llama_launcher.services import pool_preflight
 from llama_launcher.services import benchmark_store
 from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.services import api_key as api_key_store
@@ -92,6 +93,9 @@ class LaunchController:
         # alive until its queued emit is delivered.
         self._pool_inflight = False
         self._pool_signaller = None
+        # Guards a second Launch click while the pool fit preflight's async
+        # probe is still out (its dialog is modal, but the probe window isn't).
+        self._fit_gate_inflight = False
 
         # The update-check timer. A singleShot fired 3s after construction so
         # the window (image field etc.) is fully built by the time it runs --
@@ -190,7 +194,10 @@ class LaunchController:
                     f"An RPC pool for profile '{p.name}' is already "
                     f"running. Stop it before relaunching.", show_dialog=True)
                 return
-            self._launch_pool(p)
+            if p.model:
+                self._preflight_pool_fit(p)
+            else:
+                self._launch_pool(p)
             return
 
         if p.mode == "router":
@@ -276,6 +283,43 @@ class LaunchController:
         # asynchronously and doesn't exist yet. update_status() starts the
         # follower once it is actually running (podman logs replays from the
         # start, so no early output is missed).
+
+    def _preflight_pool_fit(self, p) -> None:
+        """Pooled VRAM+RAM fit gate before the pool spins up -- the same probe
+        the manual "Check fit" button runs, so a pool predicted not to fit gets
+        an Abort/Ignore dialog instead of a doomed multi-worker launch. The
+        worker probes are ssh round-trips, so they run off the UI thread via
+        the pool seam. Fail-open: a broken probe (unreachable node, no model
+        metadata) must never block a launch the user asked for.
+        """
+        if self._fit_gate_inflight or self._pool_inflight:
+            return
+        estimate_bytes = self.window._configure_panel._model_estimate_bytes(p)
+        base = self.window.base_dir()
+
+        def work():
+            try:
+                donations = pool_preflight.gather_donations(
+                    p, base,
+                    gpus=pool_preflight.default_gpus_reader(base),
+                    ram=pool_preflight.default_ram_reader(base))
+                fit = vram.pooled_fit(estimate_bytes, donations)
+                if fit.fits:
+                    return None
+                return pool_preflight.headline(estimate_bytes, donations)
+            except Exception:            # noqa: BLE001 - fail-open
+                return None
+
+        def done(headline):
+            self._fit_gate_inflight = False
+            if headline and not self._warn_and_confirm("Pool fit", headline):
+                self.window._monitor.update_status()   # restore idle status text
+                return
+            self._launch_pool(p)
+
+        self._fit_gate_inflight = True
+        self.window.status_label.setText("● checking pool fit…")
+        self._run_pool_async(work, done)
 
     def _launch_pool(self, p) -> None:
         """RPC pool launch, off the UI thread. The orchestrator blocks on each
