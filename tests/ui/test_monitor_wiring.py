@@ -577,3 +577,27 @@ def test_compute_monitor_target_carries_prompt_prev(qtbot):
     w._monitor._prompt_prev = (1000, 10.0)
     t = w._monitor._compute_monitor_target(running=True)
     assert t["prompt_prev"] == (1000, 10.0)
+
+
+def test_monitor_target_drops_key_for_non_loopback_local_bind(qtbot):
+    """Defense in depth: a local profile whose bind_host is somehow a non-loopback
+    address must NOT get the api key attached to the poll -- the key only goes to
+    loopback or the profile's registered remote node, never an arbitrary host."""
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    p = Profile(name="Solo", image="img",
+                runtime=Runtime(binary="podman", bind_host="203.0.113.9"),
+                settings={"port": 8080, "api-key": "secret", "metrics": True})
+    w._configure_panel.load_profile(p)
+    target = w._monitor._compute_monitor_target(running=True)
+    assert target["host"] == "203.0.113.9"
+    assert target["key"] is None          # secret NOT sent to an arbitrary host
+
+
+def test_monitor_target_keeps_key_for_loopback(qtbot):
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    p = Profile(name="Solo", image="img",
+                runtime=Runtime(binary="podman", bind_host="127.0.0.1"),
+                settings={"port": 8080, "api-key": "secret", "metrics": True})
+    w._configure_panel.load_profile(p)
+    target = w._monitor._compute_monitor_target(running=True)
+    assert target["key"] == "secret"

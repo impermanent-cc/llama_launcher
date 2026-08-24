@@ -93,6 +93,23 @@ def launch(command_argv: list[str], template: str | None = None,
                 "'terminal' command in the launcher config, or use 'Run detached' "
                 "(or a native profile) -- neither needs a terminal.")
         template, shell_hold = detected
+    else:
+        # A custom template comes from config.json, which may be shared/untrusted.
+        # Screen it so it can't silently run an arbitrary program: it must be a
+        # real terminal command -- reference the launch command via {cmd}/{bashcmd}
+        # (without a placeholder it would run its OWN argv and drop the launch,
+        # the shape an injection takes) and name an installed program as argv[0].
+        toks = shlex.split(template)
+        if not toks or ("{cmd}" not in toks and "{bashcmd}" not in toks):
+            raise NoTerminalError(
+                "The configured 'terminal' template must include a {cmd} or "
+                "{bashcmd} placeholder for the launch command. Fix the 'terminal' "
+                "value in the launcher config, or remove it to auto-detect.")
+        if which(toks[0]) is None:
+            raise NoTerminalError(
+                f"The configured 'terminal' program {toks[0]!r} is not installed "
+                f"(not on PATH). Fix the 'terminal' value in the launcher config, "
+                f"or remove it to auto-detect.")
     argv = build_terminal_argv(command_argv, template, shell_hold)
     try:
         subprocess.Popen(argv, start_new_session=True)

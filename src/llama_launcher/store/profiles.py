@@ -17,8 +17,16 @@ def profile_to_dict(p: Profile) -> dict:
     return asdict(p)
 
 
+# The container runtime is used as argv[0] of every launch; a loaded profile
+# must not be able to name an arbitrary executable there. The GUI combo already
+# constrains it, but the headless/loaded-JSON path did not.
+_ALLOWED_BINARIES = ("podman", "docker")
+
+
 def profile_from_dict(d: dict) -> Profile:
     rt = dict(d.get("runtime", {}))
+    if rt.get("binary") not in _ALLOWED_BINARIES:
+        rt["binary"] = "podman"
     rt["rpc_workers"] = [RpcWorker(**w) for w in rt.get("rpc_workers", [])]
     return Profile(
         name=d["name"],

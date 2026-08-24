@@ -12,6 +12,101 @@ from collections.abc import Callable
 from .spec import Profile, RpcWorker, slugify
 
 
+# Container-runtime flags in `extra_run_args` that escalate a launch to host
+# access -- a shared profile.json must not carry these silently. Any of these as
+# an exact token or `flag=...` form is flagged; volume/device get extra checks
+# below. (The launcher's OWN CDI device form `nvidia.com/gpu=all` is allowed.)
+_ESCALATING_RUN_FLAGS = frozenset({
+    "--privileged", "--entrypoint", "--security-opt", "--cap-add",
+    "--pid", "--ipc", "--userns", "--uts", "--cgroupns",
+    "-v", "--volume", "--mount", "--device", "--device-cgroup-rule",
+    "--group-add",
+})
+# Host paths whose mount into a container is a host-filesystem escape.
+_SENSITIVE_HOST_PREFIXES = ("/", "/etc", "/root", "/home", "/var", "/usr",
+                            "/boot", "/sys", "/proc", "/dev", "/bin", "/sbin",
+                            "/lib", "/run")
+
+
+def _split_flag(tok: str) -> tuple[str, str | None]:
+    """('--foo=bar') -> ('--foo', 'bar'); ('--foo') -> ('--foo', None)."""
+    if tok.startswith("-") and "=" in tok:
+        k, v = tok.split("=", 1)
+        return k, v
+    return tok, None
+
+
+def _iter_flag_values(tokens: list[str]):
+    """Yield (flag, value) for each token, pairing a bare flag with the next
+    non-flag token as its value (podman's `--flag value` form)."""
+    i = 0
+    while i < len(tokens):
+        flag, val = _split_flag(tokens[i])
+        if val is None and i + 1 < len(tokens) and not tokens[i + 1].startswith("-"):
+            val = tokens[i + 1]
+            i += 1
+        yield flag, val
+        i += 1
+
+
+def _is_sensitive_mount(flag: str, value: str | None) -> bool:
+    if value is None or flag not in ("-v", "--volume", "--mount"):
+        return False
+    if flag == "--mount":                      # --mount type=bind,source=/,...
+        src = ""
+        for part in value.split(","):
+            if part.startswith(("source=", "src=")):
+                src = part.split("=", 1)[1]
+        host = src
+    else:                                       # -v host:container[:opts]
+        host = value.split(":", 1)[0]
+    host = host.rstrip("/") or "/"
+    return host in _SENSITIVE_HOST_PREFIXES
+
+
+def dangerous_run_args(extra_run_args: str) -> list[str]:
+    """Escalating container-runtime tokens in `extra_run_args` (host-access
+    flags, sensitive-path volumes, raw --device). Empty when the string is
+    benign. Used by validate() to refuse a shared profile that would break out
+    of the container on one Launch click."""
+    if not extra_run_args or not extra_run_args.strip():
+        return []
+    try:
+        tokens = shlex.split(extra_run_args)
+    except ValueError:
+        return [extra_run_args]                # unparseable -> treat as suspect
+    bad: list[str] = []
+    for flag, val in _iter_flag_values(tokens):
+        if flag == "--device" and val and val.startswith("nvidia.com/gpu"):
+            continue                            # the launcher's own CDI form
+        if flag in ("-v", "--volume", "--mount"):
+            if _is_sensitive_mount(flag, val):
+                bad.append(f"{flag} {val}" if val else flag)
+            continue
+        if flag in _ESCALATING_RUN_FLAGS:
+            bad.append(f"{flag}={val}" if val else flag)
+    return bad
+
+
+def run_args_expose(extra_run_args: str) -> bool:
+    """True if `extra_run_args` defeats the bind_host publish restriction --
+    host networking (`--network host`) or an extra publish rule (`-p`/`--publish`)
+    -- so the exposure/api-key check must treat the profile as network-reachable
+    regardless of bind_host."""
+    if not extra_run_args or not extra_run_args.strip():
+        return False
+    try:
+        tokens = shlex.split(extra_run_args)
+    except ValueError:
+        return True
+    for flag, val in _iter_flag_values(tokens):
+        if flag in ("--network", "--net") and (val or "").lower() == "host":
+            return True
+        if flag in ("-p", "--publish"):
+            return True
+    return False
+
+
 def _mount_opts(mount) -> str:
     parts = []
     if mount.mode:

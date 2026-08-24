@@ -1,9 +1,38 @@
+import ipaddress
+import re
 from dataclasses import dataclass
 
-from .command_builder import raw_arg_warnings
+from .command_builder import raw_arg_warnings, dangerous_run_args, run_args_expose
 from .router_preset import convert_raw_args
 from .spec import Profile, member_model_id
 from .settings_catalog import CATALOG
+
+# A model id becomes an INI section header ([id]) in a router preset and is sent
+# by harnesses in the request "model" field, so keep it to a safe charset -- a
+# newline would inject arbitrary preset keys into other sections.
+_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
+
+# Host mount sources that expose the host filesystem (a shared profile could
+# otherwise silently mount them). "" stands for "/", handled by the caller.
+_SENSITIVE_MOUNT_SOURCES = frozenset({
+    "/etc", "/root", "/home", "/var", "/usr", "/boot", "/sys", "/proc",
+    "/dev", "/bin", "/sbin", "/lib", "/run",
+})
+
+
+def _bind_host_is_addressish(bind_host: str) -> bool:
+    """True if bind_host is an IP literal, a bind wildcard, or an accepted
+    loopback NAME. A free-text hostname is refused: bind_host doubles as the
+    Monitor's dial target, so a hostname there would send the server's bearer
+    token to an arbitrary host."""
+    if bind_host in LOOPBACK_HOSTS or bind_host in ("0.0.0.0", "::", "[::]"):
+        return True
+    host = bind_host[1:-1] if bind_host.startswith("[") and bind_host.endswith("]") else bind_host
+    try:
+        ipaddress.ip_address(host)
+        return True
+    except ValueError:
+        return False
 
 # Ports Odysseus scans when discovering local model servers
 # (src/model_discovery.py). A router outside these ranges is reachable but will
@@ -89,6 +118,13 @@ def validate(profile: Profile, running_ports: tuple = (),
             if bool(m.host) != bool(m.container):
                 issues.append(Issue("error",
                                     "Mount row is incomplete (host and container both required)."))
+            host = (m.host or "").rstrip("/")
+            if m.host and (host == "" or host in _SENSITIVE_MOUNT_SOURCES):
+                issues.append(Issue(
+                    "warning",
+                    f"Mount source {m.host!r} is a sensitive host path; the container "
+                    f"gets {'write ' if m.mode == 'rw' else ''}access to it. Mount only "
+                    f"the model directory you need."))
 
         if profile.image and not image_present:
             issues.append(Issue(
@@ -96,13 +132,39 @@ def validate(profile: Profile, running_ports: tuple = (),
                 f"Image {profile.image!r} is not present on the selected node; "
                 f"pull it (or build/copy it there) before launching."))
 
+    # Untrusted-profile screening: extra_run_args is spliced verbatim into the
+    # `podman run` argv, so a shared profile.json could otherwise break out of
+    # the container (host mounts, --privileged, --entrypoint) on one Launch.
+    if not is_native:
+        bad = dangerous_run_args(profile.runtime.extra_run_args)
+        if bad:
+            issues.append(Issue(
+                "error",
+                "Extra podman/docker run args request host-level access "
+                f"({', '.join(bad)}); refusing to launch. Remove them if you did "
+                f"not intend to grant the container access to the host."))
+
+    # bind_host is free text on a loaded profile; it must be an address, not a
+    # hostname (which the Monitor would then dial WITH the api key attached).
+    if not _bind_host_is_addressish(profile.runtime.bind_host):
+        issues.append(Issue(
+            "error",
+            f"Bind host {profile.runtime.bind_host!r} is not an IP address or a "
+            f"recognized loopback name; set an address (127.0.0.1 or 0.0.0.0)."))
+
     # Exposure applies to BOTH modes: Runtime.bind_host drives the publish
     # address for every launch, so a single-model server bound past loopback
     # with no key is just as open as a router would be. In server mode the key
     # is the catalog setting; in router mode it comes from the key file.
-    if profile.runtime.bind_host not in LOOPBACK_HOSTS:
+    # extra_run_args (--network host / extra -p) can defeat the bind restriction,
+    # so treat the profile as exposed then too.
+    exposed = (profile.runtime.bind_host not in LOOPBACK_HOSTS
+               or (not is_native and run_args_expose(profile.runtime.extra_run_args)))
+    if exposed:
+        # Match the renderer's blank-drop: a whitespace-only key is dropped from
+        # argv, so it is NOT real authentication (the "blank key" exposure hole).
         has_key = api_key_present if profile.mode == "router" \
-            else bool(profile.settings.get("api-key"))
+            else bool(str(profile.settings.get("api-key", "")).strip())
         if not has_key:
             issues.append(Issue(
                 "error",
@@ -240,6 +302,12 @@ def _validate_router(profile: Profile, members: tuple,
     seen_ids: dict = {}
     for member, member_profile in members:
         model_id = member_model_id(member)
+        if not _MODEL_ID_RE.match(model_id):
+            issues.append(Issue(
+                "error",
+                f"Member '{member_profile.name}' has an invalid model id "
+                f"{model_id!r}: use only letters, digits, and . _ : / - (it becomes "
+                f"a preset section header and a routing key)."))
         if model_id in seen_ids:
             issues.append(Issue(
                 "error",

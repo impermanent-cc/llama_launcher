@@ -2,7 +2,9 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from llama_launcher.core.nodes import Node, LOCAL_NODE
+from llama_launcher.core.nodes import Node, LOCAL_NODE, valid_ssh_target
+
+_ALLOWED_BINARIES = ("podman", "docker")
 
 
 def _nodes_file(base_dir: Path) -> Path:
@@ -23,11 +25,21 @@ def _remotes(base_dir: Path) -> list[Node]:
     for d in data:
         if not isinstance(d, dict) or not d.get("name"):
             continue
+        # A loaded nodes.json is untrusted config: an ssh_target that isn't a
+        # safe destination (e.g. `-oProxyCommand=...`) would be smuggled to ssh
+        # as an option, and binary is used as argv[0]. Drop bad ssh rows, clamp
+        # the binary.
+        ssh = d.get("ssh_target", "")
+        if not valid_ssh_target(ssh):
+            continue
+        binary = d.get("binary", "podman")
+        if binary not in _ALLOWED_BINARIES:
+            binary = "podman"
         out.append(Node(
             name=d["name"], kind="remote",
             connection=d.get("connection", d["name"]),
-            ssh_target=d.get("ssh_target", ""),
-            binary=d.get("binary", "podman"),
+            ssh_target=ssh,
+            binary=binary,
             enabled=bool(d.get("enabled", True)),
         ))
     return out

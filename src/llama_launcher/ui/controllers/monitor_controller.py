@@ -847,6 +847,16 @@ class MonitorController:
             # resolves that to 127.0.0.1, which would poll the LOCAL host's
             # loopback instead of the node the server actually runs on.
             host = host_of(node)
+        # Never send the api key to an arbitrary host: the bearer token goes only
+        # to loopback or the profile's registered remote node. A profile whose
+        # bind_host is some other address (validation blocks saving one, but a
+        # loaded-not-launched profile is still polled) gets an unauthenticated
+        # poll rather than leaking the secret.
+        allowed_key_host = (host in ("127.0.0.1", "localhost", "::1", "[::1]")
+                            or (node is not None and node.kind == "remote"
+                                and host == host_of(node)))
+        if not allowed_key_host:
+            key = None
         return {
             "running": True,
             "port": p.settings.get("port", 8080),
