@@ -396,3 +396,9 @@ the GPU-probing code lives in `src/llama_launcher/services/gpu.py`.
 MIT. See [LICENSE](LICENSE). Depends on [PySide6](https://doc.qt.io/qtforpython/) (LGPL-3.0),
 installed separately via pip and subject to its own terms, including your right to modify or
 replace it.
+
+## AI assistance
+
+Llama Launcher is developed with AI assistance (Anthropic Claude, via Claude Code)
+under the project owner's direction, and every change is human-reviewed before
+release. See [AI-ASSISTANCE.md](AI-ASSISTANCE.md) for the full disclosure.
