@@ -182,3 +182,21 @@ def test_save_profile_writes_owner_only_permissions(tmp_path):
     path = save_profile(p, tmp_path)
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
     assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700
+
+
+# -- corruption resilience: one bad file must not brick the GUI ---------------
+
+def test_list_profiles_skips_corrupt_file(tmp_path):
+    from llama_launcher.store.profiles import save_profile, list_profiles
+    from llama_launcher.core.spec import Profile
+    save_profile(Profile(name="good"), tmp_path)
+    (tmp_path / "profiles" / "broken.json").write_text("{ this is not json")
+    names = [p.name for p in list_profiles(tmp_path)]
+    assert "good" in names               # the good one still loads
+    assert len(names) == 1               # the broken one is skipped, not fatal
+
+
+def test_load_config_returns_empty_on_corrupt_file(tmp_path):
+    from llama_launcher.store.profiles import load_config
+    (tmp_path / "config.json").write_text("{ broken")
+    assert load_config(tmp_path) == {}

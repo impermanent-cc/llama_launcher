@@ -2,7 +2,15 @@
 import re
 from dataclasses import dataclass
 
-_SSH_TARGET_RE = re.compile(r"^(?:[A-Za-z0-9._-]+@)?[A-Za-z0-9._-]+(?::[0-9]+)?$")
+# host is a name/IPv4 charset OR a bracketed IPv6 literal ([2001:db8::1]).
+_SSH_TARGET_RE = re.compile(
+    r"^(?:[A-Za-z0-9._-]+@)?(?:[A-Za-z0-9._-]+|\[[0-9A-Fa-f:]+\])(?::[0-9]+)?$")
+
+# Options every launcher ssh probe passes so a first contact can't hang the UI
+# on an interactive prompt: fail instead of prompting (BatchMode), bound the
+# connect, and trust-on-first-use a new host key rather than blocking on it.
+SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
+            "-o", "StrictHostKeyChecking=accept-new"]
 
 
 @dataclass(frozen=True)

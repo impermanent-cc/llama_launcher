@@ -211,3 +211,16 @@ def test_prompt_progress_none_when_nothing_processing():
     assert met.prompt_progress([{"is_processing": False,
                                  "n_prompt_tokens_processed": 50}]) is None
     assert met.prompt_progress([{"is_processing": True}]) is None
+
+
+def test_fetch_metrics_brackets_ipv6_host(monkeypatch):
+    seen = {}
+    class R:
+        status_code = 200
+        text = ""
+    def _get(url, **kw):
+        seen["url"] = url
+        return R()
+    monkeypatch.setattr(met.requests, "get", _get)
+    met.fetch_metrics_text(8080, host="::1")
+    assert seen["url"] == "http://[::1]:8080/metrics"

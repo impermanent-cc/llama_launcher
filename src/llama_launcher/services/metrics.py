@@ -21,11 +21,20 @@ def _headers(api_key: str | None) -> dict | None:
     return {"Authorization": f"Bearer {api_key}"} if api_key else None
 
 
+def url_host(host: str) -> str:
+    """Bracket a bare IPv6 literal for use in a URL authority. `::1` -> `[::1]`;
+    an already-bracketed host or a name/IPv4 is returned unchanged. Without this,
+    an IPv6 bind_host (an address the app itself accepts) makes a malformed URL."""
+    if host and ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
+
+
 def fetch_metrics_text(port, timeout: float = 1.0, model: str | None = None,
                        api_key: str | None = None, host: str = "127.0.0.1") -> str:
     """Raw /metrics body (needed for label-aware parsing), '' on any failure."""
     try:
-        r = requests.get(f"http://{host}:{port}/metrics", timeout=timeout,
+        r = requests.get(f"http://{url_host(host)}:{port}/metrics", timeout=timeout,
                          params=_scope(model), headers=_headers(api_key))
         if r.status_code != 200:
             return ""
@@ -43,7 +52,7 @@ def fetch_metrics(port, timeout: float = 1.0, model: str | None = None,
 def fetch_slots(port, timeout: float = 1.0, model: str | None = None,
                 api_key: str | None = None, host: str = "127.0.0.1") -> list:
     try:
-        r = requests.get(f"http://{host}:{port}/slots", timeout=timeout,
+        r = requests.get(f"http://{url_host(host)}:{port}/slots", timeout=timeout,
                          params=_scope(model), headers=_headers(api_key))
         if r.status_code != 200:
             return []
@@ -61,7 +70,7 @@ def fetch_props(port, timeout: float = 1.0, api_key: str | None = None,
     idle timer; the key is passed for symmetry and does no harm.
     """
     try:
-        r = requests.get(f"http://{host}:{port}/props", timeout=timeout,
+        r = requests.get(f"http://{url_host(host)}:{port}/props", timeout=timeout,
                          headers=_headers(api_key))
         if r.status_code != 200:
             return None

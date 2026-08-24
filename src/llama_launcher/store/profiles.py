@@ -74,7 +74,15 @@ def load_profile(path: Path) -> Profile:
 
 def list_profiles(base_dir: Path) -> list[Profile]:
     d = _profiles_dir(base_dir)
-    return [load_profile(p) for p in sorted(d.glob("*.json"))]
+    out: list[Profile] = []
+    for p in sorted(d.glob("*.json")):
+        # One truncated/corrupt profile (a killed write, a full disk, a bad hand
+        # edit) must not brick the whole GUI at startup -- skip it, keep the rest.
+        try:
+            out.append(load_profile(p))
+        except (OSError, ValueError, TypeError, KeyError):
+            continue
+    return out
 
 
 def resolve_member_pairs(members, base_dir):
@@ -102,7 +110,11 @@ def load_config(base_dir: Path) -> dict:
     path = _config_path(base_dir)
     if not path.exists():
         return {}
-    return json.loads(path.read_text())
+    try:
+        data = json.loads(path.read_text())
+    except (OSError, ValueError):
+        return {}                       # a corrupt config must not crash startup
+    return data if isinstance(data, dict) else {}
 
 
 def save_config(cfg: dict, base_dir: Path) -> None:

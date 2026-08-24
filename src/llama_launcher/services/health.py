@@ -1,5 +1,7 @@
 import requests
 
+from llama_launcher.services.metrics import url_host
+
 
 def derive_status(container_state: str, health: str) -> str:
     """Map a container state + /health probe result to a display status.
@@ -26,7 +28,7 @@ def probe_health(port: int, timeout: float = 1.0, host: str = "127.0.0.1") -> st
     (other status, connection refused/timeout) is "down".
     """
     try:
-        r = requests.get(f"http://{host}:{port}/health", timeout=timeout)
+        r = requests.get(f"http://{url_host(host)}:{port}/health", timeout=timeout)
     except requests.RequestException:
         return "down"
     if r.status_code == 200:

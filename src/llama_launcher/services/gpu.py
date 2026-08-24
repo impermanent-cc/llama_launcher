@@ -2,7 +2,7 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
-from llama_launcher.core.nodes import valid_ssh_target
+from llama_launcher.core.nodes import valid_ssh_target, SSH_OPTS
 
 _QUERY = ("memory.used,memory.total,memory.free,utilization.gpu,"
           "temperature.gpu,power.draw,power.limit,name")
@@ -59,7 +59,7 @@ def nvidia_smi_argv(ssh_target: str = "") -> list[str]:
         return cmd
     if not valid_ssh_target(ssh_target):
         raise ValueError(f"unsafe ssh target: {ssh_target!r}")
-    return ["ssh", ssh_target, *cmd]
+    return ["ssh", *SSH_OPTS, ssh_target, *cmd]
 
 
 def query_gpus(ssh_target: str = "") -> list[GpuStat]:
