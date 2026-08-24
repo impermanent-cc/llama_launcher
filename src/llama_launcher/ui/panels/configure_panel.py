@@ -505,6 +505,10 @@ class ConfigurePanel(QWidget):
             "(llama-<name>), so pick something filesystem-friendly.")
         self.name_edit.textChanged.connect(self.refresh_preview)
         self.profile_combo = NoWheelComboBox()
+        # Shown when nothing is selected (index -1) so a freshly started window
+        # doesn't imply the first saved profile is loaded when the form actually
+        # still holds the blank default.
+        self.profile_combo.setPlaceholderText("Choose a profile...")
         self.save_btn = QPushButton("Save")
         self.save_as_btn = QPushButton("Save As")
         self.delete_btn = QPushButton("Delete")

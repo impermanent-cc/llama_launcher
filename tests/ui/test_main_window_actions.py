@@ -35,6 +35,27 @@ def test_save_and_reload_profile(qtbot, tmp_path, monkeypatch):
     assert "Act" in names
 
 
+def test_startup_does_not_show_first_profile_as_loaded(qtbot, tmp_path, monkeypatch):
+    """At startup the dropdown must not display a saved profile as if loaded:
+    addItems auto-selects index 0 without running load_profile, so the form
+    holds blank defaults while the combo showed a real profile name. The combo
+    starts unselected (a 'choose a profile' placeholder) until the user picks."""
+    monkeypatch.setattr(mw, "base_dir", lambda: tmp_path)
+    seed = mw.MainWindow()
+    qtbot.addWidget(seed)
+    seed._configure_panel.load_profile(_profile())         # name="Act"
+    seed.save_current_profile()
+
+    w = mw.MainWindow()                                    # fresh startup
+    qtbot.addWidget(w)
+    combo = w._configure_panel.profile_combo
+    assert combo.count() >= 1                              # the saved profile IS listed
+    assert combo.currentIndex() == -1                      # ...but nothing is selected
+    assert combo.placeholderText()                         # a hint is shown instead
+    # the form is still the blank default, matching the un-selected combo
+    assert w._configure_panel._profile.name == "New Profile"
+
+
 def test_name_field_is_saved(qtbot, tmp_path, monkeypatch):
     """A name typed into the Name field is the name the profile saves under."""
     monkeypatch.setattr(mw, "base_dir", lambda: tmp_path)

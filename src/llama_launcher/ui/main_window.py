@@ -296,6 +296,11 @@ class MainWindow(QMainWindow):
         self._configure_panel.profile_combo.clear()
         self._profiles = {p.name: p for p in list_profiles(base_dir())}
         self._configure_panel.profile_combo.addItems(list(self._profiles.keys()))
+        # addItems auto-selects index 0, but selecting a profile in the dropdown
+        # must not imply it is loaded into the form -- load_profile only runs on
+        # an explicit pick (activated) or an explicit setCurrentText after a
+        # save. Start unselected so the combo matches the un-loaded form.
+        self._configure_panel.profile_combo.setCurrentIndex(-1)
 
     def _on_pick_profile(self, _index):
         self._monitor._stop_log_follower()
