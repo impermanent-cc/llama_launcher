@@ -18,10 +18,10 @@ def test_app_icon_is_non_null(qtbot):
     ic = app_icon()
     assert not ic.isNull()
     # SVG icons are scalable (availableSizes() is empty), so prove it actually
-    # renders by asking for a concrete pixmap — null/empty would mean the qsvg
+    # renders by asking for a concrete pixmap; null/empty would mean the qsvg
     # engine failed and the window would still show the default icon.
     pm = ic.pixmap(64, 64)
-    assert not pm.isNull(), "icon produced a null 64px pixmap — SVG failed to render"
+    assert not pm.isNull(), "icon produced a null 64px pixmap; SVG failed to render"
     assert pm.width() > 0 and pm.height() > 0
 
 

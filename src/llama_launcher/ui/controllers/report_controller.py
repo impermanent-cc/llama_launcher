@@ -113,7 +113,7 @@ class ReportController:
         from llama_launcher.services.metrics import kv_ratio
         port = p.settings.get("port", 8080)
         if not p.settings.get("metrics"):
-            return ("(--metrics not enabled in this profile — turn it on and relaunch "
+            return ("(--metrics not enabled in this profile; turn it on and relaunch "
                     "to capture tok/s and KV-cache usage here)")
         # Mirror collect_monitor_data's host/key/scope derivation: /metrics needs
         # the API key, and on a router it is per-model (?model=id) reached via the
@@ -130,7 +130,7 @@ class ReportController:
         if not m and not slots:
             scope = " (no model currently loaded on the router)" if (
                 p.mode == "router" and model_scope is None) else ""
-            return (f"(no metrics returned from http://{host}:{port}/metrics{scope} — "
+            return (f"(no metrics returned from http://{host}:{port}/metrics{scope}; "
                     "generate the report while the server is running with --metrics)")
         lines = []
         gen = m.get("llamacpp:predicted_tokens_seconds")

@@ -21,7 +21,7 @@ def _write_moe_mtp_gguf(path):
 
 
 def _write_plain_gguf(path, arch="llama"):
-    """A GGUF with no in-file MTP head (has_mtp_infile stays False) — used to
+    """A GGUF with no in-file MTP head (has_mtp_infile stays False), used to
     isolate the mtp_sibling suggestion branch from the in-file one."""
     def kv_str(k, v):
         kb, vb = k.encode(), v.encode()

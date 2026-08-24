@@ -29,7 +29,7 @@ def _progress(status: dict) -> float | None:
     if isinstance(value, (int, float)):
         return float(value)
 
-    # Download progress: {url: {"done": N, "total": M}, ...} — possibly parallel.
+    # Download progress: {url: {"done": N, "total": M}, ...}; possibly parallel.
     done = total = 0
     for entry in raw.values():
         if isinstance(entry, dict):

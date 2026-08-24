@@ -31,6 +31,6 @@ def test_nvidia_smi_argv_rejects_leading_dash():
 
 
 def test_query_gpus_returns_empty_for_unsafe_target():
-    # query_gpus must NOT crash — it catches ValueError and returns []
+    # query_gpus must NOT crash; it catches ValueError and returns []
     result = gpu.query_gpus("-oProxyCommand=x")
     assert result == []

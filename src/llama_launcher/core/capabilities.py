@@ -153,14 +153,14 @@ _MTP_KEYS = ("spec-type", "spec-draft-n-max", "spec-draft-ngl",
 def _reason_for(key: str, tier: "Tier", caps) -> str:
     if tier == Tier.NA:
         if key in _MOE_KEYS:
-            return "Not applicable — not a MoE model."
+            return "Not applicable: not a MoE model."
         if key in _MTP_KEYS:
-            return "Not applicable — model has no MTP/draft head."
+            return "Not applicable: model has no MTP/draft head."
         return "Not applicable to this model."
     if key in _MOE_KEYS:
-        return "MoE model — offload experts to CPU to fit VRAM."
+        return "MoE model: offload experts to CPU to fit VRAM."
     if key in _MTP_KEYS:
-        return "Model ships an MTP/draft head — enable speculative decoding."
+        return "Model ships an MTP/draft head: enable speculative decoding."
     if tier == Tier.RECOMMENDED:
         return "Recommended for this model."
     return "Worth tuning for this model."
@@ -174,17 +174,17 @@ def describe_relevance(caps: ModelCaps) -> dict:
 def _sug_mtp(caps, settings, mmproj_set, draft_set):
     out = []
     if caps.has_mtp_infile and settings.get("spec-type") != "draft-mtp":
-        out.append(Suggestion("MTP head bundled — set spec-type = draft-mtp",
+        out.append(Suggestion("MTP head bundled: set spec-type = draft-mtp",
                               {"spec-type": "draft-mtp"}, {}))
     if caps.mtp_sibling and not draft_set:
-        out.append(Suggestion(f"MTP head file {caps.mtp_sibling} found — load as draft + set draft-mtp",
+        out.append(Suggestion(f"MTP head file {caps.mtp_sibling} found: load as draft + set draft-mtp",
                               {"spec-type": "draft-mtp"}, {"draft_model": caps.mtp_sibling}))
     return out
 
 
 def _sug_vision(caps, settings, mmproj_set, draft_set):
     if caps.mmproj_sibling and not mmproj_set:
-        return [Suggestion(f"Vision projector {caps.mmproj_sibling} found — set mmproj",
+        return [Suggestion(f"Vision projector {caps.mmproj_sibling} found: set mmproj",
                           {}, {"mmproj": caps.mmproj_sibling})]
     return []
 
@@ -192,7 +192,7 @@ def _sug_vision(caps, settings, mmproj_set, draft_set):
 def _sug_ctx(caps, settings, mmproj_set, draft_set):
     ctx = settings.get("ctx-size") or 0
     if caps.ctx_train and ctx > caps.ctx_train:
-        return [Suggestion(f"ctx-size exceeds trained max {caps.ctx_train} — cap it",
+        return [Suggestion(f"ctx-size exceeds trained max {caps.ctx_train}: cap it",
                           {"ctx-size": caps.ctx_train}, {})]
     return []
 

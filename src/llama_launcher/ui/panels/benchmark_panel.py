@@ -16,9 +16,9 @@ _BENCH_TABLE_HEADERS = ["size", "prompt_n", "pp t/s", "gen t/s", "total s"]
 _BENCH_HEADER_TIPS = {
     "size": "Target prompt length in tokens (a filler prompt is padded to this).",
     "prompt_n": "Actual number of prompt tokens sent to the server for this row.",
-    "pp t/s": "Prefill (prompt-processing) throughput — tokens/sec the model "
+    "pp t/s": "Prefill (prompt-processing) throughput: tokens/sec the model "
               "ingests the prompt.",
-    "gen t/s": "Generation throughput — tokens/sec the model produces in the reply.",
+    "gen t/s": "Generation throughput: tokens/sec the model produces in the reply.",
     "total s": "Total wall-clock seconds for this prompt size (prefill + generation).",
 }
 

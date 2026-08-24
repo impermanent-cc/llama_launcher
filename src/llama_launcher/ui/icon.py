@@ -1,7 +1,7 @@
 """Application icon resolution.
 
 The window/taskbar/tray icon is the app's own SVG (``assets/llama-launcher.svg``).
-The app must call ``setWindowIcon(app_icon())`` explicitly — registering the
+The app must call ``setWindowIcon(app_icon())`` explicitly; registering the
 ``.desktop`` entry only fixes the launcher-menu icon, not the running window's
 icon, so without this the window falls back to the desktop's default icon.
 """
@@ -35,7 +35,7 @@ def app_icon() -> QIcon:
 
     Prefers the bundled SVG file; falls back to the installed theme icon (set
     up by install-desktop.sh) when the repo asset can't be found, e.g. a
-    non-editable install. May be null if neither is available — callers that
+    non-editable install. May be null if neither is available; callers that
     need a guaranteed-visible icon should provide their own fallback.
     """
     path = _find_repo_icon()

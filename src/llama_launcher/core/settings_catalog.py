@@ -27,7 +27,7 @@ KV_CACHE_TYPES = ("f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0"
 
 # ik_llama.cpp-only KV-cache quant types layered onto -ctk/-ctv when the engine is
 # ik. Source-verified (common/common.cpp): only q6_0 and q8_KV are added beyond
-# mainline in the default build. NOTE the capital "KV" in q8_KV — ik's parser is
+# mainline in the default build. NOTE the capital "KV" in q8_KV; ik's parser is
 # case-sensitive. The wider ik iq-quants need GGML_IQK_FA_ALL_QUANTS=ON images.
 IK_EXTRA_KV_CACHE_TYPES = ("q6_0", "q8_KV")
 

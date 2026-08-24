@@ -4,7 +4,7 @@ Two rules that are not optional:
 
 1. Every GET carries `autoload=false`. Router GET endpoints load the model by
    default when `?model=` names an unloaded one, so a naive poll would load a
-   model merely by observing it — the opposite of what an idle host is for.
+   model merely by observing it, the opposite of what an idle host is for.
 2. /v1/models and /models are public even with --api-key set; everything else
    needs the key. See tools/server/server-http.cpp.
 """

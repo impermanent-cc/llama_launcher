@@ -51,7 +51,7 @@ _LOOPBACK_HOSTS = LOOPBACK_HOSTS   # retained: referenced by the router rules be
 def dial_host(bind_host: str) -> str:
     """The address to CONNECT to for a server published on `bind_host`.
 
-    0.0.0.0 (and ::) are bind wildcards, not destinations — dialing them is a
+    0.0.0.0 (and ::) are bind wildcards, not destinations; dialing them is a
     bug, so they map to loopback.
     """
     return "127.0.0.1" if bind_host in ("0.0.0.0", "::", "[::]", "") else bind_host
@@ -204,7 +204,7 @@ def validate(profile: Profile, running_ports: tuple = (),
 
     # MTP speculative decoding (--spec-type draft-mtp) has two known limitations
     # in llama.cpp: it ignores the multimodal projector and only supports a
-    # single slot. Warn (don't block) — these run but silently lose the feature.
+    # single slot. Warn (don't block); these run but silently lose the feature.
     if profile.settings.get("spec-type") == "draft-mtp":
         if profile.mmproj:
             issues.append(Issue("warning",

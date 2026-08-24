@@ -7,9 +7,9 @@ def test_dot_states(qtbot):
     qtbot.addWidget(d); d.show()
     d.set_state("none")
     assert not d.isVisible() or d.text() == ""
-    d.set_state("suggested", "MoE model — offload experts to CPU")
+    d.set_state("suggested", "MoE model: offload experts to CPU")
     assert d.isVisible() and d.text() == "●"
-    assert d.toolTip() == "MoE model — offload experts to CPU"
+    assert d.toolTip() == "MoE model: offload experts to CPU"
     d.set_state("muted", "Not a MoE model")
     assert d.text() == "○"
 

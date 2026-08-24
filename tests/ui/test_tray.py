@@ -5,7 +5,7 @@ import llama_launcher.ui.main_window as mw
 
 @pytest.fixture(autouse=True)
 def _tray_available(monkeypatch):
-    # Default: a tray IS available — to prove that tray availability ALONE does
+    # Default: a tray IS available, to prove that tray availability ALONE does
     # not enable minimize-to-tray (the user must also opt in via config).
     monkeypatch.setattr(
         "PySide6.QtWidgets.QSystemTrayIcon.isSystemTrayAvailable",

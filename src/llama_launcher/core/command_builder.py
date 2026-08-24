@@ -535,6 +535,6 @@ def build_worker_command(profile, worker, index, connection="", wport=None):
     # NB: current `ggml-rpc-server` has no per-worker memory-budget flag (its
     # only options are -t/-d/-H/-p/-c; verified live 2026-08-20). `worker.mem_mb`
     # is therefore a preflight-only pledge (feeds pooled_fit + the overcommit
-    # warning) and is deliberately NOT passed to the worker — an unknown arg
+    # warning) and is deliberately NOT passed to the worker; an unknown arg
     # makes ggml-rpc-server exit with "unknown argument".
     return argv

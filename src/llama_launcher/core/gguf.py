@@ -33,7 +33,7 @@ def _num(v):
 
     Some per-layer fields (notably attention.head_count[_kv]) are stored as a
     one-entry-per-block array when a model's layers differ; GgufMeta is scalar
-    (int | None), so collapse arrays to their max — a conservative scalar for
+    (int | None), so collapse arrays to their max, a conservative scalar for
     the VRAM estimate, and exact when every layer is equal. Pass scalars and
     None through unchanged; an empty/non-numeric array yields None.
     """

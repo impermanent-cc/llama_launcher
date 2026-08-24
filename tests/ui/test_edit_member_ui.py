@@ -80,7 +80,7 @@ def test_members_guidance_label_present(win):
 def test_double_click_editable_cell_does_not_swap_form(win):
     _saved_router_with_member(win)
     # Double-clicking an inline-editable cell (col 1 = Model id) must NOT swap
-    # the form to the member profile — it belongs to inline editing.
+    # the form to the member profile; it belongs to inline editing.
     win._configure_panel.members_list.cellDoubleClicked.emit(0, 1)
     assert win._configure_panel.current_profile().name == "myrouter"
     # Double-clicking the identity column (col 0 = Profile) DOES open the member.

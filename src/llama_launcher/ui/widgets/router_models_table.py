@@ -32,7 +32,7 @@ class RouterModelsTable(QWidget):
         header.setContentsMargins(0, 0, 0, 0)
         header.addWidget(QLabel("Models"))
         self.info = InfoButton(
-            "Model ids the router exposes — each row's Model id is what API "
+            "Model ids the router exposes: each row's Model id is what API "
             "clients request. Load or unload a member model here; Status shows "
             "whether it's currently up."
         )

@@ -249,7 +249,7 @@ class MainWindow(QMainWindow):
         if self._minimize_to_tray:
             self.tray = QSystemTrayIcon(self)
             tray_icon = app_icon()
-            if tray_icon.isNull():   # no asset/theme icon found — keep a visible fallback
+            if tray_icon.isNull():   # no asset/theme icon found; keep a visible fallback
                 tray_icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
             self.tray.setIcon(tray_icon)
             self.tray.setToolTip("Llama Launcher")
@@ -419,7 +419,7 @@ class MainWindow(QMainWindow):
     def _stop_timers(self) -> None:
         """Stop background timers/workers so a torn-down window can't keep
         firing update_status, keep polling stats, or leave a QThread running
-        past the window's lifetime. Idempotent — QTimer.stop() on a stopped
+        past the window's lifetime. Idempotent; QTimer.stop() on a stopped
         timer is a no-op, and each drain() below is itself a no-op when its
         controller owns nothing currently running.
 

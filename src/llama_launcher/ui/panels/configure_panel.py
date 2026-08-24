@@ -178,9 +178,9 @@ class ConfigurePanel(QWidget):
         self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         self.gpu_combo = NoWheelComboBox()
         for _gpu_label, _gpu_val in (
-            ("CDI — --device nvidia.com/gpu=all (recommended)", "cdi"),
-            ("Legacy — --gpus all", "gpus-all"),
-            ("None — no GPU passthrough", "none"),
+            ("CDI: --device nvidia.com/gpu=all (recommended)", "cdi"),
+            ("Legacy: --gpus all", "gpus-all"),
+            ("None: no GPU passthrough", "none"),
         ):
             self.gpu_combo.addItem(_gpu_label, _gpu_val)
         for w in (self.image_edit, self.model_edit):
@@ -200,7 +200,7 @@ class ConfigurePanel(QWidget):
         self.fetch_btn.setToolTip(
             "Query the container registry (GHCR) for the newest build tag matching "
             "this image's repo and variant, and update the Image field. Requires an "
-            "image to be set (use Detect or type one). This updates the tag only — it "
+            "image to be set (use Detect or type one). This updates the tag only; it "
             "does NOT download the build; pull it with podman/docker pull.")
         self.fetch_btn.clicked.connect(self.window._launch.on_fetch_latest)
         image_row = QHBoxLayout()
@@ -293,7 +293,7 @@ class ConfigurePanel(QWidget):
         self.stop_timeout_spin.setToolTip(
             "Grace period after Stop before the container is force-killed "
             "(SIGTERM → wait → SIGKILL). Raise it if a large model needs longer "
-            "to unload cleanly.\n\nApplies to this profile's own container — in "
+            "to unload cleanly.\n\nApplies to this profile's own container; in "
             "router mode that's the router container; each router member's kill "
             "delay is the per-row 'Stop timeout (s)' in the Router members table.")
 
@@ -339,7 +339,7 @@ class ConfigurePanel(QWidget):
         members_box.addWidget(self.members_list)
         members_box.addLayout(members_row)
         self.members_guidance = QLabel(
-            "Each member is a saved model profile — set its GPU layers, MoE offload, "
+            "Each member is a saved model profile: set its GPU layers, MoE offload, "
             "and context in that profile (single-server mode), then add it here.")
         self.members_guidance.setWordWrap(True)
         self.members_guidance.setStyleSheet("QLabel { color: palette(mid); }")
@@ -808,7 +808,7 @@ class ConfigurePanel(QWidget):
         if target is None:
             QMessageBox.warning(
                 self, "Profile missing",
-                f"Profile '{name}' no longer exists — remove it from the router "
+                f"Profile '{name}' no longer exists; remove it from the router "
                 f"or recreate it.")
             return
         if self._has_unsaved_changes():

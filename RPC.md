@@ -10,7 +10,7 @@ but it lets a model that doesn't fit on any single node's VRAM load at all.
 
 The prebuilt `ghcr.io/ggml-org/llama.cpp` images are **not** built with
 `GGML_RPC=ON`, so they contain neither the `--rpc` flag on `llama-server` nor
-the `rpc-server` binary. There is no supported prebuilt RPC image — you must
+the `rpc-server` binary. There is no supported prebuilt RPC image; you must
 build one yourself.
 
 One image serves double duty: it runs `llama-server` (the pool **head**) on
@@ -30,7 +30,7 @@ podman build -t llama.cpp:rpc-cuda \
   .
 ```
 
-`GGML_RPC=ON` is the flag that matters — it compiles both the `--rpc` client
+`GGML_RPC=ON` is the flag that matters: it compiles both the `--rpc` client
 support into `llama-server` and the standalone `rpc-server` binary. If the
 project's `cuda.Dockerfile` doesn't already thread `GGML_RPC` through to
 `cmake`, add `-DGGML_RPC=ON` to its `cmake` invocation directly and rebuild.
@@ -47,12 +47,12 @@ podman run --rm --entrypoint /app/llama-server llama.cpp:rpc-cuda --help | grep 
 podman run --rm --entrypoint /bin/sh llama.cpp:rpc-cuda -c 'ls -l /app/ggml-rpc-server'
 ```
 
-The worker binary's only options are `-t/-d/-H/-p/-c` — there is **no**
+The worker binary's only options are `-t/-d/-H/-p/-c`; there is **no**
 per-worker `--mem` budget flag in current builds, so Llama Launcher treats a
 worker's memory pledge as a "Check fit" preflight number only and never passes
 it to the worker.
 
-If either check fails, the build didn't actually turn RPC on — re-check the
+If either check fails, the build didn't actually turn RPC on; re-check the
 `GGML_RPC` plumbing before trying to launch a pool against this tag.
 
 ## Local dry-run (one box, two simulated workers)
@@ -62,7 +62,7 @@ just with every worker on localhost.
 
 1. Start two `rpc-server` workers, each in its own container, published to
    loopback only (workers are never meant to be reachable off-box except
-   through an SSH tunnel — see below):
+   through an SSH tunnel; see below):
 
    ```bash
    podman run -d --name rpc-w0 --device nvidia.com/gpu=all \
@@ -99,7 +99,7 @@ An "RPC pool" profile in Llama Launcher does exactly the above, generalized
 to real remote nodes:
 
 - Every worker container publishes its `rpc-server` port to `127.0.0.1` only
-  on its own host — never to a routable interface.
+  on its own host, never to a routable interface.
 - A **local** worker (same node as the GUI/head) is reached directly via
   `127.0.0.1:<port>`.
 - A **remote** worker is reached through an `ssh -L <port>:127.0.0.1:<port>`
@@ -112,7 +112,7 @@ to real remote nodes:
   to be listening before starting the head. Stop order is head-first, then
   workers, then any open tunnels are closed.
 - Launch-time validation does not ssh-probe every node, so use the GUI's
-  "Check fit" button before launching a pool — it pre-checks per-node
+  "Check fit" button before launching a pool: it pre-checks per-node
   RPC-image presence and VRAM/RAM fit up front, instead of failing partway
   through a live launch.
 
@@ -120,12 +120,12 @@ to real remote nodes:
 
 `rpc-server` and `llama-server` talk to each other over ggml's own wire
 format, which is **not** version-stabilized across builds. Every node in a
-pool — the head and all workers, local or remote — must run the **same**
+pool (the head and all workers, local or remote) must run the **same**
 `llama.cpp` build (i.e. the same image tag, rebuilt and re-pushed/re-pulled
 together whenever you update). Mixing builds across nodes is the most common
 cause of an RPC pool that connects but fails or misbehaves mid-load.
 
-## Verifying a real multi-node pooled run — what to look for
+## Verifying a real multi-node pooled run: what to look for
 
 A pool can "start" (workers up, head running) and still not actually be
 pooling, or fail subtly mid-load. Use these signals to tell the difference.
@@ -134,7 +134,7 @@ pooling, or fail subtly mid-load. Use these signals to tell the difference.
 > workers; a run against real GPU workers has not yet been exercised, so
 > treat GPU pooling as experimental and report issues.
 
-### Success signals — the head log at load time
+### Success signals: the head log at load time
 
 - The RPC devices appear in the head's device list, e.g. `RPC[<host>:<port>]`
   alongside your local `CUDA0`.
@@ -148,11 +148,11 @@ pooling, or fail subtly mid-load. Use these signals to tell the difference.
 
 ### Confirm it is actually distributed (not all on the head)
 
-- Run `nvidia-smi` **on each worker node** during load/inference — the
+- Run `nvidia-smi` **on each worker node** during load/inference: the
   `ggml-rpc-server` process should be holding VRAM. A worker sitting at ~0 MiB
   got no layers.
 - **`-ngl` (GPU-layers) must be high** (e.g. `99`) to offload layers onto the
-  RPC devices at all — without it, layers stay on the head and workers idle.
+  RPC devices at all; without it, layers stay on the head and workers idle.
 - Use **`--tensor-split`** on the head if the automatic split overcommits one
   node.
 
@@ -163,23 +163,23 @@ pooling, or fail subtly mid-load. Use these signals to tell the difference.
    the **same image tag on every node** (see "One build, every node").
 2. **Worker OOM:** there is no per-worker `--mem` cap, so a worker exposes its
    full VRAM; if the split over-allocates, it OOM-kills mid-upload and the head
-   reports "server crashed." Watch each node's VRAM headroom — that is what the
+   reports "server crashed." Watch each node's VRAM headroom; that is what the
    GUI's "Check fit" estimates.
 3. **`[create_node] invalid data ptr` / graph-compute crash:** observed with
-   **CPU-device** workers (`-d CPU`) on current llama.cpp — the CPU-donation
+   **CPU-device** workers (`-d CPU`) on current llama.cpp; the CPU-donation
    path appears buggy upstream. GPU workers are the supported path; if you see
    this with GPU workers, suspect a version mismatch (#1).
 4. **Dead ssh tunnel / unreachable worker:** the launcher's readiness gate
    refuses to start the head ("worker N failed to start"). Check that node's
    image tag and that its tunnel came up.
 5. The rpc-server's "**Never expose the RPC server to an open network**"
-   warning is **expected** — loopback publish + ssh tunnels keep it private.
+   warning is **expected**: loopback publish + ssh tunnels keep it private.
 
 ### Performance expectation
 
-Pooling is **slower than single-box** — it is a capacity feature, not a speed
+Pooling is **slower than single-box**: it is a capacity feature, not a speed
 feature; each token serializes tensors over the link. Catastrophic slowness
-usually means the interconnect (LAN bandwidth) is the bottleneck — RPC is
+usually means the interconnect (LAN bandwidth) is the bottleneck; RPC is
 bandwidth-sensitive. Avoid `--cpu-moe` / `--no-kv-offload` (they centralize
 work on the head; the launcher warns about them).
 

@@ -58,7 +58,7 @@ def sparkline(values, width: int = 0) -> str:
 class SpecCounters:
     """A point-in-time read of llama.cpp's spec-decode counters.
 
-    These are monotonic counters, so a rate needs two reads — see spec_delta.
+    These are monotonic counters, so a rate needs two reads; see spec_delta.
     Unlike the log-scraped acceptance line, they can be fetched per-model in
     router mode via /metrics?model=<id>.
     """

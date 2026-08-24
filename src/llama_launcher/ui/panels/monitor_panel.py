@@ -45,7 +45,7 @@ class MonitorPanel(QWidget):
         cards_header.setContentsMargins(0, 0, 0, 0)
         cards_header.addWidget(QLabel("Instances"))
         self.cards_info = InfoButton(
-            "Live per-server stats — one card per running instance (gen tok/s, "
+            "Live per-server stats: one card per running instance (gen tok/s, "
             "KV-cache use). Click a card to focus its details; use its buttons to "
             "stop or remove that server."
         )
@@ -122,7 +122,7 @@ class MonitorPanel(QWidget):
         if reranking:
             urls.append(f"rerank: {base}/v1/rerank")
         if urls:
-            self.endpoints_label.setText("Endpoints —  " + "    ".join(urls))
+            self.endpoints_label.setText("Endpoints:  " + "    ".join(urls))
             self.endpoints_label.setVisible(True)
         else:
             self.endpoints_label.setText("")
@@ -149,7 +149,7 @@ class MonitorPanel(QWidget):
         if not parts:
             self.info_label.setVisible(False)
             return
-        self.info_label.setText("Info —  " + " · ".join(parts))
+        self.info_label.setText("Info:  " + " · ".join(parts))
         self.info_label.setVisible(True)
 
     def update_stats(self, data: dict):
@@ -168,11 +168,11 @@ class MonitorPanel(QWidget):
             # request's prefill rate; the live slot-delta rate is the current one.
             plive = data.get("prompt_tok_s_live")
             ptok = plive if plive is not None else data.get("prompt_tok_s")
-            speed = f"gen {gen:.1f} tok/s" if gen is not None else "gen –"
+            speed = f"gen {gen:.1f} tok/s" if gen is not None else "gen n/a"
             if ptok is not None:
                 speed += f"  ·  prompt {ptok:.0f} tok/s"
         kv = data.get("kv_pct")
-        kv_s = f"KV {kv * 100:.0f}%" if kv is not None else "KV –"
+        kv_s = f"KV {kv * 100:.0f}%" if kv is not None else "KV n/a"
         parts = [speed, kv_s]
         if data.get("speculating"):
             parts.append("spec ●")

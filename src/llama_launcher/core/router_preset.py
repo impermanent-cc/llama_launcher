@@ -21,7 +21,7 @@ EXCLUDED_PRESET_KEYS: frozenset = frozenset({
 }) | ROUTER_ONLY_KEYS
 
 # A flag starts with one or two dashes followed by a LETTER. "-1" and "-1.5" are
-# values, not flags — llama.cpp uses negative sentinels all over its interface
+# values, not flags; llama.cpp uses negative sentinels all over its interface
 # (--seed -1, --n-gpu-layers -1, --top-n-sigma -1.5).
 _FLAG_RE = re.compile(r"^--?[A-Za-z]")
 
@@ -82,7 +82,7 @@ def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
         if key in EXCLUDED_PRESET_KEYS or key not in profile.settings:
             continue
         value = profile.settings[key]
-        # The INI key is the flag itself, minus dashes — including negative
+        # The INI key is the flag itself, minus dashes, including negative
         # flags such as --no-cors-credentials, whose key is "no-cors-credentials".
         ini_key = setting.flag.lstrip("-")
         if setting.type == "bool":

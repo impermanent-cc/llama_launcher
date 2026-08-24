@@ -105,7 +105,7 @@ def test_finished_after_result_does_not_report_no_newer(win, monkeypatch):
 
 
 class _StubWorker:
-    """Stand-in for a running _UpdateWorker/QThread — no real thread involved."""
+    """Stand-in for a running _UpdateWorker/QThread; no real thread involved."""
 
     def __init__(self, wait_returns):
         self._wait_returns = wait_returns

@@ -25,7 +25,7 @@ def _as(typ, v):
 
 
 def parse_props(data: dict) -> PropsInfo:
-    """Parse a llama-server /props body. Total — never raises on bad input."""
+    """Parse a llama-server /props body. Total: never raises on bad input."""
     if not isinstance(data, dict):
         return PropsInfo(None, None, None, None, {})
     dgs = data.get("default_generation_settings")

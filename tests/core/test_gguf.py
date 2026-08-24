@@ -24,7 +24,7 @@ def _kv_arr_u32(key, vals):
 
 def _arr_head_gguf():
     # A model that stores per-layer attention.head_count[_kv] as arrays
-    # (its layers differ) — valid GGUF that some real models emit.
+    # (its layers differ); valid GGUF that some real models emit.
     kvs = [
         _kv_str("general.architecture", "hybrid"),
         _kv_u32("hybrid.block_count", 4),
@@ -108,7 +108,7 @@ def test_capability_kv_absent_is_none():
 
 def test_array_head_counts_collapse_to_scalar():
     # GgufMeta is scalar (int | None); per-layer array head counts must
-    # collapse to a single int — the max, a conservative scalar for the
+    # collapse to a single int, the max, a conservative scalar for the
     # VRAM estimate (and exact when every layer is equal).
     m = parse_gguf_header(_arr_head_gguf())
     assert m.n_head == 32 and isinstance(m.n_head, int)

@@ -33,9 +33,9 @@ class StatsPanel(QWidget):
         layout = QVBoxLayout(self)
         mono = QFont("monospace")
         mono.setStyleHint(QFont.StyleHint.Monospace)
-        self.gpu_label = QLabel("GPU —")
-        self.system_label = QLabel("System —")
-        self.container_label = QLabel("Container —")
+        self.gpu_label = QLabel("GPU: …")
+        self.system_label = QLabel("System: …")
+        self.container_label = QLabel("Container: …")
         for w in (self.gpu_label, self.system_label, self.container_label):
             w.setFont(mono)
             w.setWordWrap(True)
@@ -62,7 +62,7 @@ class StatsPanel(QWidget):
 
     def _render_gpu(self, snap) -> None:
         if not snap.gpu_available:
-            self.gpu_label.setText("GPU — unavailable (nvidia-smi not found)")
+            self.gpu_label.setText("GPU: unavailable (nvidia-smi not found)")
             return
         blocks = []
         for i, g in enumerate(snap.gpus):
@@ -77,7 +77,7 @@ class StatsPanel(QWidget):
 
     def _render_system(self, snap) -> None:
         if snap.cpu is None or snap.mem is None:
-            self.system_label.setText("System — unavailable")
+            self.system_label.setText("System: unavailable")
             return
         spark = self._spark("cpu", snap.cpu.overall_pct)
         cores = sparkline(snap.cpu.per_core_pct) if snap.cpu.per_core_pct else ""
@@ -93,7 +93,7 @@ class StatsPanel(QWidget):
     def _render_container(self, snap) -> None:
         c = snap.container
         if c is None:
-            self.container_label.setText("Container — no server running")
+            self.container_label.setText("Container: no server running")
             return
         limit = (f" / {_gib_from_bytes(c.mem_limit_bytes):6.1f} GiB"
                  if c.mem_limit_bytes else "")

@@ -29,7 +29,7 @@ def test_build_command_rpc_head_is_host_networked_and_local():
     assert argv[argv.index("--rpc") + 1] == "127.0.0.1:50052"
     assert argv[0] == "podman" and "run" in argv
     # The RPC head must force the llama-server entrypoint even when the pool
-    # image's tag ("b1") doesn't match the full/light heuristic — a pool image is
+    # image's tag ("b1") doesn't match the full/light heuristic; a pool image is
     # a full-style (tools.sh-entrypoint) build, so the head would otherwise run
     # the dispatcher and print usage instead of serving.
     assert argv[argv.index("--entrypoint") + 1] == "/app/llama-server"

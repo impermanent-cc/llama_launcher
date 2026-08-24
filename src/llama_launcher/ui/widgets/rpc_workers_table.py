@@ -30,7 +30,7 @@ class RpcWorkersTable(QWidget):
         # so this value is NOT enforced on the worker; it is only a pledge feeding
         # the "Check fit" preflight (pooled VRAM+RAM vs. model size).
         self.table.horizontalHeaderItem(2).setToolTip(
-            "Estimate only — how much memory you expect this worker to donate, "
+            "Estimate only: how much memory you expect this worker to donate, "
             "used by 'Check fit'. Not enforced (rpc-server has no memory cap).")
         hdr = self.table.horizontalHeader()
         hdr.setSectionResizeMode(0, QHeaderView.Stretch)             # Node

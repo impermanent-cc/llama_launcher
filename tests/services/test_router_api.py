@@ -49,7 +49,7 @@ def test_list_models_never_autoloads(monkeypatch):
 
     monkeypatch.setattr(router_api.requests, "get", fake_get)
     models = router_api.list_models("127.0.0.1", 8080, "sk-x")
-    # Observing a model must never load it — that would defeat idle unloading.
+    # Observing a model must never load it; that would defeat idle unloading.
     assert seen["params"]["autoload"] == "false"
     assert models[0].status == "sleeping"
 

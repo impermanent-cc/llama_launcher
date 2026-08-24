@@ -194,7 +194,7 @@ def main(argv=None) -> int:
             return _do_stop(p, base, args.json)
         return _do_health(p, base, args.json)
 
-    # GUI path — only import Qt here so that importing app.py never constructs QApplication.
+    # GUI path: only import Qt here so that importing app.py never constructs QApplication.
     from PySide6.QtWidgets import QApplication
     from llama_launcher.ui.main_window import MainWindow
     from llama_launcher.ui.icon import app_icon

@@ -22,7 +22,7 @@ def file_size(path) -> int | None:
 
 
 def sibling_ggufs(host_model_path) -> list[str]:
-    """GGUF filenames beside the model — in its directory and its parent —
+    """GGUF filenames beside the model (in its directory and its parent),
     excluding the model file itself. Empty on any error."""
     p = Path(host_model_path)
     names: set[str] = set()

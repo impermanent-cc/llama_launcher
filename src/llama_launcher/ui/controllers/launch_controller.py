@@ -367,7 +367,7 @@ class LaunchController:
         Calls on_done() when the process finishes.
 
         on_error(text) receives podman's stderr on a non-zero exit, and a
-        message if the binary could not be started at all — `finished` is NOT
+        message if the binary could not be started at all; `finished` is NOT
         emitted on FailedToStart, so without errorOccurred a launch that never
         began would report nothing whatsoever.
         """
@@ -401,7 +401,7 @@ class LaunchController:
 
         # Stop the log follower immediately; run `podman stop` asynchronously so a
         # slow stop (podman waits up to its grace period for SIGTERM) never freezes
-        # the GUI — which previously made Stop look like it did nothing.
+        # the GUI, which previously made Stop look like it did nothing.
         self.window._monitor._stop_log_follower()
         connection = self._connection_for_profile(p)
         self.window.status_label.setText("● stopping…")
@@ -474,7 +474,7 @@ class LaunchController:
         else:
             free_txt = f"~{s.free_bytes/gib:.1f} GiB"
         return (f"Estimated VRAM need ~{s.est_bytes/gib:.1f} GiB exceeds free "
-                f"{free_txt} by ~{-s.margin/gib:.1f} GiB. It may not fit — "
+                f"{free_txt} by ~{-s.margin/gib:.1f} GiB. It may not fit; "
                 f"consider quantized KV cache (-ctk/-ctv q8_0) or a higher --n-cpu-moe. "
                 f"(Estimate is conservative; --n-cpu-moe/-ngl reduce actual GPU use.)")
 
@@ -509,7 +509,7 @@ class LaunchController:
         if not repo:
             QMessageBox.information(
                 self.window, "No image",
-                "Set or Detect an image first — Fetch latest looks up the newest "
+                "Set or Detect an image first. Fetch latest looks up the newest "
                 "build for the image's repository.")
             return
         prefix = variant_prefix(tag) if tag else "server-cuda12"
@@ -531,7 +531,7 @@ class LaunchController:
         self.window._configure_panel.image_edit.setText(image)
         QMessageBox.information(
             self.window, "Latest build",
-            f"Image set to {image}.\n\nThis only updates the tag — the build is NOT "
+            f"Image set to {image}.\n\nThis only updates the tag; the build is NOT "
             f"downloaded. Pull it with:\n  podman pull {image}\n(or docker pull).")
 
     def _on_fetch_failed(self, msg: str) -> None:

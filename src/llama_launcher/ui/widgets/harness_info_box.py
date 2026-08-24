@@ -18,7 +18,7 @@ class HarnessInfoBox(QWidget):
         ids = "\n".join(f"  - {m}" for m in model_ids) or "  (no members yet)"
         self.harness_text.setPlainText(
             f"base_url: {base_url}/v1\n"
-            f"api_key:  (see above — reveal to copy)\n"
+            f"api_key:  (see above, reveal to copy)\n"
             f"model ids:\n{ids}\n"
             f"\nCold loads can take minutes: raise your harness's request and "
             f"stale timeouts accordingly."

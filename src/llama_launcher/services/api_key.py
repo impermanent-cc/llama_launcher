@@ -19,7 +19,7 @@ _GLOBAL_KEY_FILE = "global-api-key"
 def router_dir(base_dir: Path, router_name: str, create: bool = True) -> Path:
     """Per-router config directory.
 
-    Created 0700 when `create` — it holds an API key, and a group-writable
+    Created 0700 when `create`; it holds an API key, and a group-writable
     directory would let another local user swap the key or repoint the preset,
     which the 0600 on the file itself does nothing to prevent. Readers pass
     create=False so a poll never has filesystem side effects.

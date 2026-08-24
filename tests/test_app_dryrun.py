@@ -11,7 +11,7 @@ import pytest
 from llama_launcher.core.spec import Mount, Profile, Runtime
 from llama_launcher.store.profiles import save_config, save_profile
 
-# Import the functions under test — these don't exist yet, so import errors are expected.
+# Import the functions under test; these don't exist yet, so import errors are expected.
 from llama_launcher.app import dry_run, main
 
 
@@ -113,7 +113,7 @@ def test_dry_run_validation_error_returns_1_and_prints_error(
 ):
     """dry_run on a profile with no model set triggers a validation error,
     returns 1, and prints the validation issues under a '# Validation:' header."""
-    # Profile with no model — validation will produce an error
+    # Profile with no model; validation will produce an error
     p = Profile(
         name="no-model",
         image="ghcr.io/ggml-org/llama.cpp:server",
