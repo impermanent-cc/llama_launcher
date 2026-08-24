@@ -1,7 +1,7 @@
 import subprocess
 from dataclasses import dataclass
 
-from llama_launcher.core.nodes import valid_ssh_target
+from llama_launcher.core.nodes import valid_ssh_target, SSH_OPTS
 
 
 @dataclass(frozen=True)
@@ -119,7 +119,7 @@ def remote_meminfo_argv(ssh_target: str) -> list:
     """
     if not valid_ssh_target(ssh_target):
         raise ValueError(f"unsafe ssh target: {ssh_target!r}")
-    return ["ssh", ssh_target, "cat", "/proc/meminfo"]
+    return ["ssh", *SSH_OPTS, ssh_target, "cat", "/proc/meminfo"]
 
 
 def read_remote_meminfo(ssh_target: str) -> MemStat | None:

@@ -31,6 +31,7 @@ TERMINALS: list[tuple[str, str, bool]] = [
     ("konsole", "konsole --hold -e bash -lc {cmd}", False),
     ("ptyxis", "ptyxis -- bash -lc {cmd}", True),
     ("gnome-terminal", "gnome-terminal -- bash -lc {cmd}", True),
+    ("foot", "foot bash -lc {cmd}", True),          # wlroots/sway native
     ("kgx", "kgx -e {bashcmd}", True),
     ("xfce4-terminal", "xfce4-terminal --hold -x bash -lc {cmd}", False),
     ("xterm", "xterm -hold -e bash -lc {cmd}", False),
@@ -113,7 +114,10 @@ def launch(command_argv: list[str], template: str | None = None,
     argv = build_terminal_argv(command_argv, template, shell_hold)
     try:
         subprocess.Popen(argv, start_new_session=True)
-    except FileNotFoundError as exc:
+    except OSError as exc:
+        # Any Popen failure -- missing binary (FileNotFoundError), a snap-confined
+        # terminal (PermissionError), a bad exec format -- must degrade to a
+        # graceful dialog, not an unhandled crash of the launch.
         raise NoTerminalError(
             f"Terminal '{argv[0]}' could not be started: {exc}. Set a 'terminal' "
             "command in the launcher config, or use 'Run detached'.") from exc

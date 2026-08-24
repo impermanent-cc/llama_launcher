@@ -142,3 +142,19 @@ def test_custom_template_valid_terminal_is_accepted(monkeypatch):
     terminal.launch(["echo", "hi"], template="wezterm -e bash -lc {cmd}",
                     which=_which_all)
     assert calls["argv"][0] == "wezterm"
+
+
+def test_launch_wraps_any_oserror_as_no_terminal(monkeypatch):
+    """A snap-confined or exec-format-broken terminal raises PermissionError/
+    OSError, not FileNotFoundError -- it must still become a graceful
+    NoTerminalError, not crash the launch."""
+    def _boom(*a, **k):
+        raise PermissionError(13, "Permission denied", "konsole")
+    monkeypatch.setattr(terminal.subprocess, "Popen", _boom)
+    with pytest.raises(NoTerminalError):
+        terminal.launch(["echo", "hi"], template="konsole --hold -e bash -lc {cmd}",
+                        which=lambda b: "/usr/bin/konsole")
+
+
+def test_foot_is_a_known_terminal():
+    assert any(b == "foot" for b, _t, _h in terminal.TERMINALS)

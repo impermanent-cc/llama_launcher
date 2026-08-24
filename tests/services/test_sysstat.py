@@ -62,7 +62,9 @@ def test_parse_loadavg():
 
 
 def test_remote_meminfo_argv_builds_guarded_ssh():
-    assert remote_meminfo_argv("user@box2") == ["ssh", "user@box2", "cat", "/proc/meminfo"]
+    argv = remote_meminfo_argv("user@box2")
+    assert argv[0] == "ssh" and "BatchMode=yes" in argv
+    assert argv[-3:] == ["user@box2", "cat", "/proc/meminfo"]
 
 
 def test_remote_meminfo_argv_rejects_flag_injection():

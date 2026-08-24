@@ -11,7 +11,12 @@ def test_local_argv_is_plain_nvidia_smi():
 
 def test_remote_argv_wraps_in_ssh():
     argv = gpu.nvidia_smi_argv("me@10.0.0.2")
-    assert argv[:3] == ["ssh", "me@10.0.0.2", "nvidia-smi"]
+    assert argv[0] == "ssh"
+    assert "-o" in argv and "BatchMode=yes" in argv       # no hang on host-key prompt
+    assert "me@10.0.0.2" in argv
+    assert "nvidia-smi" in argv
+    # the ssh options precede the target, the target precedes the command
+    assert argv.index("me@10.0.0.2") < argv.index("nvidia-smi")
     assert any(a.startswith("--query-gpu=") for a in argv)
 
 

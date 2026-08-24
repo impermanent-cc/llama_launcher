@@ -44,3 +44,13 @@ def test_valid_ssh_target_rejects_embedded_space():
 
 def test_valid_ssh_target_rejects_command_injection():
     assert valid_ssh_target("user@host;rm -rf") is False
+
+
+def test_valid_ssh_target_accepts_bracketed_ipv6():
+    assert valid_ssh_target("[2001:db8::1]") is True
+    assert valid_ssh_target("me@[2001:db8::1]:22") is True
+
+
+def test_valid_ssh_target_still_rejects_option_smuggle():
+    assert valid_ssh_target("-oProxyCommand=x") is False
+    assert valid_ssh_target("") is False
