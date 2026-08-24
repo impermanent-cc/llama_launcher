@@ -24,8 +24,13 @@ def _run(args: list[str], timeout: float = _DEFAULT_TIMEOUT) -> subprocess.Compl
 
 
 def _base(binary: str, connection: str = "") -> list[str]:
-    """Command head, with the podman remote-connection flag when set."""
-    return [binary, "--connection", connection] if connection else [binary]
+    """Command head, with the remote-connection flag when set. podman selects a
+    remote host with `--connection`, docker with `--context` -- the same concept,
+    different flag, so a docker node was previously unreachable."""
+    if not connection:
+        return [binary]
+    flag = "--context" if binary == "docker" else "--connection"
+    return [binary, flag, connection]
 
 
 def binary_available(binary: str) -> bool:
@@ -59,7 +64,11 @@ def logs_argv(name: str, binary: str, connection: str = "") -> list[str]:
 
 
 def container_exists(name: str, binary: str, connection: str = "") -> bool:
-    return _run([*_base(binary, connection), "container", "exists", name]).returncode == 0
+    # `container exists` is a podman-only convenience subcommand (docker has no
+    # equivalent -> always False, breaking stale-container cleanup on docker).
+    # `inspect --type container` returns 0/1 identically on both runtimes.
+    return _run([*_base(binary, connection), "inspect", "--type", "container",
+                 name]).returncode == 0
 
 
 def started_at(name: str, binary: str, connection: str = "") -> str | None:
@@ -82,7 +91,11 @@ def stats(name: str, binary: str, connection: str = "") -> dict | None:
     row = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) else None)
     if not row:
         return None
-    return {"cpu_perc": row.get("CPUPerc", ""), "mem_usage": row.get("MemUsage", "")}
+    # podman and docker name the same fields differently: podman uses
+    # cpu_percent/mem_usage, docker uses CPUPerc/MemUsage. Reading only the
+    # docker names left live CPU/MEM blank on podman -- the DEFAULT runtime.
+    return {"cpu_perc": row.get("cpu_percent") or row.get("CPUPerc", ""),
+            "mem_usage": row.get("mem_usage") or row.get("MemUsage", "")}
 
 
 _ENGINE_IMAGE_MATCH = {
@@ -119,18 +132,60 @@ _PROFILE_LABEL = "llama-launcher.profile"
 _MODE_LABEL = "llama-launcher.mode"
 
 
+def _parse_ps_payload(output: str) -> list[dict]:
+    """Rows from `ps --format json` for either runtime: podman's single JSON
+    array, or docker's newline-delimited bare objects (NDJSON)."""
+    text = (output or "").strip()
+    if not text:
+        return []
+    # podman: one array. (A docker single-container payload with no newline is
+    # also valid JSON, but a dict, handled by the line loop below.)
+    if text.startswith("["):
+        try:
+            data = json.loads(text)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        return data if isinstance(data, list) else []
+    rows: list[dict] = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+        except (json.JSONDecodeError, TypeError):
+            continue
+        if isinstance(obj, dict):
+            rows.append(obj)
+    return rows
+
+
+def _normalize_labels(labels) -> dict:
+    """Labels as a dict. podman gives a dict; docker gives a comma-separated
+    `k=v,k=v` string (or "")."""
+    if isinstance(labels, dict):
+        return labels
+    if isinstance(labels, str) and labels:
+        out: dict = {}
+        for part in labels.split(","):
+            if "=" in part:
+                k, v = part.split("=", 1)
+                out[k.strip()] = v.strip()
+        return out
+    return {}
+
+
 def parse_ps_json(output: str) -> list[dict]:
     """Normalise `podman ps -a --format json` rows this launcher owns.
 
     Containers created before labels existed are still adopted, by falling back
     to the `llama-` name prefix. Anything else is ignored.
+
+    Accepts both podman's single JSON array and docker's NDJSON (one bare object
+    per line): reading only the array shape left the whole Monitor/Instances
+    panel empty on docker even though the launch had succeeded.
     """
-    try:
-        data = json.loads(output)
-    except (json.JSONDecodeError, TypeError):
-        return []
-    if not isinstance(data, list):
-        return []
+    data = _parse_ps_payload(output)
 
     rows: list[dict] = []
     for item in data:
@@ -141,8 +196,7 @@ def parse_ps_json(output: str) -> list[dict]:
         if not isinstance(name, str) or not name:
             continue
 
-        labels = item.get("Labels")
-        labels = labels if isinstance(labels, dict) else {}
+        labels = _normalize_labels(item.get("Labels"))
         profile = labels.get(_PROFILE_LABEL)
         mode = labels.get(_MODE_LABEL)
 
@@ -176,7 +230,8 @@ def rm_argv(name: str, binary: str, connection: str = "") -> list[str]:
 
 
 def image_exists(image: str, binary: str, connection: str = "") -> bool:
-    return _run([*_base(binary, connection), "image", "exists", image]).returncode == 0
+    # `image exists` is podman-only; `image inspect` returns 0/1 on both runtimes.
+    return _run([*_base(binary, connection), "image", "inspect", image]).returncode == 0
 
 
 def pull_argv(image: str, binary: str, connection: str = "") -> list[str]:
@@ -184,12 +239,21 @@ def pull_argv(image: str, binary: str, connection: str = "") -> list[str]:
 
 
 def connection_add_argv(name: str, ssh_target: str, binary: str = "podman") -> list[str]:
+    # podman registers a remote host as a named connection; docker registers it
+    # as a named context over the same ssh transport.
+    if binary == "docker":
+        return [binary, "context", "create", name, "--docker", f"host=ssh://{ssh_target}"]
     return [binary, "system", "connection", "add", name, f"ssh://{ssh_target}"]
 
 
 def connection_remove_argv(name: str, binary: str = "podman") -> list[str]:
+    if binary == "docker":
+        return [binary, "context", "rm", name]
     return [binary, "system", "connection", "remove", name]
 
 
 def node_reachable(connection: str, binary: str = "podman") -> bool:
-    return _run([*_base(binary, connection), "info", "--format", "{{.Host.Arch}}"]).returncode == 0
+    # {{.Host.Arch}} is a podman info field; docker info has no such path, so use
+    # a runtime-appropriate probe (both return 0 only when the daemon answers).
+    fmt = "{{.OSType}}" if binary == "docker" else "{{.Host.Arch}}"
+    return _run([*_base(binary, connection), "info", "--format", fmt]).returncode == 0

@@ -75,17 +75,18 @@ class NodesDialog(QDialog):
             QMessageBox.warning(self, "Nodes",
                                 f"Invalid SSH target {ssh_target!r}.")
             return
-        # Register the podman connection, then persist the node.
+        # Register the remote connection/context, then persist the node.
         if not _run_ok(runtime.connection_add_argv(name, ssh_target, binary)):
             QMessageBox.warning(self, "Nodes",
-                                f"Could not add podman connection for {name!r}.")
+                                f"Could not add {binary} connection for {name!r}.")
             return
         add_node(Node(name=name, kind="remote", connection=name,
                       ssh_target=ssh_target, binary=binary), self._base_dir)
         self._refresh_list()
 
-    def test_node(self, connection: str, ssh_target: str) -> tuple[bool, bool]:
-        reachable = runtime.node_reachable(connection)
+    def test_node(self, connection: str, ssh_target: str,
+                  binary: str = "podman") -> tuple[bool, bool]:
+        reachable = runtime.node_reachable(connection, binary)
         gpus = bool(gpu.query_gpus(ssh_target)) if reachable else False
         return reachable, gpus
 
@@ -99,7 +100,8 @@ class NodesDialog(QDialog):
         node = get_node(self._base_dir, name)
         conn = connection_for(node) if node else name
         target = node.ssh_target if node else self.ssh_edit.text().strip()
-        reachable, gpus = self.test_node(conn, target)
+        binary = node.binary if node else self.binary_combo.currentText()
+        reachable, gpus = self.test_node(conn, target, binary)
         self.status.setText(
             f"{'reachable' if reachable else 'UNREACHABLE'} · "
             f"{'GPUs visible' if gpus else 'no GPUs'}")
@@ -111,6 +113,7 @@ class NodesDialog(QDialog):
         name = item.text().split("  (")[0]
         if name == "local":
             return
-        _run_ok(runtime.connection_remove_argv(name))
+        node = get_node(self._base_dir, name)
+        _run_ok(runtime.connection_remove_argv(name, node.binary if node else "podman"))
         remove_node(name, self._base_dir)
         self._refresh_list()
