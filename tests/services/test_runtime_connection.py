@@ -57,7 +57,8 @@ def test_container_exists_and_started_at_prefix_connection():
         return R()
     with patch.object(runtime, "_run", fake_run):
         assert runtime.container_exists("llama-p", "podman", connection="box-b") is True
-        assert seen["args"] == ["podman", "--connection", "box-b", "container", "exists", "llama-p"]
+        assert seen["args"] == ["podman", "--connection", "box-b", "inspect",
+                                "--type", "container", "llama-p"]
 
         assert runtime.started_at("llama-p", "podman", connection="box-b") == "2024-01-15T10:30:00Z"
         assert seen["args"] == ["podman", "--connection", "box-b", "inspect", "-f",
@@ -72,7 +73,7 @@ def test_container_exists_and_started_at_local_argv_unchanged():
         return R()
     with patch.object(runtime, "_run", fake_run):
         runtime.container_exists("llama-p", "podman")
-        assert seen["args"] == ["podman", "container", "exists", "llama-p"]
+        assert seen["args"] == ["podman", "inspect", "--type", "container", "llama-p"]
 
         runtime.started_at("llama-p", "podman")
         assert seen["args"] == ["podman", "inspect", "-f", "{{.State.StartedAt}}", "llama-p"]
