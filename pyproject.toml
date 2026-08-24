@@ -3,6 +3,7 @@ name = "llama-launcher"
 version = "0.1.0"
 description = "PySide6 desktop GUI to build and launch llama.cpp llama-server via podman/docker, with remote multi-node and RPC pooling"
 readme = "README.md"
+authors = [{ name = "impermanent-cc", email = "200443016+impermanent-cc@users.noreply.github.com" }]
 license = "MIT"
 license-files = ["LICENSE"]
 # The codebase's true floor is 3.10 (PEP 604 unions), but only 3.12/3.13 are

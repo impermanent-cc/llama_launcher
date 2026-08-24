@@ -76,6 +76,20 @@ uv run python -m llama_launcher.app --dry-run --profile "NAME"
 uv run pytest -q                       # test suite
 ```
 
+### Install straight from GitHub (no clone)
+
+To just run the app, install it from GitHub with uv (no clone, no PyPI needed):
+
+```bash
+uv tool install git+https://github.com/impermanent-cc/llama_launcher
+
+llama-launcher                         # GUI, now on your PATH
+```
+
+`uv tool upgrade llama-launcher` later pulls the newest commit. To run it once without
+installing anything, use
+`uvx --from git+https://github.com/impermanent-cc/llama_launcher llama-launcher`.
+
 ## GPU passthrough
 
 The launcher offers three GPU modes (Configure tab → **Runtime**):
