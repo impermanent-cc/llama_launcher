@@ -109,3 +109,36 @@ def test_launch_uses_detected_terminal(monkeypatch):
                         lambda argv, **k: calls.setdefault("argv", argv))
     terminal.launch(["echo", "hi"], template=None, which=_which_only("ptyxis"))
     assert calls["argv"][0] == "ptyxis"
+
+
+# --- W2c: a custom template from (possibly shared) config.json is screened ---
+
+def _which_all(name):          # every binary "installed"
+    return f"/usr/bin/{name}"
+
+
+def test_custom_template_without_placeholder_is_rejected(monkeypatch):
+    """A config `terminal` value that never references {cmd}/{bashcmd} would run
+    its own argv and drop the launch command -- the shape an injection takes."""
+    monkeypatch.setattr(terminal.subprocess, "Popen",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned")))
+    with pytest.raises(NoTerminalError):
+        terminal.launch(["echo", "hi"], template="sh -c id", which=_which_all)
+
+
+def test_custom_template_with_uninstalled_program_is_rejected(monkeypatch):
+    monkeypatch.setattr(terminal.subprocess, "Popen",
+                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned")))
+    with pytest.raises(NoTerminalError):
+        terminal.launch(["echo", "hi"],
+                        template="not-a-real-term -e bash -lc {cmd}",
+                        which=lambda b: None)
+
+
+def test_custom_template_valid_terminal_is_accepted(monkeypatch):
+    calls = {}
+    monkeypatch.setattr(terminal.subprocess, "Popen",
+                        lambda argv, **k: calls.setdefault("argv", argv))
+    terminal.launch(["echo", "hi"], template="wezterm -e bash -lc {cmd}",
+                    which=_which_all)
+    assert calls["argv"][0] == "wezterm"

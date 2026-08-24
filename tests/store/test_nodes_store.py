@@ -41,3 +41,27 @@ def test_gpu_ssh_target_remote(tmp_path):
     add_node(Node(name="box-b", kind="remote", connection="box-b",
                   ssh_target="me@10.0.0.2"), tmp_path)
     assert gpu_ssh_target(tmp_path, "box-b") == "me@10.0.0.2"
+
+
+# -- load-time trust clamps ---------------------------------------------------
+
+def test_remotes_drops_rows_with_invalid_ssh_target(tmp_path):
+    import json
+    from llama_launcher.store.nodes import load_nodes
+    (tmp_path / "nodes.json").write_text(json.dumps([
+        {"name": "ok", "ssh_target": "me@10.0.0.2", "binary": "podman"},
+        {"name": "evil", "ssh_target": "-oProxyCommand=calc", "binary": "podman"},
+        {"name": "bad", "ssh_target": "we ird ; rm", "binary": "podman"},
+    ]))
+    names = [n.name for n in load_nodes(tmp_path) if n.kind == "remote"]
+    assert names == ["ok"]
+
+
+def test_remotes_clamps_unknown_binary(tmp_path):
+    import json
+    from llama_launcher.store.nodes import load_nodes
+    (tmp_path / "nodes.json").write_text(json.dumps([
+        {"name": "n", "ssh_target": "me@10.0.0.2", "binary": "/usr/bin/evil"},
+    ]))
+    n = [x for x in load_nodes(tmp_path) if x.kind == "remote"][0]
+    assert n.binary == "podman"

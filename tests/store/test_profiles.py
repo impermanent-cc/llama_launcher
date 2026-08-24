@@ -156,3 +156,17 @@ def test_rpc_workers_round_trip():
 def test_container_profile_round_trip_unchanged():
     p = Profile(name="plain", runtime=Runtime())
     assert profile_from_dict(profile_to_dict(p)).runtime.rpc_workers == []
+
+
+# -- load-time trust clamps ---------------------------------------------------
+
+def test_profile_from_dict_clamps_unknown_binary_to_podman():
+    from llama_launcher.store.profiles import profile_from_dict
+    p = profile_from_dict({"name": "x", "runtime": {"binary": "/usr/bin/evil"}})
+    assert p.runtime.binary == "podman"
+
+
+def test_profile_from_dict_keeps_podman_and_docker():
+    from llama_launcher.store.profiles import profile_from_dict
+    assert profile_from_dict({"name": "x", "runtime": {"binary": "docker"}}).runtime.binary == "docker"
+    assert profile_from_dict({"name": "x", "runtime": {"binary": "podman"}}).runtime.binary == "podman"
