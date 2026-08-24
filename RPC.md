@@ -130,9 +130,10 @@ cause of an RPC pool that connects but fails or misbehaves mid-load.
 A pool can "start" (workers up, head running) and still not actually be
 pooling, or fail subtly mid-load. Use these signals to tell the difference.
 
-> **Note:** the RPC pool has been validated end-to-end against CPU-only
-> workers; a run against real GPU workers has not yet been exercised, so
-> treat GPU pooling as experimental and report issues.
+> **Under construction.** RPC pooling is implemented but has not yet been
+> verified by the author on real multi-GPU hardware, and the build is still
+> being planned out. Treat the whole feature as experimental and expect rough
+> edges; feedback and issue reports are welcome.
 
 ### Success signals: the head log at load time
 

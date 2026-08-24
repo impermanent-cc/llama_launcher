@@ -175,7 +175,12 @@ instance is shown as its own card, tagged `· <node>` for remotes, and its logs/
 over that node's connection. One unreachable node degrades to zero cards for itself without
 blanking the rest.
 
-## RPC pool: pooling VRAM+RAM across machines
+## RPC pool: pooling VRAM+RAM across machines (experimental)
+
+> **Under construction.** RPC pooling is wired up in the GUI but has not yet been
+> verified by the author on real multi-GPU hardware, and the build is still being
+> planned out. Treat it as experimental and expect rough edges; the build recipe
+> and current status live in [`RPC.md`](RPC.md).
 
 To run a model larger than any single machine's memory, set Configure → **Launch mode** to
 **RPC pool (multi-node)**. This pools VRAM+RAM across several machines using llama.cpp's
@@ -220,9 +225,9 @@ Click a row to point the full Monitor (and logs) below at that instance; the
 ■ button on a row stops it. Selecting an instance to watch does not change the
 profile you're editing.
 
-## Benchmark (Monitor tab)
+## Benchmark
 
-The Monitor tab has a **Benchmark** section for a controlled, repeatable speed
+The **Benchmark** tab runs a controlled, repeatable speed
 measurement so a config change (flags or model) can be compared apples-to-apples.
 It POSTs standardized filler prompts to the running server and reads llama.cpp's
 `timings` to report **prompt-eval** and **generation** tok/s at each prompt size.
