@@ -38,6 +38,15 @@ def binary_available(binary: str) -> bool:
 
 
 def is_rootless(binary: str) -> bool:
+    # podman exposes a boolean at Host.Security.Rootless; docker info has no such
+    # field (the template errors, leaving stdout empty -> always False, so a
+    # rootless docker daemon was misreported as rootful in the diagnostic
+    # report). docker instead lists "name=rootless" among SecurityOptions -- use
+    # a runtime-appropriate probe, like _base/node_reachable do.
+    if binary == "docker":
+        res = _run([binary, "info", "--format",
+                    "{{range .SecurityOptions}}{{println .}}{{end}}"])
+        return "rootless" in res.stdout
     res = _run([binary, "info", "--format", "{{.Host.Security.Rootless}}"])
     return res.stdout.strip() == "true"
 

@@ -52,6 +52,28 @@ def test_is_rootless_true(monkeypatch):
     assert rt.is_rootless("podman") is True
 
 
+def test_is_rootless_docker_reads_security_options(monkeypatch):
+    # docker has no Host.Security.Rootless field (that podman template errors and
+    # leaves stdout empty -> always False, a live-repro parity bug). A rootless
+    # docker daemon lists "name=rootless" among SecurityOptions instead.
+    calls = {}
+
+    def fake_run(args):
+        calls["args"] = args
+        return FakeCompleted(
+            stdout="name=apparmor\nname=seccomp,profile=default\nname=rootless\n")
+
+    monkeypatch.setattr(rt, "_run", fake_run)
+    assert rt.is_rootless("docker") is True
+    assert calls["args"][0] == "docker" and "info" in calls["args"]
+
+
+def test_is_rootless_docker_rootful(monkeypatch):
+    monkeypatch.setattr(rt, "_run", lambda args: FakeCompleted(
+        stdout="name=apparmor\nname=seccomp,profile=default\n"))
+    assert rt.is_rootless("docker") is False
+
+
 def test_run_oserror_returns_completed_process(monkeypatch):
     monkeypatch.setattr(rt.subprocess, "run", lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError("no podman")))
     result = rt._run(["podman", "info"])
