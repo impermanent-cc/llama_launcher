@@ -28,6 +28,10 @@ RPC, and show a live **CPU/GPU/memory stats dock**.
 
 ## Quickstart: your first running model
 
+![Configure tab: building a llama-server launch command](assets/screenshots/config.png)
+
+*The Configure tab: choose engine, image, model, and GPU mode; the exact command and a live VRAM-fit estimate update as you edit.*
+
 After installing (below), the GUI opens on the **Configure** tab:
 
 1. **Point at your models.** In the **Folders** row, add a mount whose *host* path is the
@@ -201,6 +205,10 @@ that then appears in the picker. Presets store only `llama-server` settings
 name.
 
 ## Instances panel (Monitor tab)
+
+![Monitor tab: live instance cards, throughput, GPU stats, and streaming logs](assets/screenshots/monitor.png)
+
+*The Monitor tab: per-instance cards (generation tok/s, KV%), live GPU/CPU stats, and the streaming server log.*
 
 The top of the Monitor tab lists every server this launcher has started, with
 its port, health, and a live summary stat (generation tok/s, or "ready" for an
