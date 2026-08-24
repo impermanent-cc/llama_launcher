@@ -109,3 +109,11 @@ def test_sk_redaction_still_catches_a_real_token_after_punctuation():
     for text in ("key=sk-abcdefghijklmnopqrst", "(sk-abcdefghijklmnopqrst)",
                  "sk-abcdefghijklmnopqrst"):
         assert "sk-abcdefghijklmnopqrst" not in redact_secrets(text)
+
+
+def test_redact_secrets_masks_known_key_with_space():
+    from llama_launcher.core.report import redact_secrets
+    text = "launched with key: my secret key here in logs"
+    out = redact_secrets(text, known=["my secret key"])
+    assert "my secret key" not in out
+    assert "***" in out

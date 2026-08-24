@@ -122,6 +122,19 @@ class SettingWidget(QWidget):
             self._editor = container
         else:  # string
             self._editor = QLineEdit()
+            if getattr(setting, "secret", False):
+                # Mask the value on screen (shoulder-surfing / screenshots) with a
+                # reveal toggle; the value is still readable programmatically.
+                self._editor.setEchoMode(QLineEdit.Password)
+                self._editor.setToolTip((self._editor.toolTip() + "  ").strip())
+                reveal = QToolButton()
+                reveal.setText("👁")
+                reveal.setCheckable(True)
+                reveal.setToolTip("Show / hide")
+                reveal.toggled.connect(
+                    lambda on: self._editor.setEchoMode(
+                        QLineEdit.Normal if on else QLineEdit.Password))
+                self._reveal_btn = reveal
             self._editor.textChanged.connect(lambda: self.changed.emit())
 
         # Cap editor widths so dropdowns/inputs don't stretch the whole panel,
@@ -133,6 +146,8 @@ class SettingWidget(QWidget):
         if _max_width:
             self._editor.setMaximumWidth(_max_width)
         layout.addWidget(self._editor)
+        if getattr(self, "_reveal_btn", None) is not None:
+            layout.addWidget(self._reveal_btn)
         layout.addStretch(1)
 
         self._dot = SuggestionDot(self)

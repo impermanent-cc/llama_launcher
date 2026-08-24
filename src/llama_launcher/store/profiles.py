@@ -47,12 +47,24 @@ def profile_from_dict(d: dict) -> Profile:
 def _profiles_dir(base_dir: Path) -> Path:
     d = base_dir / "profiles"
     d.mkdir(parents=True, exist_ok=True)
+    # A profile may hold a cleartext api-key; keep the directory owner-only.
+    # mkdir's mode only applies on creation, so tighten a pre-existing dir too.
+    try:
+        d.chmod(0o700)
+    except OSError:
+        pass
     return d
 
 
 def save_profile(p: Profile, base_dir: Path) -> Path:
     path = _profiles_dir(base_dir) / f"{slugify(p.name)}.json"
-    path.write_text(json.dumps(profile_to_dict(p), indent=2))
+    data = json.dumps(profile_to_dict(p), indent=2)
+    # Write owner-only from the start: a profile can carry an api-key, and
+    # write_text() + a later chmod would leave it world-readable in between.
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        f.write(data)
+    os.chmod(path, 0o600)          # tighten a pre-existing wider file too
     return path
 
 

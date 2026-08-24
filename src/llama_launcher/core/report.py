@@ -15,13 +15,19 @@ _REDACTIONS = (
 _SK_TOKEN = re.compile(r"(?<![A-Za-z0-9])sk-[A-Za-z0-9_\-]{16,}")
 
 
-def redact_secrets(text: str) -> str:
+def redact_secrets(text: str, known=None) -> str:
+    """Mask secrets in `text`. `known` is an optional iterable of exact secret
+    values to redact verbatim -- catches keys the pattern rules miss (a key
+    containing a space, or a bare non-`sk-` key echoed in logs)."""
     if not text:
         return text
     text = _REDACTIONS[0].sub(r"\1***", text)
     text = _REDACTIONS[1].sub(r"\1***\3", text)
     text = _REDACTIONS[2].sub(r"\1***", text)
     text = _SK_TOKEN.sub("***", text)      # same marker as the rules above
+    for secret in (known or ()):
+        if secret and secret.strip():
+            text = text.replace(secret, "***")
     return text
 
 

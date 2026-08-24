@@ -151,3 +151,17 @@ def test_main_dry_run_flag_routes_to_dry_run(tmp_path, capsys, monkeypatch):
     out = capsys.readouterr().out
     assert "# Container command:" in out
     assert "# Terminal invocation:" in out
+
+
+def test_dry_run_redacts_api_key(tmp_path, capsys, monkeypatch):
+    """--dry-run output is what users paste into bug reports; the api-key must
+    not appear in it (neither the container command nor the terminal line)."""
+    p = _make_profile("keyed", port=8080)
+    p.settings["api-key"] = "sk-supersecret-value"
+    save_profile(p, tmp_path)
+    monkeypatch.setattr("llama_launcher.app.binary_available", lambda _: True)
+    ret = dry_run(profile_name="keyed", base_dir=tmp_path)
+    out = capsys.readouterr().out
+    assert ret in (0, 1)
+    assert "sk-supersecret-value" not in out
+    assert "***" in out

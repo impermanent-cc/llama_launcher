@@ -170,3 +170,15 @@ def test_profile_from_dict_keeps_podman_and_docker():
     from llama_launcher.store.profiles import profile_from_dict
     assert profile_from_dict({"name": "x", "runtime": {"binary": "docker"}}).runtime.binary == "docker"
     assert profile_from_dict({"name": "x", "runtime": {"binary": "podman"}}).runtime.binary == "podman"
+
+
+def test_save_profile_writes_owner_only_permissions(tmp_path):
+    """A profile can hold a cleartext api-key; the file (and profiles dir) must
+    not be world-readable at the default umask."""
+    import stat
+    from llama_launcher.store.profiles import save_profile
+    from llama_launcher.core.spec import Profile
+    p = Profile(name="k", settings={"api-key": "sk-secret"})
+    path = save_profile(p, tmp_path)
+    assert stat.S_IMODE(path.stat().st_mode) == 0o600
+    assert stat.S_IMODE(path.parent.stat().st_mode) == 0o700

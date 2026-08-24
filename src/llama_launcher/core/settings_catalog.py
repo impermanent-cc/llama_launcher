@@ -20,6 +20,7 @@ class Setting:
     suggestions: tuple = ()   # int only: preset values offered in an editable combo
     engine: str = "any"       # "any" | "ik_llama.cpp"  (which engine surfaces this flag)
     deprecated: bool = False  # upstream emits DEPRECATED warnings; kept for old images
+    secret: bool = False      # mask the editor (password field) -- e.g. api-key
 
 
 KV_CACHE_TYPES = ("f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1")
@@ -257,7 +258,7 @@ _ALL = [
     Setting("port", "--port", "int", 8080, "Server & Tools", (), 1, 65535, 1,
             tooltip="TCP port the server listens on (bound to 127.0.0.1). Connect clients to "
                     "http://localhost:<port>. Default 8080."),
-    Setting("api-key", "--api-key", "string", "", "Server & Tools", (),
+    Setting("api-key", "--api-key", "string", "", "Server & Tools", (), secret=True,
             tooltip="Require this key in the Authorization header for API requests; supply "
                     "several comma-separated. Empty = no authentication."),
     Setting("jinja", "--jinja", "bool", False, "Server & Tools", (),

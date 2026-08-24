@@ -27,6 +27,13 @@ def router_dir(base_dir: Path, router_name: str, create: bool = True) -> Path:
     d = Path(base_dir) / "router" / slugify(router_name)
     if create:
         d.mkdir(parents=True, exist_ok=True, mode=0o700)
+        # mkdir's mode only applies when it creates the dir; tighten a
+        # pre-existing (possibly group/world-readable) dir too, since it holds
+        # the API key.
+        try:
+            d.chmod(0o700)
+        except OSError:
+            pass
     return d
 
 

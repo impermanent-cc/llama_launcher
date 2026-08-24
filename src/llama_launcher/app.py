@@ -4,6 +4,7 @@ import shlex
 import sys
 
 from llama_launcher.core.command_builder import build_command
+from llama_launcher.core.report import redact_secrets
 from llama_launcher.core.validation import dial_host, validate
 from llama_launcher.services import headless
 from llama_launcher.services import api_key as api_key_store
@@ -71,10 +72,14 @@ def dry_run(profile_name: str | None = None, base_dir=None) -> int:
     template = load_config(base_dir).get("terminal", DEFAULT_TEMPLATE)
     term = build_terminal_argv(inner, template)
 
+    # Redact the api-key: --dry-run output is exactly what users paste into bug
+    # reports. Pass the known key value too, so a key without an `sk-` prefix or
+    # with a space is caught as well.
+    known = [str(p.settings.get("api-key", ""))]
     print("# Container command:")
-    print(shlex.join(inner))
+    print(redact_secrets(shlex.join(inner), known=known))
     print("# Terminal invocation:")
-    print(shlex.join(term))
+    print(redact_secrets(shlex.join(term), known=known))
 
     if issues:
         print("# Validation:")

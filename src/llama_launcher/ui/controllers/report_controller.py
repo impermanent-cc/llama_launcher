@@ -1,4 +1,5 @@
 import os
+import shlex
 import subprocess
 import datetime
 from pathlib import Path
@@ -58,9 +59,13 @@ class ReportController:
             QMessageBox.warning(self.window, "Open Web UI", "Could not open browser (xdg-open not found).")
 
     def export_sh(self, path: str):
-        cmd = " ".join(self.window._configure_panel.build_current_command())
-        Path(path).write_text(f"#!/usr/bin/env bash\n{cmd}\n")
-        os.chmod(path, 0o755)
+        # shlex.join, not " ".join: a profile field with a space or shell
+        # metacharacter must stay a single argv token, never become shell code
+        # when the script is run. Owner-only (0700) -- the argv may carry an
+        # api-key, so it shouldn't be world-readable.
+        cmd = shlex.join(self.window._configure_panel.build_current_command())
+        Path(path).write_text(f"#!/usr/bin/env bash\nset -e\n{cmd}\n")
+        os.chmod(path, 0o700)
 
     def gather_report_data(self) -> dict:
         import platform, json as _json
@@ -82,16 +87,21 @@ class ReportController:
                        f"rootless={runtime.is_rootless(p.runtime.binary)}\n"
                        f"{gpu_txt}\nOS={platform.platform()}")
         ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+        # Redact the profile's own key by value too, so one containing a space or
+        # lacking the sk- prefix (which the pattern rules would miss) is caught in
+        # every section of the report users paste for help.
+        known = [str(p.settings.get("api-key", "")),
+                 api_key_store.resolve_api_key(self.window.router_base_dir(), p) or ""]
         return {
             "generated_at": ts,
-            "command": report_mod.redact_secrets(cmd),
-            "profile": report_mod.redact_secrets(_json.dumps(profile_to_dict(p), indent=2)),
+            "command": report_mod.redact_secrets(cmd, known=known),
+            "profile": report_mod.redact_secrets(_json.dumps(profile_to_dict(p), indent=2), known=known),
             "validation": [f"[{i.level}] {i.message}" for i in issues],
             "status_history": [self.window.status_label.text()],
             "runtime": runtime_txt,
             "metrics": self._metrics_report_text(p),
             "image": p.image,
-            "logs": report_mod.redact_secrets(self.window.monitor_panel.log_view.toPlainText()[-4000:]),
+            "logs": report_mod.redact_secrets(self.window.monitor_panel.log_view.toPlainText()[-4000:], known=known),
         }
 
     def _metrics_report_text(self, p: Profile) -> str:

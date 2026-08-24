@@ -158,3 +158,11 @@ def test_set_enum_choices_noop_on_non_enum(qtbot):
     qtbot.addWidget(w)
     w.set_enum_choices(["a", "b"])  # must not raise
     assert w.value() == CATALOG["ctx-size"].default
+
+
+def test_api_key_widget_is_password_masked(qtbot):
+    from PySide6.QtWidgets import QLineEdit
+    w = make_widget(CATALOG["api-key"])
+    w.set_value("sk-secret")
+    assert w._editor.echoMode() == QLineEdit.Password
+    assert w.value() == "sk-secret"          # value still readable programmatically

@@ -126,3 +126,19 @@ def test_on_generate_report_auto_saves(qtbot, tmp_path, monkeypatch):
     assert len(matches) == 1
     content = matches[0].read_text()
     assert "_Generated:" in content
+
+
+def test_export_sh_uses_shlex_join_and_owner_only_mode(qtbot, monkeypatch, tmp_path):
+    """Export must shell-quote each argv element (a profile field with a space or
+    metacharacter must not become shell code) and write an owner-only file."""
+    import stat
+    monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
+    w = mw.MainWindow(); qtbot.addWidget(w)
+    monkeypatch.setattr(w._configure_panel, "build_current_command",
+                        lambda *a: ["podman", "run", "--name", "a b; touch pwned", "img"])
+    out = tmp_path / "run.sh"
+    w._report.export_sh(str(out))
+    text = out.read_text()
+    assert "'a b; touch pwned'" in text          # single argv token, quoted
+    assert "touch pwned\n" not in text           # not split into a second command
+    assert stat.S_IMODE(out.stat().st_mode) == 0o700
