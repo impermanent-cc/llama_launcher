@@ -3,6 +3,7 @@ from pathlib import Path
 
 from llama_launcher.core.presets import Preset
 from llama_launcher.core.spec import slugify
+from llama_launcher.store._io import write_private
 
 
 def preset_to_dict(p: Preset) -> dict:
@@ -27,7 +28,7 @@ def _presets_dir(base_dir: Path) -> Path:
 
 def save_preset(p: Preset, base_dir: Path) -> Path:
     path = _presets_dir(base_dir) / f"{slugify(p.key)}.json"
-    path.write_text(json.dumps(preset_to_dict(p), indent=2))
+    write_private(path, json.dumps(preset_to_dict(p), indent=2))
     return path
 
 

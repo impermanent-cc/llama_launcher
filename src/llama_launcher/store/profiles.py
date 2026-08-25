@@ -3,6 +3,8 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
+from llama_launcher.store._io import write_private
+
 from llama_launcher.core.spec import (
     Profile, Mount, LoraRef, Runtime, RouterMember, RpcWorker, slugify,
 )
@@ -118,4 +120,4 @@ def load_config(base_dir: Path) -> dict:
 
 
 def save_config(cfg: dict, base_dir: Path) -> None:
-    _config_path(base_dir).write_text(json.dumps(cfg, indent=2))
+    write_private(_config_path(base_dir), json.dumps(cfg, indent=2))

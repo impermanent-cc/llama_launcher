@@ -70,3 +70,11 @@ def test_runtime_engine_defaults_to_llama_cpp():
 
 def test_runtime_engine_is_settable():
     assert Runtime(engine="ik_llama.cpp").engine == "ik_llama.cpp"
+
+
+def test_slugify_empty_falls_back_to_placeholder():
+    # An all-symbol or empty name must not collapse to "" (a ".json" filename /
+    # "llama-" container name); fall back to a stable placeholder.
+    assert slugify("!!!") == "unnamed"
+    assert slugify("") == "unnamed"
+    assert slugify("   ") == "unnamed"

@@ -65,3 +65,35 @@ def test_remotes_clamps_unknown_binary(tmp_path):
     ]))
     n = [x for x in load_nodes(tmp_path) if x.kind == "remote"][0]
     assert n.binary == "podman"
+
+
+def test_load_drops_node_with_leading_dash_name(tmp_path):
+    # A name/connection beginning with '-' could be misread by podman/docker as
+    # an option flag (argv-flag confusion), so such a row is dropped on load.
+    import json
+    from llama_launcher.store.nodes import _nodes_file
+    _nodes_file(tmp_path).write_text(json.dumps([
+        {"name": "-oProxyCommand=x", "connection": "-oProxyCommand=x",
+         "ssh_target": "me@10.0.0.9", "binary": "podman"},
+        {"name": "good", "connection": "good", "ssh_target": "me@10.0.0.8"},
+    ]))
+    names = [n.name for n in load_nodes(tmp_path)]
+    assert names == ["local", "good"]
+
+
+def test_load_clamps_leading_dash_connection_to_name(tmp_path):
+    import json
+    from llama_launcher.store.nodes import _nodes_file
+    _nodes_file(tmp_path).write_text(json.dumps([
+        {"name": "box", "connection": "-x", "ssh_target": "me@10.0.0.7"},
+    ]))
+    box = get_node(tmp_path, "box")
+    assert box is not None and box.connection == "box"   # not "-x"
+
+
+def test_saved_nodes_file_is_owner_only(tmp_path):
+    import stat
+    from llama_launcher.store.nodes import _nodes_file
+    add_node(Node(name="b", kind="remote", connection="b", ssh_target="me@1.2.3.4"), tmp_path)
+    mode = stat.S_IMODE(_nodes_file(tmp_path).stat().st_mode)
+    assert mode == 0o600

@@ -5,7 +5,12 @@ from llama_launcher.core.pathmap import container_to_host
 from llama_launcher.core.capabilities import derive_caps, ModelCaps
 
 
-def read_gguf_meta(path, max_bytes: int = 16 * 1024 * 1024) -> GgufMeta | None:
+def read_gguf_meta(path, max_bytes: int = 64 * 1024 * 1024) -> GgufMeta | None:
+    # GGUF metadata (including the tokenizer vocab) lives at the file start,
+    # before the tensor data. A large-vocab model can push the architecture keys
+    # past a tight cap -> parse_gguf_header raises -> None -> vram falls back to a
+    # weights-only (no KV) estimate silently. 64MB comfortably covers even
+    # 256k-token vocabs while still reading only the header, not the weights.
     try:
         with open(path, "rb") as f:
             data = f.read(max_bytes)

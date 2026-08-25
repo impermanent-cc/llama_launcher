@@ -3,6 +3,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from llama_launcher.core.nodes import Node, LOCAL_NODE, valid_ssh_target
+from llama_launcher.store._io import write_private
 
 _ALLOWED_BINARIES = ("podman", "docker")
 
@@ -28,16 +29,24 @@ def _remotes(base_dir: Path) -> list[Node]:
         # A loaded nodes.json is untrusted config: an ssh_target that isn't a
         # safe destination (e.g. `-oProxyCommand=...`) would be smuggled to ssh
         # as an option, and binary is used as argv[0]. Drop bad ssh rows, clamp
-        # the binary.
+        # the binary. name/connection reach argv as `--connection <name>` /
+        # `--context <name>`; a leading '-' could be misread as an option flag,
+        # so drop a dash-led name and clamp a dash-led connection back to name.
+        name = d["name"]
+        if name.startswith("-"):
+            continue
         ssh = d.get("ssh_target", "")
         if not valid_ssh_target(ssh):
             continue
         binary = d.get("binary", "podman")
         if binary not in _ALLOWED_BINARIES:
             binary = "podman"
+        connection = d.get("connection") or name
+        if connection.startswith("-"):
+            connection = name
         out.append(Node(
-            name=d["name"], kind="remote",
-            connection=d.get("connection", d["name"]),
+            name=name, kind="remote",
+            connection=connection,
             ssh_target=ssh,
             binary=binary,
             enabled=bool(d.get("enabled", True)),
@@ -56,7 +65,7 @@ def save_nodes(nodes: list[Node], base_dir: Path) -> None:
     remotes = [asdict(n) for n in nodes if n.kind == "remote"]
     for r in remotes:
         r.pop("kind", None)            # implied "remote" on load
-    _nodes_file(base_dir).write_text(json.dumps(remotes, indent=2))
+    write_private(_nodes_file(base_dir), json.dumps(remotes, indent=2))
 
 
 def get_node(base_dir: Path, name: str) -> Node | None:

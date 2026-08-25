@@ -82,8 +82,10 @@ class Profile:
 
 
 def slugify(name: str) -> str:
-    s = re.sub(r"[^a-z0-9]+", "-", name.lower())
-    return s.strip("-")
+    s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
+    # An all-symbol / empty name would collapse to "" -> a ".json" filename or a
+    # "llama-" container name; fall back to a stable placeholder.
+    return s or "unnamed"
 
 
 def member_model_id(m: RouterMember) -> str:
