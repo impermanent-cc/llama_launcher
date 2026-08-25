@@ -575,3 +575,30 @@ def test_render_instances_advances_decode_baselines(win):
                                       "decode_now_by_key": {"local/x": (5.0, 1.0)}}
     win._monitor._render_instances()
     assert win._monitor._cards_decode_prev == {"local/x": (5.0, 1.0)}
+
+
+def test_pool_instance_stop_dispatches_off_thread(win, tmp_path):
+    # The Monitor instance-card Stop for an RPC pool head must go through
+    # LaunchController's off-thread pool seam, not call rpc.stop_pool inline on
+    # the UI thread (per-worker `podman stop` + ssh teardown would freeze the GUI).
+    base = win.base_dir()
+    store.save_profile(Profile(name="pool", image="img:tag",
+                               runtime=Runtime(launch_mode="rpc")), base)
+    head = Instance(name="llama-pool", profile="pool", mode="server", running=True,
+                    port=8080, host="127.0.0.1", embeddings=False, reranking=False)
+    win._monitor._instances = [head]
+
+    import llama_launcher.services.rpc as rpc
+    sync_called = {}
+    monkeypatch_stop = lambda p, base, **k: sync_called.setdefault("ok", True)
+    rpc_stop_orig = rpc.stop_pool
+    rpc.stop_pool = monkeypatch_stop
+    delegated = {}
+    win._launch.stop_pool_async = lambda profile: delegated.setdefault("name", profile.name)
+    try:
+        win._monitor._on_instance_stop("llama-pool")
+    finally:
+        rpc.stop_pool = rpc_stop_orig
+
+    assert delegated.get("name") == "pool", "must delegate to the off-thread pool seam"
+    assert "ok" not in sync_called, "must NOT call rpc.stop_pool synchronously on the UI thread"

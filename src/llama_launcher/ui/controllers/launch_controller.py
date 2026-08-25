@@ -386,17 +386,24 @@ class LaunchController:
         proc.start(argv[0], argv[1:])
         return proc
 
+    def stop_pool_async(self, profile) -> bool:
+        """Stop an RPC pool OFF the UI thread. stop_pool does a `podman stop`
+        per worker (an ssh round-trip when remote) plus tunnel teardown, which
+        would freeze the GUI if run inline. Returns False if a pool op is already
+        in flight. Shared by on_stop and the Monitor instance-card Stop so both
+        stop paths get the same off-thread dispatch."""
+        if self._pool_inflight:
+            return False
+        self._pool_inflight = True
+        self.window.status_label.setText("● stopping pool…")
+        base = self.window.base_dir()
+        self._run_pool_async(lambda: rpc.stop_pool(profile, base), self._on_pool_stopped)
+        return True
+
     def on_stop(self):
         p = self.window._configure_panel.current_profile()
         if p.runtime.launch_mode == "rpc":
-            # stop_pool does a `podman stop` per worker (an ssh round-trip when
-            # remote) plus tunnel teardown -- off the UI thread, same as launch.
-            if self._pool_inflight:
-                return
-            self._pool_inflight = True
-            self.window.status_label.setText("● stopping pool…")
-            base = self.window.base_dir()
-            self._run_pool_async(lambda: rpc.stop_pool(p, base), self._on_pool_stopped)
+            self.stop_pool_async(p)
             return
 
         # Stop the log follower immediately; run `podman stop` asynchronously so a

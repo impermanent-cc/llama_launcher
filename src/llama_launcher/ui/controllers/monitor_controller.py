@@ -744,9 +744,11 @@ class MonitorController:
         if pool_profile is not None:
             # Coordinated stop: the head AND every worker container, over each
             # worker's own node -- a bare `podman stop` on just the head would
-            # leave the workers running.
-            rpc.stop_pool(pool_profile, self.window.base_dir())
-            self.update_status()
+            # leave the workers running. Dispatch OFF the UI thread (per-worker
+            # `podman stop` + ssh tunnel teardown would otherwise freeze the
+            # GUI), reusing LaunchController's pool seam; it refreshes status on
+            # completion via _on_pool_stopped.
+            self.window._launch.stop_pool_async(pool_profile)
         else:
             binary = inst.binary if inst is not None \
                 else self.window._configure_panel.current_profile().runtime.binary

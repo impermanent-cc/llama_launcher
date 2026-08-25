@@ -328,3 +328,24 @@ def test_drain_awaits_inflight_pool_worker(main_window):
     ctl.drain()
 
     assert ran["done"] is True, "drain() must wait for the in-flight pool worker"
+
+
+def test_stop_pool_async_defers_to_run_pool_async_and_sets_inflight(main_window, monkeypatch):
+    ctl = main_window._launch
+    captured = {}
+    monkeypatch.setattr(ctl, "_run_pool_async",
+                        lambda work, on_done: captured.update(work=work, on_done=on_done))
+    ok = ctl.stop_pool_async(_rpc_profile())
+    assert ok is True
+    assert "work" in captured, "stop must dispatch through _run_pool_async (off-thread)"
+    assert ctl._pool_inflight is True
+
+
+def test_stop_pool_async_reentrant_guard(main_window, monkeypatch):
+    ctl = main_window._launch
+    ctl._pool_inflight = True
+    called = {}
+    monkeypatch.setattr(ctl, "_run_pool_async",
+                        lambda work, on_done: called.setdefault("ok", True))
+    assert ctl.stop_pool_async(_rpc_profile()) is False
+    assert "ok" not in called
