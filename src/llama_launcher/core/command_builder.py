@@ -251,6 +251,14 @@ def needs_server_entrypoint(image: str) -> bool:
     return image_tag(image).split("-", 1)[0] in _TOOLS_VARIANTS
 
 
+def _connection_flag(binary: str) -> str:
+    """The remote-host selector flag for a runtime: podman uses --connection,
+    docker uses --context (the same concept, different flag). Mirrors
+    services.runtime._base -- a docker launch that emitted --connection would be
+    rejected ("unknown flag") while stop/status, which go through _base, worked."""
+    return "--context" if binary == "docker" else "--connection"
+
+
 def _run_level_args(profile: Profile, router_host_dir: str = "",
                     detach: bool = False, connection: str = "",
                     network_host: bool = False) -> list[str]:
@@ -259,7 +267,7 @@ def _run_level_args(profile: Profile, router_host_dir: str = "",
 
     argv = [rt.binary]
     if connection:
-        argv += ["--connection", connection]
+        argv += [_connection_flag(rt.binary), connection]
     argv += ["run"]
     # A router is a persistent headless host: run it detached, and keep the
     # container after exit so a crash leaves a readable exit code and logs.
@@ -519,7 +527,7 @@ def build_worker_command(profile, worker, index, connection="", wport=None):
     port = wport if wport is not None else worker.port
     argv = [rt.binary]
     if connection:
-        argv += ["--connection", connection]
+        argv += [_connection_flag(rt.binary), connection]
     argv += ["run", "-d", "--name", f"llama-{slugify(profile.name)}-rpc{index}"]
     argv += ["--label", f"llama-launcher.profile={profile.name}"]
     argv += ["--label", "llama-launcher.mode=rpc-worker"]
