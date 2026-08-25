@@ -14,9 +14,14 @@ for it before release.
 
 ## Attribution policy
 
-This file is the repository-level disclosure of AI assistance for the project.
-Individual commits may also carry a `Co-Authored-By` trailer crediting the model
-that helped with them.
+This project uses a single repository-level disclosure of AI assistance, this
+file plus the short pointer in the README, instead of per-commit attribution
+trailers. Credit is presented cohesively here rather than scattered across
+individual commit messages.
+
+This policy takes effect for commits made on or after 2026-08-24. Some earlier
+commits carry a `Co-Authored-By` trailer from the project's previous practice;
+those are left unchanged.
 
 ## Responsibility
 
