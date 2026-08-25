@@ -11,7 +11,7 @@ import re
 import shlex
 from dataclasses import dataclass, field
 
-from .settings_catalog import CATALOG, ROUTER_ONLY_KEYS
+from .settings_catalog import CATALOG, ROUTER_ONLY_KEYS, IK_EXTRA_KV_CACHE_TYPES
 from .spec import Profile, RouterMember, member_model_id
 
 # Keys the router owns. llama.cpp strips or overwrites these when it launches a
@@ -77,11 +77,29 @@ def convert_raw_args(raw: str) -> tuple[dict, list[str]]:
 
 
 def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
+    """Preset key/value pairs for a member's settings.
+
+    Applies the SAME gating as command_builder._owned_server_pairs so the two
+    argv-generation paths agree: engine-gated flags never reach a mismatched
+    engine, ik-only KV-cache VALUES are dropped on a mainline launch, an enum
+    left at its default (a "leave engine default" sentinel) is skipped, blanks
+    emit nothing, and --load-mode supersedes the legacy --no-mmap/--mlock. A
+    router that skipped these emitted flags the child llama-server then rejects.
+    """
     out: list[tuple[str, str]] = []
+    engine = profile.runtime.engine
+    suppress = {"no-mmap", "mlock"} if "load-mode" in profile.settings else set()
     for key, setting in catalog.items():
-        if key in EXCLUDED_PRESET_KEYS or key not in profile.settings:
+        if key in EXCLUDED_PRESET_KEYS or key in suppress or key not in profile.settings:
+            continue
+        if setting.engine != "any" and setting.engine != engine:
             continue
         value = profile.settings[key]
+        if (key in ("cache-type-k", "cache-type-v")
+                and value in IK_EXTRA_KV_CACHE_TYPES and engine != "ik_llama.cpp"):
+            continue
+        if setting.type == "enum" and value == setting.default:
+            continue
         # The INI key is the flag itself, minus dashes, including negative
         # flags such as --no-cors-credentials, whose key is "no-cors-credentials".
         ini_key = setting.flag.lstrip("-")
@@ -90,8 +108,17 @@ def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
                 continue
             out.append((ini_key, "true"))
         else:
+            if not str(value).strip():          # blank -> emit nothing
+                continue
             out.append((ini_key, str(value)))
     return out
+
+
+def _ini_safe(value: str) -> bool:
+    """An INI value must not carry a newline: a newline in a path or setting
+    value would inject arbitrary preset keys/sections (the section is served to
+    the child llama-server). CR is rejected too (some parsers split on it)."""
+    return "\n" not in value and "\r" not in value
 
 
 def render_preset(pairs: list, catalog: dict = CATALOG) -> PresetResult:
@@ -100,18 +127,32 @@ def render_preset(pairs: list, catalog: dict = CATALOG) -> PresetResult:
     warnings: list[str] = []
 
     for member, profile in pairs:
+        def emit(key: str, value) -> bool:
+            """Append `key = value`, dropping (with a warning) any value that
+            carries a newline so it cannot inject preset keys/sections."""
+            if not _ini_safe(str(value)):
+                warnings.append(
+                    f"{profile.name}: {key!r} value contains a newline and was "
+                    f"dropped (it would inject router preset keys).")
+                return False
+            lines.append(f"{key} = {value}")
+            return True
+
         model_id = member_model_id(member)
+        if not _ini_safe(model_id):
+            warnings.append(f"{profile.name}: model id contains a newline; member skipped.")
+            continue
         lines.append(f"[{model_id}]")
 
         if profile.model:
-            lines.append(f"model = {profile.model}")
+            emit("model", profile.model)
         if profile.mmproj:
-            lines.append(f"mmproj = {profile.mmproj}")
+            emit("mmproj", profile.mmproj)
         if profile.draft_model:
-            lines.append(f"spec-draft-model = {profile.draft_model}")
+            emit("spec-draft-model", profile.draft_model)
 
         if profile.loras:
-            lines.append(f"lora = {profile.loras[0].path}")
+            emit("lora", profile.loras[0].path)
             if len(profile.loras) > 1:
                 dropped = ", ".join(l.path for l in profile.loras[1:])
                 warnings.append(
@@ -121,8 +162,8 @@ def render_preset(pairs: list, catalog: dict = CATALOG) -> PresetResult:
 
         emitted: set = set()
         for key, value in _setting_pairs(profile, catalog):
-            lines.append(f"{key} = {value}")
-            emitted.add(key)
+            if emit(key, value):
+                emitted.add(key)
 
         raw_pairs, problems = convert_raw_args(profile.raw_args)
         for key, value in raw_pairs.items():
@@ -135,8 +176,8 @@ def render_preset(pairs: list, catalog: dict = CATALOG) -> PresetResult:
                     f"raw arg {key!r} duplicates a value already set in the form; "
                     f"the form value is kept")
                 continue
-            lines.append(f"{key} = {value}")
-            emitted.add(key)
+            if emit(key, value):
+                emitted.add(key)
         for problem in problems:
             warnings.append(f"{profile.name}: {problem}")
 

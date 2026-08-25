@@ -168,3 +168,35 @@ def test_raw_args_negative_float_value():
 def test_raw_args_still_treats_a_real_flag_as_a_flag():
     pairs, _ = convert_raw_args("--flag --other x")
     assert pairs == {"flag": "true", "other": "x"}
+
+
+def test_preset_omits_engine_gated_flag_for_mainline_member():
+    # An ik_llama.cpp-only flag on a llama.cpp member must not reach a mainline
+    # router's preset (the child llama-server would reject it) -- parity with
+    # command_builder._owned_server_pairs.
+    from llama_launcher.core.spec import Runtime
+    p = Profile(name="Q", model="/m.gguf", settings={"mla-use": "1"},
+                runtime=Runtime(engine="llama.cpp"))
+    assert "mla-use" not in render_preset([(_member(), p)]).text
+
+
+def test_preset_omits_enum_value_equal_to_default():
+    # An enum left at its default is a "leave engine default" sentinel; emitting
+    # it is redundant (and for ik's mla-use 'auto', invalid).
+    p = Profile(name="Q", model="/m.gguf", settings={"flash-attn": "auto"})
+    assert "flash-attn" not in render_preset([(_member(), p)]).text
+
+
+def test_preset_omits_blank_string_value():
+    p = Profile(name="Q", model="/m.gguf", settings={"tensor-split": ""})
+    assert "tensor-split" not in render_preset([(_member(), p)]).text
+
+
+def test_preset_rejects_newline_injection_in_path_field():
+    # A newline in a path field must not inject arbitrary preset keys/sections.
+    evil = "/m.gguf\nload-on-startup = true\n[injected]\nmodel = /etc/shadow"
+    p = Profile(name="Q", model=evil)
+    res = render_preset([(_member(), p)])
+    assert "[injected]" not in res.text
+    assert "/etc/shadow" not in res.text
+    assert res.warnings  # dropped-with-warning, not silently emitted
