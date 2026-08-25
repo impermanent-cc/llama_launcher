@@ -45,5 +45,13 @@ def host_of(node: Node) -> str:
         return "127.0.0.1"
     target = node.ssh_target
     host = target.rsplit("@", 1)[-1] if "@" in target else target
+    if host.startswith("["):
+        # Bracketed IPv6 (`[2001:db8::1]` / `[2001:db8::1]:22`): the address is
+        # inside the brackets and an optional :port follows the ']', so a plain
+        # rsplit(':') would split INSIDE the address. Return the bare literal;
+        # url_host re-brackets it for a URL authority.
+        end = host.find("]")
+        if end != -1:
+            return host[1:end] or "127.0.0.1"
     host = host.rsplit(":", 1)[0] if ":" in host else host
     return host or "127.0.0.1"
