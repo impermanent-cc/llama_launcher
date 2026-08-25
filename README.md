@@ -208,21 +208,6 @@ worker as its own `rpc-worker · <node>` card.
 RPC pool mode is **GUI-only** (headless refuses it) and needs a `GGML_RPC=ON` image the
 prebuilt tags don't include. See [`RPC.md`](RPC.md) for the build recipe and full details.
 
-## Family presets
-
-Next to the settings is a **Suggest for family** picker. Choose a family
-(curated, e.g. Qwen3-MoE, or one you saved) and its recommended flags appear as
-one-click 💡 chips in the suggestions strip, the same chips the app already
-shows for GGUF-detected capabilities. Each chip is a **suggestion, not a rule**:
-nothing changes until you click it, and clicking applies only that one option
-(there's also an "Apply all …" chip). Your model, mounts, and any values you
-don't accept are left untouched.
-
-**Save as preset…** turns the options you've currently set into a named preset
-that then appears in the picker. Presets store only `llama-server` settings
-(never model paths), and a preset you save overrides a curated one of the same
-name.
-
 ## Instances panel (Monitor tab)
 
 ![Monitor tab: live instance cards, throughput, GPU stats, and streaming logs](assets/screenshots/monitor.png)
