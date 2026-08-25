@@ -1,3 +1,4 @@
+import posixpath
 import re
 import shlex
 
@@ -21,11 +22,49 @@ _ESCALATING_RUN_FLAGS = frozenset({
     "--pid", "--ipc", "--userns", "--uts", "--cgroupns",
     "-v", "--volume", "--mount", "--device", "--device-cgroup-rule",
     "--group-add",
+    # Host-exec vectors: an attacker-named OCI runtime / hooks dir / conmon
+    # makes podman/docker execute an arbitrary binary on the host.
+    "--runtime", "--hooks-dir", "--conmon",
 })
-# Host paths whose mount into a container is a host-filesystem escape.
-_SENSITIVE_HOST_PREFIXES = ("/", "/etc", "/root", "/home", "/var", "/usr",
-                            "/boot", "/sys", "/proc", "/dev", "/bin", "/sbin",
-                            "/lib", "/run")
+# System roots whose mount into a container is a host-filesystem escape. Matched
+# by PREFIX (any subpath counts), not exact membership -- the exact-match form
+# silently let /var/run/docker.sock, ~/.ssh, /root/.aws, etc. through. /home is
+# special-cased in is_sensitive_host_path: ordinary home data mounts stay
+# allowed, only credential dotfile dirs under it are sensitive.
+_SENSITIVE_ROOTS = ("/etc", "/root", "/var", "/usr", "/boot", "/sys", "/proc",
+                    "/dev", "/bin", "/sbin", "/lib", "/run")
+_RUNTIME_SOCKETS = ("docker.sock", "podman.sock")
+
+
+def is_sensitive_host_path(host: str) -> bool:
+    """True if mounting `host` into a container exposes the host filesystem.
+
+    Canonicalises first (collapsing `..`/`//`) so a traversal like
+    `/tmp/../etc` cannot launder a sensitive path past the check. The whole
+    root `/` and any path under a system root count; a container runtime socket
+    counts wherever it lives; under /home only credential dotfile directories
+    (e.g. `~/.ssh`, `~/.aws`) and whole-home mounts count, so ordinary data
+    mounts like `~/models` are allowed.
+    """
+    if not host:
+        return False
+    host = posixpath.normpath(host)
+    if host.startswith("//"):                   # normpath keeps a leading "//"
+        host = host[1:]
+    if not host.startswith("/"):                # relative path or named volume
+        return False
+    if host == "/":
+        return True
+    if host.rsplit("/", 1)[-1] in _RUNTIME_SOCKETS:
+        return True
+    if any(host == r or host.startswith(r + "/") for r in _SENSITIVE_ROOTS):
+        return True
+    if host == "/home" or host.startswith("/home/"):
+        parts = [p for p in host[len("/home"):].split("/") if p]
+        if len(parts) <= 1:                     # /home or a whole home dir
+            return True
+        return any(p.startswith(".") for p in parts[1:])  # ~/.ssh, ~/.aws, ...
+    return False
 
 
 def _split_flag(tok: str) -> tuple[str, str | None]:
@@ -60,8 +99,7 @@ def _is_sensitive_mount(flag: str, value: str | None) -> bool:
         host = src
     else:                                       # -v host:container[:opts]
         host = value.split(":", 1)[0]
-    host = host.rstrip("/") or "/"
-    return host in _SENSITIVE_HOST_PREFIXES
+    return is_sensitive_host_path(host)
 
 
 def dangerous_run_args(extra_run_args: str) -> list[str]:

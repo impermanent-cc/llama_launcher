@@ -46,6 +46,31 @@ def test_dangerous_run_args_allows_benign():
     assert dangerous_run_args("") == []
 
 
+def test_dangerous_run_args_flags_sensitive_subpaths_and_socket():
+    # The screen was exact-match on top-level dirs, so a sensitive *subpath* or
+    # the runtime socket slipped through with no warning -> container escape.
+    assert dangerous_run_args("-v /var/run/docker.sock:/var/run/docker.sock")
+    assert dangerous_run_args("-v /run/user/1000/podman/podman.sock:/s")
+    assert dangerous_run_args("-v /home/me/.ssh:/keys:ro")
+    assert dangerous_run_args("--volume /root/.aws:/aws")
+    assert dangerous_run_args("--mount type=bind,source=/var/run/docker.sock,target=/s")
+    # `..` traversal must not launder a sensitive path past the screen.
+    assert dangerous_run_args("-v /tmp/../etc:/x")
+
+
+def test_dangerous_run_args_still_allows_ordinary_home_data():
+    # Legitimate home data mounts must keep working; only credential dotfile
+    # dirs under /home are sensitive.
+    assert dangerous_run_args("-v /home/me/models:/models:ro") == []
+    assert dangerous_run_args("-v /home/me/work/data:/data") == []
+
+
+def test_dangerous_run_args_flags_runtime_path_flags():
+    # An attacker-named OCI runtime / hooks dir is a host-exec vector.
+    assert dangerous_run_args("--runtime /tmp/evil")
+    assert dangerous_run_args("--hooks-dir /tmp/hooks")
+
+
 def test_run_args_expose_detects_host_net_and_publish():
     assert run_args_expose("--network host")
     assert run_args_expose("--net=host")

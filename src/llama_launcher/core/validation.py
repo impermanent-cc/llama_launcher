@@ -2,7 +2,8 @@ import ipaddress
 import re
 from dataclasses import dataclass
 
-from .command_builder import raw_arg_warnings, dangerous_run_args, run_args_expose
+from .command_builder import (raw_arg_warnings, dangerous_run_args,
+                              run_args_expose, is_sensitive_host_path)
 from .router_preset import convert_raw_args
 from .spec import Profile, member_model_id
 from .settings_catalog import CATALOG
@@ -11,13 +12,6 @@ from .settings_catalog import CATALOG
 # by harnesses in the request "model" field, so keep it to a safe charset -- a
 # newline would inject arbitrary preset keys into other sections.
 _MODEL_ID_RE = re.compile(r"^[A-Za-z0-9._:/-]+$")
-
-# Host mount sources that expose the host filesystem (a shared profile could
-# otherwise silently mount them). "" stands for "/", handled by the caller.
-_SENSITIVE_MOUNT_SOURCES = frozenset({
-    "/etc", "/root", "/home", "/var", "/usr", "/boot", "/sys", "/proc",
-    "/dev", "/bin", "/sbin", "/lib", "/run",
-})
 
 
 def _bind_host_is_addressish(bind_host: str) -> bool:
@@ -118,8 +112,7 @@ def validate(profile: Profile, running_ports: tuple = (),
             if bool(m.host) != bool(m.container):
                 issues.append(Issue("error",
                                     "Mount row is incomplete (host and container both required)."))
-            host = (m.host or "").rstrip("/")
-            if m.host and (host == "" or host in _SENSITIVE_MOUNT_SOURCES):
+            if m.host and is_sensitive_host_path(m.host):
                 issues.append(Issue(
                     "warning",
                     f"Mount source {m.host!r} is a sensitive host path; the container "
