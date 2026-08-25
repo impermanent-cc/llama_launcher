@@ -431,7 +431,9 @@ def test_native_instance_stop_sends_sigterm_then_schedules_kill(win, monkeypatch
 def test_stop_head_of_rpc_pool_calls_coordinated_stop_pool(win, monkeypatch):
     """A card [Stop] on the HEAD of an rpc pool (runtime.launch_mode == "rpc")
     performs the coordinated pool stop -- head + every worker -- instead of a
-    bare `podman stop` on just the head container."""
+    bare `podman stop` on just the head container. The stop is dispatched OFF
+    the UI thread via LaunchController's pool seam; the sync seam here runs it
+    inline so the assertion is deterministic."""
     from llama_launcher.core.spec import RpcWorker
     from llama_launcher.ui.controllers import monitor_controller as mc
     store.save_profile(Profile(name="pool", image="img", runtime=Runtime(
@@ -442,6 +444,8 @@ def test_stop_head_of_rpc_pool_calls_coordinated_stop_pool(win, monkeypatch):
         port=8080, host="127.0.0.1", embeddings=False, reranking=False)]
     called = {}
     monkeypatch.setattr(mc.rpc, "stop_pool", lambda p, base, **k: called.setdefault("profile", p))
+    monkeypatch.setattr(win._launch, "_run_pool_async",
+                        lambda work, on_done: on_done(work()))
     spawned = []
     monkeypatch.setattr(win._launch, "_spawn_async",
                         lambda argv, on_done=None, on_error=None: spawned.append(argv))
