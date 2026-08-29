@@ -1,0 +1,51 @@
+import datetime
+from llama_launcher.core.build_spec import BuildConfig
+from llama_launcher.core.build_command import (
+    config_slug, auto_tag, render_defines, parse_raw_defines,
+)
+
+D = datetime.date(2026, 8, 28)
+
+
+def test_slug_normalizes():
+    assert config_slug("CUDA Perf build!") == "cuda-perf-build"
+    assert config_slug("") == "config"
+
+
+def test_auto_tag_and_collisions():
+    c = BuildConfig(name="cuda perf", engine="llama.cpp")
+    assert auto_tag(c, set(), D) == "llama-custom:cuda-perf-20260828"
+    taken = {"llama-custom:cuda-perf-20260828"}
+    assert auto_tag(c, taken, D) == "llama-custom:cuda-perf-20260828-2"
+
+
+def test_tag_override_wins():
+    c = BuildConfig(name="x", tag_override="me/mine:v1")
+    assert auto_tag(c, {"me/mine:v1"}, D) == "me/mine:v1"
+
+
+def test_render_defines_bool_and_quoting():
+    c = BuildConfig(options={"cuda": True, "cuda-architectures": "86;120"})
+    out = render_defines(c)
+    assert "-DGGML_CUDA=ON" in out
+    assert "-DCMAKE_CUDA_ARCHITECTURES='86;120'" in out
+
+
+def test_render_defines_skips_defaults_and_wrong_engine():
+    # build-type at its default ("Release") emits nothing; ik-only option on
+    # a mainline config emits nothing.
+    c = BuildConfig(engine="llama.cpp",
+                    options={"build-type": "Release", "iqk-fa-all-quants": True})
+    assert render_defines(c) == []
+
+
+def test_raw_defines_win_by_name():
+    c = BuildConfig(options={"cuda": True}, raw_defines="-DGGML_CUDA=OFF ignored")
+    out = render_defines(c)
+    assert out.count("-DGGML_CUDA=OFF") == 1
+    assert "-DGGML_CUDA=ON" not in out
+    assert "ignored" not in " ".join(out)
+
+
+def test_parse_raw_defines_filters_non_defines():
+    assert parse_raw_defines("-DA=1 rm -rf / -DB=2") == ["-DA=1", "-DB=2"]
