@@ -31,5 +31,5 @@ def test_tools_checkboxes_in_grid(qtbot):
     qtbot.addWidget(w)
     layout = w._editor.layout()
     assert isinstance(layout, QGridLayout)
-    assert layout.columnCount() == 3          # 3x3 grid
-    assert layout.count() == 9                # "all" + 8 built-in tools
+    assert layout.columnCount() == 3          # 3-wide grid
+    assert layout.count() == 8                # "all" + 7 built-in tools

@@ -187,6 +187,30 @@ def test_preset_omits_enum_value_equal_to_default():
     assert "flash-attn" not in render_preset([(_member(), p)]).text
 
 
+def test_preset_translates_spec_type_for_ik():
+    from llama_launcher.core.spec import Runtime
+    p = Profile(name="Q", model="/m.gguf", settings={"spec-type": "draft-mtp"},
+                runtime=Runtime(engine="ik_llama.cpp"))
+    assert "spec-type = mtp" in render_preset([(_member(), p)]).text
+
+
+def test_preset_drops_suffix_spec_type_on_mainline():
+    from llama_launcher.core.spec import Runtime
+    p = Profile(name="Q", model="/m.gguf", settings={"spec-type": "suffix"},
+                runtime=Runtime(engine="llama.cpp"))
+    assert "spec-type" not in render_preset([(_member(), p)]).text
+
+
+def test_preset_load_mode_at_default_does_not_suppress_legacy():
+    # Parity with command_builder: a leftover load-mode equal to its default
+    # emits nothing, so it must not eat the legacy no-mmap/mlock either.
+    p = Profile(name="Q", model="/m.gguf",
+                settings={"load-mode": "auto", "no-mmap": True})
+    text = render_preset([(_member(), p)]).text
+    assert "load-mode" not in text
+    assert "no-mmap = true" in text
+
+
 def test_preset_omits_blank_string_value():
     p = Profile(name="Q", model="/m.gguf", settings={"tensor-split": ""})
     assert "tensor-split" not in render_preset([(_member(), p)]).text

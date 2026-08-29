@@ -50,3 +50,19 @@ def test_new_flags_and_speculative_group_present(qtbot):
         assert key in w._configure_panel._widgets, key
     titles = {b.title() for b in w.findChildren(QGroupBox)}
     assert "Speculative Decoding" in titles
+
+
+def test_ik_engine_extends_spec_type_enum(qtbot):
+    from llama_launcher.ui.main_window import MainWindow
+    from llama_launcher.core.settings_catalog import CATALOG
+    w = MainWindow()
+    qtbot.addWidget(w)
+    panel = w._configure_panel
+    combo = panel.engine_combo
+    combo.setCurrentIndex(combo.findData("ik_llama.cpp"))
+    spec = panel._widgets["spec-type"]
+    spec.set_value("suffix")
+    assert spec.value() == "suffix"
+    # flipping back to mainline drops the ik-only choice to the default
+    combo.setCurrentIndex(combo.findData("llama.cpp"))
+    assert spec.value() == CATALOG["spec-type"].default
