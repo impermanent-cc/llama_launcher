@@ -5,7 +5,7 @@ def test_window_has_three_tabs(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
     titles = [w.tabs.tabText(i) for i in range(w.tabs.count())]
-    assert titles == ["Configure", "Monitor", "Benchmark"]
+    assert titles == ["Configure", "Monitor", "Benchmark", "Build"]
     assert not hasattr(w, "router_panel")
     # preview + launch remain reachable (shared, below tabs)
     assert w._configure_panel.preview_text().startswith("podman run --rm")

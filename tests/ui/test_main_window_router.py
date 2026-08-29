@@ -710,7 +710,7 @@ def test_load_mode_disables_legacy_mmap_widgets(win):
 
 def test_benchmark_has_its_own_tab_and_config_strip_hidden_off_configure(win):
     titles = [win.tabs.tabText(i) for i in range(win.tabs.count())]
-    assert titles == ["Configure", "Monitor", "Benchmark"]
+    assert titles == ["Configure", "Monitor", "Benchmark", "Build"]
     # Config-only strip (suggest-family + command preview) shows on Configure...
     win.tabs.setCurrentIndex(titles.index("Configure"))
     assert win._configure_panel._config_bottom.isVisibleTo(win) is True

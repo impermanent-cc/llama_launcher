@@ -38,6 +38,7 @@ from llama_launcher.services import runtime, terminal, registry, health, metrics
 from llama_launcher.ui.panels.configure_panel import ConfigurePanel
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
 from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
+from llama_launcher.ui.panels.build_panel import BuildPanel
 from llama_launcher.ui.panels.stats_panel import StatsPanel
 from llama_launcher.ui.widgets.router_models_table import RouterModelsTable
 from llama_launcher.ui.widgets.status_banner import StatusBanner
@@ -147,6 +148,8 @@ class MainWindow(QMainWindow):
         self.benchmark_panel.benchmark_cancel_requested.connect(self._benchmark._on_benchmark_cancel)
         self.benchmark_panel.benchmark_clear_requested.connect(self._benchmark._on_benchmark_clear)
         self.tabs.addTab(self.benchmark_panel, "Benchmark")
+        self.build_panel = BuildPanel(base_dir=default_base_dir())
+        self.tabs.addTab(self.build_panel, "Build")
         self.tabs.currentChanged.connect(self._on_tab_changed)
         # Stretch=1 so the tab body (Configure's Environment/Settings columns)
         # fills the vertical space down to the command-preview strip, rather
