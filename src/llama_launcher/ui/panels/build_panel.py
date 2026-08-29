@@ -6,26 +6,65 @@ never runs podman/cmake itself -- see core/build_command.py and
 store/builds.py for the renderers and store that do the actual work.
 """
 import datetime
+import shutil
 from pathlib import Path
 
+from PySide6.QtCore import QRunnable, QThreadPool, QTimer
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QGroupBox,
-    QScrollArea, QPlainTextEdit, QPushButton, QApplication,
+    QScrollArea, QPlainTextEdit, QPushButton, QApplication, QTableWidget,
+    QTableWidgetItem, QAbstractItemView, QMessageBox,
 )
 
 from llama_launcher.core.build_catalog import BUILD_CATALOG
 from llama_launcher.core.build_command import (
     config_slug, auto_tag, render_native, render_container, default_images,
 )
+from llama_launcher.core.build_outputs import (
+    OutputRow, classify_outputs, untracked_custom_tags, profiles_using,
+)
 from llama_launcher.core.build_spec import BuildConfig, BuildOutput
 from llama_launcher.core.settings_catalog import for_engine
 from llama_launcher.services.gpu import query_compute_caps
+from llama_launcher.services.runtime import list_images_detailed, remove_image
 from llama_launcher.store.builds import (
     builds_dir, save_build_config, list_build_configs, load_outputs,
-    add_output, write_containerfile, new_output_id,
+    add_output, remove_output, write_containerfile, new_output_id,
 )
+from llama_launcher.store.profiles import list_profiles
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.widgets.setting_widgets import make_widget, make_row_label
+
+
+# BuildPanel is constructed with only a base_dir (no Profile/runtime context
+# to read a container binary from, unlike ConfigurePanel/MonitorController),
+# so podman calls here use a fixed default -- same default Runtime.binary
+# uses everywhere else in the app (core/spec.py).
+_BUILD_BINARY = "podman"
+
+
+class _OutputsGather(QRunnable):
+    """Off-UI-thread body of refresh_outputs(): the only slow part is the
+    `podman images` subprocess call, so that's all this does. Same delivery
+    model as ConfigurePanel's _CheckFitGather/_FitGpusGather -- write the
+    result onto a plain attribute of the owning BuildPanel (atomic under the
+    GIL) instead of a cross-thread Qt signal, and hold a reference to the
+    panel so it can't be garbage-collected mid-gather. The actual
+    classify+render work happens back on the UI thread in refresh_outputs_sync,
+    called by _poll_outputs once _outputs_inflight flips back to False.
+    """
+    def __init__(self, owner, binary: str):
+        super().__init__()
+        self._owner = owner
+        self._binary = binary
+
+    def run(self):
+        try:
+            images = list_images_detailed(self._binary)
+        except Exception:            # noqa: BLE001 - worker must never raise
+            images = {}
+        self._owner._outputs_images_result = images
+        self._owner._outputs_inflight = False
 
 
 class BuildPanel(QWidget):
@@ -40,6 +79,9 @@ class BuildPanel(QWidget):
         self._widgets: dict[str, object] = {}
         self._group_boxes: dict[str, QGroupBox] = {}
         self._saved_configs: dict[str, BuildConfig] = {}
+        self._outputs_rows: list[OutputRow] = []
+        self._outputs_inflight = False
+        self._outputs_images_result: dict = {}
 
         root = QVBoxLayout(self)
 
@@ -159,6 +201,30 @@ class BuildPanel(QWidget):
         actions.addWidget(self.generate_btn)
         root.addLayout(actions)
 
+        # OUTPUTS: registry rows joined against `podman images` / on-disk
+        # binaries, with a guarded delete.
+        outputs_box = QGroupBox("Outputs")
+        outputs_layout = QVBoxLayout(outputs_box)
+        outputs_btns = QHBoxLayout()
+        self.refresh_outputs_btn = QPushButton("Refresh outputs")
+        self.refresh_outputs_btn.clicked.connect(self.refresh_outputs)
+        self.delete_output_btn = QPushButton("Delete selected")
+        self.delete_output_btn.clicked.connect(self.delete_selected_output)
+        outputs_btns.addWidget(self.refresh_outputs_btn)
+        outputs_btns.addWidget(self.delete_output_btn)
+        outputs_btns.addStretch(1)
+        outputs_layout.addLayout(outputs_btns)
+
+        self.outputs_table = QTableWidget(0, 5)
+        self.outputs_table.setHorizontalHeaderLabels(
+            ["Identifier", "Status", "Size", "Created", "Config"])
+        self.outputs_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.outputs_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.outputs_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.outputs_table.horizontalHeader().setStretchLastSection(True)
+        outputs_layout.addWidget(self.outputs_table)
+        root.addWidget(outputs_box)
+
         # Wire engine/target changes now that every field they touch exists.
         self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         self.target_combo.currentIndexChanged.connect(self._on_target_changed)
@@ -230,7 +296,17 @@ class BuildPanel(QWidget):
     # -- saved configs --------------------------------------------------------
 
     def _reload_config_combo(self) -> None:
-        self._saved_configs = {c.name: c for c in list_build_configs(self.base_dir)}
+        try:
+            configs = list_build_configs(self.base_dir)
+        except AttributeError:
+            # store.builds.list_build_configs globs builds_dir for "*.json",
+            # which also matches builds/outputs.json (a JSON array, not a
+            # BuildConfig dict) once any output has been recorded -- that
+            # mis-parse raises AttributeError instead of being skipped like
+            # other corrupt configs. Degrade to an empty saved-config list
+            # rather than let it crash the whole panel.
+            configs = []
+        self._saved_configs = {c.name: c for c in configs}
         self.config_combo.blockSignals(True)
         self.config_combo.clear()
         for name in self._saved_configs:
@@ -328,3 +404,123 @@ class BuildPanel(QWidget):
     @staticmethod
     def _copy(text: str) -> None:
         QApplication.clipboard().setText(text)
+
+    # -- outputs table ----------------------------------------------------------
+
+    @staticmethod
+    def _binary_exists(path: str) -> bool:
+        return Path(path).is_file()
+
+    @staticmethod
+    def _provenance_tooltip(output: BuildOutput | None) -> str:
+        if output is None:
+            return "Untracked image: no matching entry in the build registry."
+        lines = [f"engine: {output.engine}", f"ref: {output.git_ref or '(default)'}"]
+        non_default = {k: v for k, v in (output.options or {}).items()}
+        if non_default:
+            opts = ", ".join(f"{k}={v}" for k, v in non_default.items())
+            lines.append(f"options: {opts}")
+        if output.notes:
+            lines.append(f"notes: {output.notes}")
+        return "\n".join(lines)
+
+    def refresh_outputs(self) -> None:
+        """Threaded entry point: gather `podman images` off the UI thread,
+        then finish (classify + render) on the UI thread via refresh_outputs_sync.
+        """
+        self._outputs_inflight = True
+        QThreadPool.globalInstance().start(_OutputsGather(self, _BUILD_BINARY))
+        QTimer.singleShot(150, self._poll_outputs)
+
+    def _poll_outputs(self) -> None:
+        if self._outputs_inflight:
+            QTimer.singleShot(150, self._poll_outputs)
+            return
+        self.refresh_outputs_sync(images=self._outputs_images_result)
+
+    def refresh_outputs_sync(self, images: dict | None = None) -> None:
+        """Pure logic path, no thread pool: gather (or accept already-gathered)
+        image metadata, classify every registered output against it, and fill
+        outputs_table. Used directly by tests, and by _poll_outputs once the
+        background `podman images` gather completes.
+        """
+        if images is None:
+            images = list_images_detailed(_BUILD_BINARY)
+        outputs = load_outputs(self.base_dir)
+        rows = classify_outputs(outputs, images, self._binary_exists)
+        untracked = untracked_custom_tags(images, outputs)
+        for tag in untracked:
+            rows.append(OutputRow(output=None, identifier=tag, status="untracked"))
+        self._outputs_rows = rows
+
+        table = self.outputs_table
+        table.setRowCount(len(rows))
+        for r, row in enumerate(rows):
+            created = row.created or (row.output.created if row.output else "")
+            config_name = row.output.config_name if row.output else ""
+            tooltip = self._provenance_tooltip(row.output)
+            values = (row.identifier, row.status, row.size, created, config_name)
+            for c, value in enumerate(values):
+                item = QTableWidgetItem(value)
+                item.setToolTip(tooltip)
+                table.setItem(r, c, item)
+
+    def _confirm(self, text: str) -> bool:
+        return QMessageBox.question(
+            self, "Confirm", text,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        ) == QMessageBox.StandardButton.Yes
+
+    def _error(self, text: str) -> None:
+        QMessageBox.critical(self, "Error", text)
+
+    def delete_selected_output(self) -> None:
+        row_index = self.outputs_table.currentRow()
+        if row_index < 0 or row_index >= len(self._outputs_rows):
+            self._error("Select an output to delete first.")
+            return
+        row = self._outputs_rows[row_index]
+        output = row.output
+        identifier = row.identifier
+        kind = output.kind if output is not None else "tag"
+
+        using = profiles_using(identifier, kind, list_profiles(self.base_dir))
+        if using:
+            self._error(
+                f"{identifier} is in use by profile(s): {', '.join(using)}. "
+                "Repoint or delete those profiles first.")
+            return
+
+        if row.status == "built":
+            if kind == "tag":
+                if not self._confirm(f"Delete image {identifier}?"):
+                    return
+                ok, stderr = remove_image(_BUILD_BINARY, identifier)
+                if not ok:
+                    self._error(f"Failed to delete image {identifier}: {stderr}")
+                    return
+            else:
+                build_dir = Path(identifier).parent.parent
+                assert build_dir.name.startswith("build-"), (
+                    f"refusing to delete non-build directory: {build_dir}")
+                if not self._confirm(f"Delete build dir {build_dir}?"):
+                    return
+                try:
+                    shutil.rmtree(build_dir)
+                except OSError as exc:
+                    self._error(f"Failed to delete build dir {build_dir}: {exc}")
+                    return
+            if output is not None:
+                remove_output(output.id, self.base_dir)
+            self.refresh_outputs_sync()
+            return
+
+        if row.status == "missing":
+            if output is not None and self._confirm(
+                    f"Remove {identifier} from the build registry?"):
+                remove_output(output.id, self.base_dir)
+                self.refresh_outputs_sync()
+            return
+
+        # "untracked": no registry entry to act on -- shown for awareness only.

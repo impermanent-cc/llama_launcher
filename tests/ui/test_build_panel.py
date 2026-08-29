@@ -50,3 +50,83 @@ def test_cuda_arch_prefill_never_clobbers(qtbot, tmp_path, monkeypatch):
     p._widgets["cuda"].set_value(False)
     p._widgets["cuda"].set_value(True)
     assert p._widgets["cuda-architectures"].value() == "86"
+
+
+def test_outputs_table_statuses(qtbot, tmp_path, monkeypatch):
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.store.builds import add_output
+    from llama_launcher.core.build_spec import BuildOutput
+    add_output(BuildOutput(id="a1", kind="tag", identifier="llama-custom:x-1",
+                           config_name="x", engine="llama.cpp", git_ref="m",
+                           options={}, created="2026-08-28"), tmp_path)
+    monkeypatch.setattr(bp, "list_images_detailed", lambda *a, **k: {})
+    p = _panel(qtbot, tmp_path)
+    p.refresh_outputs_sync()      # test hook: same logic, no thread pool
+    statuses = [p.outputs_table.item(r, 1).text()
+                for r in range(p.outputs_table.rowCount())]
+    assert statuses == ["missing"]
+
+
+def test_delete_refused_when_profile_uses_tag(qtbot, tmp_path, monkeypatch):
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.store.builds import add_output
+    from llama_launcher.store.profiles import save_profile
+    from llama_launcher.core.build_spec import BuildOutput
+    from llama_launcher.core.spec import Profile
+    from llama_launcher.services.runtime import ImageInfo
+
+    add_output(BuildOutput(id="t1", kind="tag", identifier="t:1",
+                           config_name="x", engine="llama.cpp", git_ref="m",
+                           options={}, created="2026-08-28"), tmp_path)
+    save_profile(Profile(name="p1", image="t:1"), tmp_path)
+
+    monkeypatch.setattr(
+        bp, "list_images_detailed",
+        lambda *a, **k: {"t:1": ImageInfo(tag="t:1", size="10MB", created="now")})
+
+    def _raise(*a, **k):
+        raise AssertionError("remove_image should not be called")
+    monkeypatch.setattr(bp, "remove_image", _raise)
+
+    p = _panel(qtbot, tmp_path)
+    p.refresh_outputs_sync()
+
+    errors = []
+    monkeypatch.setattr(p, "_error", lambda text: errors.append(text))
+
+    p.outputs_table.setCurrentCell(0, 0)
+    p.delete_selected_output()
+
+    assert errors and "p1" in errors[0]
+
+
+def test_delete_built_tag_confirms_then_removes(qtbot, tmp_path, monkeypatch):
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.store.builds import add_output, load_outputs
+    from llama_launcher.core.build_spec import BuildOutput
+    from llama_launcher.services.runtime import ImageInfo
+
+    add_output(BuildOutput(id="t1", kind="tag", identifier="t:1",
+                           config_name="x", engine="llama.cpp", git_ref="m",
+                           options={}, created="2026-08-28"), tmp_path)
+
+    monkeypatch.setattr(
+        bp, "list_images_detailed",
+        lambda *a, **k: {"t:1": ImageInfo(tag="t:1", size="10MB", created="now")})
+
+    calls = []
+
+    def _remove_image(binary, tag, connection=""):
+        calls.append((binary, tag))
+        return (True, "")
+    monkeypatch.setattr(bp, "remove_image", _remove_image)
+
+    p = _panel(qtbot, tmp_path)
+    p.refresh_outputs_sync()
+    monkeypatch.setattr(p, "_confirm", lambda text: True)
+
+    p.outputs_table.setCurrentCell(0, 0)
+    p.delete_selected_output()
+
+    assert calls and calls[0][1] == "t:1"
+    assert load_outputs(tmp_path) == []
