@@ -9,7 +9,7 @@ import datetime
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QRunnable, QThreadPool, QTimer, Qt
+from PySide6.QtCore import QRunnable, QThreadPool, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QGroupBox,
     QScrollArea, QPlainTextEdit, QPushButton, QApplication, QTableWidget,
@@ -68,7 +68,30 @@ class _OutputsGather(QRunnable):
         self._owner._outputs_inflight = False
 
 
+class _CapsGather(QRunnable):
+    """Off-thread nvidia-smi compute-capability query for the CUDA-arch
+    prefill. nvidia-smi can stall for seconds on a wedged driver or a waking
+    dGPU; a synchronous call would freeze the whole window. Same
+    owner-reference poll shape as _OutputsGather."""
+
+    def __init__(self, owner):
+        super().__init__()
+        self.owner = owner
+        self.done = False
+        self.caps: list = []
+
+    def run(self):
+        try:
+            self.caps = query_compute_caps()
+        finally:
+            self.done = True
+
+
 class BuildPanel(QWidget):
+    # Emitted after use_in_profile saves a profile to disk, so MainWindow can
+    # refresh its in-memory copy (a stale Configure form would silently
+    # revert the change on its next Save).
+    profile_updated = Signal(str)
     """Owns all Build-tab widgets. `base_dir` is the store directory (a
     profiles/builds root), passed explicitly rather than resolved internally
     so tests never touch the user's real config dir.
@@ -83,6 +106,14 @@ class BuildPanel(QWidget):
         self._outputs_rows: list[OutputRow] = []
         self._outputs_inflight = False
         self._outputs_images_result: dict = {}
+        # Programmatic-load guard: seeding/prefill react to user gestures
+        # only, never to load_build_config's own set_value cascade.
+        self._loading = False
+        # Option values carried across engine flips (the form is torn down
+        # and rebuilt per engine); cleared when a saved config is loaded.
+        self._options_stash: dict = {}
+        self._caps_cache: list | None = None
+        self._caps_gather: _CapsGather | None = None
 
         root = QVBoxLayout(self)
 
@@ -256,6 +287,15 @@ class BuildPanel(QWidget):
     # -- settings form (rebuilt per engine) ----------------------------------
 
     def _rebuild_settings_form(self, engine: str) -> None:
+        # Stash the outgoing form's non-default values (and drop stash keys
+        # the user reverted) so an engine flip -- which tears the widgets down
+        # because the two catalogs genuinely differ -- doesn't silently lose
+        # every option the user set. load_build_config clears the stash.
+        for key, w in self._widgets.items():
+            if w.is_set():
+                self._options_stash[key] = w.value()
+            else:
+                self._options_stash.pop(key, None)
         for box in self._group_boxes.values():
             box.setParent(None)
             box.deleteLater()
@@ -274,6 +314,15 @@ class BuildPanel(QWidget):
             groups[setting.group].addRow(make_row_label(setting), w)
         if "cuda" in self._widgets:
             self._widgets["cuda"].changed.connect(self._on_cuda_toggle)
+        # Re-apply stashed values that exist in this engine's catalog, as a
+        # programmatic load (no seeding/prefill side effects).
+        was_loading, self._loading = self._loading, True
+        try:
+            for key, value in self._options_stash.items():
+                if key in self._widgets:
+                    self._widgets[key].set_value(value)
+        finally:
+            self._loading = was_loading
 
     def _on_engine_changed(self, _index=0) -> None:
         self._rebuild_settings_form(self.engine_combo.currentData() or "llama.cpp")
@@ -294,15 +343,44 @@ class BuildPanel(QWidget):
         self.refresh_preview()
 
     def _on_cuda_toggle(self) -> None:
-        cuda = self._widgets.get("cuda")
-        arch = self._widgets.get("cuda-architectures")
-        if cuda is not None and arch is not None and cuda.value() \
-                and not str(arch.value()).strip():
-            caps = query_compute_caps()
-            if caps:
-                arch.set_value(";".join(caps))
+        if self._loading:
+            return
+        self._maybe_prefill_cuda_arch()
         self._maybe_seed_default_images()
         self.refresh_preview()
+
+    def _maybe_prefill_cuda_arch(self) -> None:
+        """Fill an empty cuda-architectures field from the detected GPU. The
+        first nvidia-smi query runs off-thread (it can stall for seconds);
+        the result is cached, so later toggles are synchronous."""
+        cuda = self._widgets.get("cuda")
+        arch = self._widgets.get("cuda-architectures")
+        if (cuda is None or arch is None or not cuda.value()
+                or str(arch.value()).strip()):
+            return
+        if self._caps_cache is not None:
+            if self._caps_cache:
+                arch.set_value(";".join(self._caps_cache))
+            return
+        if self._caps_gather is not None:
+            return                       # a fetch is already in flight
+        g = _CapsGather(self)
+        self._caps_gather = g
+        QThreadPool.globalInstance().start(g)
+        QTimer.singleShot(50, self._poll_caps)
+
+    def _poll_caps(self) -> None:
+        g = self._caps_gather
+        if g is None:
+            return
+        if not g.done:
+            QTimer.singleShot(50, self._poll_caps)
+            return
+        self._caps_gather = None
+        self._caps_cache = g.caps
+        self._maybe_prefill_cuda_arch()  # cache path; fills if still apt
+        if g.caps:
+            self.refresh_preview()
 
     def _maybe_seed_default_images(self) -> None:
         """Seed builder/runtime image fields from default_images(cfg) only
@@ -312,7 +390,11 @@ class BuildPanel(QWidget):
         -- without this, picking Container before ticking cuda seeds the
         debian pair and then the cuda branch of default_images() is
         unreachable, since the plain "only when empty" rule never re-seeds a
-        field that already has generator text in it."""
+        field that already has generator text in it. Never fires during a
+        programmatic load: a saved config that deliberately pairs pool values
+        with a different cuda state must round-trip unmutated."""
+        if self._loading:
+            return
         cuda_builder, cuda_runtime = default_images(BuildConfig(options={"cuda": True}))
         cpu_builder, cpu_runtime = default_images(BuildConfig(options={"cuda": False}))
         builder_pool = {cuda_builder, cpu_builder}
@@ -368,6 +450,15 @@ class BuildPanel(QWidget):
         )
 
     def load_build_config(self, cfg: BuildConfig) -> None:
+        self._loading = True
+        try:
+            self._load_build_config(cfg)
+        finally:
+            self._loading = False
+        self.refresh_preview()
+
+    def _load_build_config(self, cfg: BuildConfig) -> None:
+        self._options_stash = {}       # loaded config replaces prior UI state
         self.name_edit.setText(cfg.name)
         self.engine_combo.blockSignals(True)
         idx = self.engine_combo.findData(cfg.engine)
@@ -387,20 +478,41 @@ class BuildPanel(QWidget):
             if key in cfg.options:
                 w.set_value(cfg.options[key])
         self._on_target_changed()
-        self.refresh_preview()
 
     # -- preview / generate -----------------------------------------------------
 
     def _containerfile_path(self, cfg: BuildConfig) -> Path:
         return builds_dir(self.base_dir) / f"{config_slug(cfg.name)}.containerfile"
 
+    @staticmethod
+    def _matching_entry(cfg: BuildConfig, kind: str, identifier: str | None,
+                        outputs: list) -> BuildOutput | None:
+        """The registry entry that describes the SAME expected build: for tags
+        the same config/engine/ref/options snapshot (regenerating without
+        changes reuses it instead of stacking phantom rows); for binaries the
+        same path (one build dir holds one expected build)."""
+        for o in outputs:
+            if o.kind != kind:
+                continue
+            if kind == "binary":
+                if o.identifier == identifier:
+                    return o
+            elif (o.config_name == cfg.name and o.engine == cfg.engine
+                  and o.git_ref == cfg.git_ref and o.options == cfg.options):
+                return o
+        return None
+
     def _current_tag(self, cfg: BuildConfig) -> str:
-        """The tag `generate()` would record for `cfg` right now: auto_tag()
-        against the REAL existing-tags set from the on-disk registry, not an
-        empty set. Shared by refresh_preview and generate so a same-day
-        second generate never shows one tag in the preview/copy and records a
-        different (collision-bumped) one in the registry."""
-        existing = {o.identifier for o in load_outputs(self.base_dir)}
+        """The tag `generate()` would record for `cfg` right now: the tag of
+        an existing identical-build entry if one is registered (idempotent
+        regenerate), else auto_tag() against the REAL existing-tags set from
+        the on-disk registry. Shared by refresh_preview and generate so the
+        previewed/copied tag and the recorded tag never diverge."""
+        outs = load_outputs(self.base_dir)
+        dup = self._matching_entry(cfg, "tag", None, outs)
+        if dup is not None:
+            return dup.identifier
+        existing = {o.identifier for o in outs}
         return auto_tag(cfg, existing, datetime.date.today())
 
     def _render_container(self, cfg: BuildConfig | None = None, tag: str | None = None):
@@ -430,6 +542,17 @@ class BuildPanel(QWidget):
         else:
             nb = render_native(cfg)
             identifier, kind = nb.expected_binary, "binary"
+        # Re-clicking Generate must not stack registry rows: an identical
+        # expected build keeps its entry; a binary regenerate with changed
+        # flags REPLACES the entry for that build dir (the new expectation
+        # supersedes the old one -- same path, one build).
+        outs = load_outputs(self.base_dir)
+        dup = self._matching_entry(cfg, kind, identifier, outs)
+        if dup is not None:
+            if kind == "tag" or dup.options == cfg.options:
+                self.refresh_preview()
+                return
+            remove_output(dup.id, self.base_dir)
         add_output(BuildOutput(
             id=new_output_id(), kind=kind, identifier=identifier,
             config_name=cfg.name, engine=cfg.engine, git_ref=cfg.git_ref,
@@ -627,5 +750,7 @@ class BuildPanel(QWidget):
             self._error(f"Unknown output kind: {kind}")
             return
 
-        # Save the profile
+        # Save the profile and tell MainWindow, whose in-memory copy (and
+        # possibly the loaded Configure form) is now stale.
         save_profile(profile, self.base_dir)
+        self.profile_updated.emit(profile_name)

@@ -760,3 +760,20 @@ def test_router_status_clears_when_router_not_running(win, monkeypatch):
     win._monitor.update_status()
     assert win._monitor._router_statuses == {}
     assert win.router_models_table.table.rowCount() == 0
+
+
+def test_configure_form_reloads_after_build_use_in_profile(qtbot):
+    # use_in_profile saves to disk; if that profile is loaded in the Configure
+    # form, the form must pick up the change or its next Save reverts it.
+    from llama_launcher.ui.main_window import MainWindow, base_dir
+    from llama_launcher.core.spec import Profile
+    from llama_launcher.store.profiles import save_profile
+    save_profile(Profile(name="uip-serv", image="old:1"), base_dir())
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w._reload_profile_list()
+    w._configure_panel.profile_combo.setCurrentText("uip-serv")
+    w._on_pick_profile(0)
+    save_profile(Profile(name="uip-serv", image="new:2"), base_dir())
+    w.build_panel.profile_updated.emit("uip-serv")
+    assert w._configure_panel.current_profile().image == "new:2"

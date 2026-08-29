@@ -41,15 +41,31 @@ def test_generate_container_writes_containerfile_and_registry(qtbot, tmp_path, m
 
 
 def test_cuda_arch_prefill_never_clobbers(qtbot, tmp_path, monkeypatch):
+    # The nvidia-smi query runs off the UI thread (it can stall for seconds on
+    # a wedged driver), so the first prefill lands asynchronously; afterwards
+    # the result is cached and toggles are synchronous.
     import llama_launcher.ui.panels.build_panel as bp
     monkeypatch.setattr(bp, "query_compute_caps", lambda: ["120"])
     p = _panel(qtbot, tmp_path)
     p._widgets["cuda"].set_value(True)
-    assert p._widgets["cuda-architectures"].value() == "120"
+    qtbot.waitUntil(
+        lambda: p._widgets["cuda-architectures"].value() == "120", timeout=3000)
     p._widgets["cuda-architectures"].set_value("86")
     p._widgets["cuda"].set_value(False)
     p._widgets["cuda"].set_value(True)
     assert p._widgets["cuda-architectures"].value() == "86"
+
+
+def test_cuda_prefill_not_queried_during_config_load(qtbot, tmp_path, monkeypatch):
+    # Loading a saved cuda=ON config must not fire nvidia-smi (or reseed
+    # anything): programmatic loads are not user gestures.
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.core.build_spec import BuildConfig
+    calls = []
+    monkeypatch.setattr(bp, "query_compute_caps", lambda: calls.append(1) or [])
+    p = _panel(qtbot, tmp_path)
+    p.load_build_config(BuildConfig(name="c", options={"cuda": True}))
+    assert calls == []
 
 
 def test_outputs_table_statuses(qtbot, tmp_path, monkeypatch):
@@ -201,23 +217,110 @@ def test_maybe_seed_reseeds_generated_values_but_not_user_typed(qtbot, tmp_path)
 
 
 def test_refresh_preview_matches_generate_tag_on_collision(qtbot, tmp_path):
-    import datetime
-    from llama_launcher.core.build_command import auto_tag
+    # A CHANGED config on the same day is a different expected build: it gets
+    # the collision-bumped tag, and preview and registry must agree on it.
     from llama_launcher.store.builds import load_outputs
 
     p = _panel(qtbot, tmp_path)
     p.target_combo.setCurrentIndex(p.target_combo.findData("container"))
     p.name_edit.setText("srv")
     p.generate()          # first generate: records the base tag
-
-    cfg = p.current_build_config()
-    existing = {o.identifier for o in load_outputs(tmp_path)}
-    expected_tag = auto_tag(cfg, existing, datetime.date.today())
-    assert expected_tag.endswith("-2")   # sanity: a collision really occurred
+    p._widgets["rpc"].set_value(True)     # changed flags -> new expected build
 
     p.refresh_preview()
     podman_line = p.preview.toPlainText().splitlines()[-1]
-    assert expected_tag in podman_line
+    assert "-2" in podman_line
+
+    p.generate()
+    outs = load_outputs(tmp_path)
+    assert len(outs) == 2
+    assert any(o.identifier.endswith("-2") and o.identifier in podman_line
+               for o in outs)
+
+
+def test_generate_twice_same_config_is_idempotent(qtbot, tmp_path):
+    # Re-clicking Generate with nothing changed must not create phantom
+    # "missing" rows: the identical expected build reuses its registry entry.
+    from llama_launcher.store.builds import load_outputs
+    p = _panel(qtbot, tmp_path)
+    p.target_combo.setCurrentIndex(p.target_combo.findData("container"))
+    p.name_edit.setText("srv")
+    p.generate()
+    p.generate()
+    assert len(load_outputs(tmp_path)) == 1
+
+
+def test_native_regenerate_replaces_entry(qtbot, tmp_path):
+    # The same build dir can only hold one expected build: regenerating with
+    # changed flags replaces the entry instead of stacking duplicates.
+    from llama_launcher.store.builds import load_outputs
+    p = _panel(qtbot, tmp_path)
+    p.name_edit.setText("nat")
+    p.source_dir_edit.setText("/s")
+    p.generate()
+    p.generate()
+    assert len(load_outputs(tmp_path)) == 1
+    p._widgets["rpc"].set_value(True)
+    p.generate()
+    outs = load_outputs(tmp_path)
+    assert len(outs) == 1
+    assert outs[0].options.get("rpc") is True
+
+
+def test_load_config_does_not_reseed_loaded_images(qtbot, tmp_path):
+    # A saved config that deliberately pairs debian bases with cuda=ON must
+    # round-trip unmutated: loading is not a user gesture, so no reseeding.
+    from llama_launcher.core.build_spec import BuildConfig
+    p = _panel(qtbot, tmp_path)
+    cfg = BuildConfig(name="deb-cuda", target="container",
+                      builder_image="docker.io/library/debian:bookworm",
+                      runtime_image="docker.io/library/debian:bookworm-slim",
+                      options={"cuda": True})
+    p.load_build_config(cfg)
+    assert p.builder_image_edit.text() == "docker.io/library/debian:bookworm"
+    assert p.current_build_config() == cfg
+
+
+def test_engine_flip_preserves_shared_option_values(qtbot, tmp_path):
+    p = _panel(qtbot, tmp_path)
+    p._widgets["cuda"].set_value(True)                    # engine="any"
+    p._widgets["cuda-fa"].set_value(False)                # llama.cpp-only
+    p.engine_combo.setCurrentIndex(p.engine_combo.findData("ik_llama.cpp"))
+    assert p._widgets["cuda"].value() is True
+    p.engine_combo.setCurrentIndex(p.engine_combo.findData("llama.cpp"))
+    assert p._widgets["cuda"].value() is True
+    assert p._widgets["cuda-fa"].value() is False
+
+
+def test_load_config_forgets_prior_form_state(qtbot, tmp_path):
+    # The engine-flip stash must not leak old form values into a freshly
+    # loaded config on the next flip.
+    from llama_launcher.core.build_spec import BuildConfig
+    p = _panel(qtbot, tmp_path)
+    p._widgets["cuda"].set_value(True)
+    p.load_build_config(BuildConfig(name="clean"))
+    p.engine_combo.setCurrentIndex(p.engine_combo.findData("ik_llama.cpp"))
+    p.engine_combo.setCurrentIndex(p.engine_combo.findData("llama.cpp"))
+    assert p._widgets["cuda"].value() is False
+
+
+def test_use_in_profile_emits_profile_updated(qtbot, tmp_path, monkeypatch):
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.core.spec import Profile
+    from llama_launcher.store.profiles import save_profile
+    from llama_launcher.store.builds import add_output
+    from llama_launcher.core.build_spec import BuildOutput
+    save_profile(Profile(name="serv", image="old:1"), tmp_path)
+    add_output(BuildOutput(id="a1", kind="tag", identifier="llama-custom:new-1",
+                           config_name="x", engine="llama.cpp", git_ref="m",
+                           options={}, created="2026-08-28"), tmp_path)
+    monkeypatch.setattr(bp, "list_images_detailed", lambda *a, **k: {})
+    p = _panel(qtbot, tmp_path)
+    p.refresh_outputs_sync()
+    p.outputs_table.selectRow(0)
+    with qtbot.waitSignal(p.profile_updated, timeout=1000) as blocker:
+        p.use_in_profile("serv")
+    assert blocker.args == ["serv"]
 
 
 def test_delete_built_calls_pooled_refresh_not_sync(qtbot, tmp_path, monkeypatch):

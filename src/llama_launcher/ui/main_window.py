@@ -149,6 +149,7 @@ class MainWindow(QMainWindow):
         self.benchmark_panel.benchmark_clear_requested.connect(self._benchmark._on_benchmark_clear)
         self.tabs.addTab(self.benchmark_panel, "Benchmark")
         self.build_panel = BuildPanel(base_dir=default_base_dir())
+        self.build_panel.profile_updated.connect(self._on_build_profile_updated)
         self.tabs.addTab(self.build_panel, "Build")
         self.tabs.currentChanged.connect(self._on_tab_changed)
         # Stretch=1 so the tab body (Configure's Environment/Settings columns)
@@ -309,6 +310,17 @@ class MainWindow(QMainWindow):
         self._monitor._stop_log_follower()
         name = self._configure_panel.profile_combo.currentText()
         if name in self._profiles:
+            self._configure_panel.load_profile(self._profiles[name])
+
+    def _on_build_profile_updated(self, name: str) -> None:
+        """The Build tab's use-in-profile saved a profile to disk. Refresh the
+        in-memory copy, and if that profile is loaded in the Configure form,
+        reload the form too -- otherwise its next Save writes the stale image
+        or binary path back, silently undoing the action."""
+        was_loaded = self._configure_panel.profile_combo.currentText() == name
+        self._reload_profile_list()
+        if was_loaded and name in self._profiles:
+            self._configure_panel.profile_combo.setCurrentText(name)
             self._configure_panel.load_profile(self._profiles[name])
 
     def save_current_profile(self):
