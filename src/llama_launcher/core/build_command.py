@@ -43,6 +43,10 @@ def render_defines(cfg: BuildConfig) -> list[str]:
         if setting.type == "bool":
             rendered = "ON" if value else "OFF"
         else:
+            # A cleared field is "leave upstream alone", never -DNAME='' --
+            # same blank guard as command_builder._render_setting.
+            if not str(value).strip():
+                continue
             rendered = shlex.quote(str(value))
         out.append(f"-D{setting.flag}={rendered}")
     raw = parse_raw_defines(cfg.raw_defines)

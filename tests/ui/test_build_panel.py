@@ -304,3 +304,17 @@ def test_preview_and_outputs_share_tabbed_splitter(qtbot, tmp_path):
     assert tabs.widget(0).isAncestorOf(p.preview)
     assert tabs.widget(1).isAncestorOf(p.outputs_table)
     assert splitters[0].isAncestorOf(tabs)
+
+
+def test_fresh_panel_emits_only_touched_options(qtbot, tmp_path):
+    # Regression net for the default-init class of bug: a fresh panel with just
+    # CUDA ticked must not emit explicit OFFs or empty values for anything else.
+    p = _panel(qtbot, tmp_path)
+    p.target_combo.setCurrentIndex(p.target_combo.findData("container"))
+    p.name_edit.setText("just-cuda")
+    p._widgets["cuda"].set_value(True)
+    p.refresh_preview()
+    text = p.preview.toPlainText()
+    assert "-DGGML_CUDA=ON" in text
+    assert "=OFF" not in text
+    assert "=''" not in text

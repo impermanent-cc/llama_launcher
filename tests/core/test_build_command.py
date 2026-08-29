@@ -109,3 +109,10 @@ def test_default_images_cuda_and_cpu():
     assert default_images(cpu) == (
         "docker.io/library/debian:bookworm",
         "docker.io/library/debian:bookworm-slim")
+
+
+def test_render_defines_skips_blank_non_bool_values():
+    # A cleared string field must emit nothing, never -DGGML_BLAS_VENDOR=''
+    # (mirrors command_builder._render_setting's blank guard).
+    c = BuildConfig(options={"blas-vendor": ""})
+    assert render_defines(c) == []
