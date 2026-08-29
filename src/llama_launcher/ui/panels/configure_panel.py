@@ -108,6 +108,7 @@ class _CheckFitGather(QRunnable):
 
 
 _FIT_GPU_TTL = 5.0    # seconds a free-VRAM probe stays fresh for the fit readout
+_MEMBER_META_TTL = 15.0   # seconds a member GGUF header read stays fresh
 
 
 class _FitGpusGather(QRunnable):
@@ -153,6 +154,7 @@ class ConfigurePanel(QWidget):
         self._fit_gpus = None
         self._fit_gpus_ssh = None
         self._fit_gpus_at = 0.0
+        self._member_meta_cache: dict = {}   # host path -> (at, meta, weights)
         self._fit_gather_inflight = False
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
@@ -314,7 +316,10 @@ class ConfigurePanel(QWidget):
             item = self.members_list.horizontalHeaderItem(_col)
             if item is not None:
                 item.setToolTip(_tip)
-        self.members_list.horizontalHeader().setSectionResizeMode(1, QHeaderView.Stretch)
+        # Interactive (not Stretch): every column stays user-resizable.
+        self.members_list.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
+        for _col, _w in enumerate((150, 170, 90, 110)):
+            self.members_list.setColumnWidth(_col, _w)
         self.members_list.verticalHeader().setVisible(False)
         self.members_list.setMaximumHeight(140)
         self.members_list.itemChanged.connect(lambda _i: self.refresh_preview())
@@ -1089,7 +1094,11 @@ class ConfigurePanel(QWidget):
         self._fit_timer.start()
 
     def _refresh_fit_line(self) -> None:
-        if self._fit_meta is None:
+        if self._is_router_mode():
+            if not self.members():
+                self._set_fit_line("")
+                return
+        elif self._fit_meta is None:
             self._set_fit_line("")
             return
         ssh = gpu_ssh_target(self.window.base_dir(),
@@ -1111,21 +1120,75 @@ class ConfigurePanel(QWidget):
             return
         self._render_fit_line()
 
+    def _is_router_mode(self) -> bool:
+        return self.mode_combo.currentData() == "router"
+
+    def _member_estimates(self) -> list[int]:
+        """Per-member weights+KV estimates for the router fit readout, each
+        derived from that member profile's OWN model, mounts and settings --
+        the router itself has no model, and whatever lingers in the (disabled)
+        model field must not leak into the estimate."""
+        out: list[int] = []
+        for _member, prof in self.member_pairs():
+            if not prof.model:
+                continue
+            meta, weights = self._cached_meta_weights(prof.model, prof.mounts)
+            if meta is None and not weights:
+                continue
+            out.append(vram.estimate_for_model(
+                meta, weights or 0,
+                ctx_size=prof.settings.get("ctx-size"),
+                k_quant=prof.settings.get("cache-type-k", "f16"),
+                v_quant=prof.settings.get("cache-type-v", "f16")))
+        return out
+
+    def _cached_meta_weights(self, container_path: str, mounts) -> tuple:
+        """(meta, weights_bytes) with a short TTL cache: a GGUF header read
+        is a 64MB file read, and the debounced fit refresh re-runs on every
+        form edit -- without the cache each edit would re-read every member."""
+        host = container_to_host(container_path, mounts)
+        if host is None:
+            return None, None
+        hit = self._member_meta_cache.get(host)
+        if hit is not None and time.monotonic() - hit[0] < _MEMBER_META_TTL:
+            return hit[1], hit[2]
+        meta = model_info.read_gguf_meta(host)
+        weights = model_info.file_size(host)
+        self._member_meta_cache[host] = (time.monotonic(), meta, weights)
+        return meta, weights
+
+    @staticmethod
+    def _router_fit_note(s) -> str:
+        if s.models_total == 1:
+            return "1 member"
+        if s.models_counted == s.models_total:
+            return f"all {s.models_total} members"
+        return f"{s.models_counted} largest of {s.models_total} members"
+
     def _render_fit_line(self) -> None:
         mib = 1024 * 1024
-        s = vram.fit_summary(
-            self._fit_meta, self._fit_weights or 0,
-            settings=self.current_profile().settings,
-            free_bytes_per_gpu=[g.mem_free_mib * mib
-                                for g in (self._fit_gpus or [])])
+        free = [g.mem_free_mib * mib for g in (self._fit_gpus or [])]
         gib = 1024 ** 3
+        if self._is_router_mode():
+            s = vram.router_fit_summary(
+                self._member_estimates(),
+                models_max=self.current_profile().settings.get(
+                    "models-max", CATALOG["models-max"].default),
+                free_bytes_per_gpu=free)
+            note = f" ({self._router_fit_note(s)})" if s is not None else ""
+        else:
+            s = vram.fit_summary(
+                self._fit_meta, self._fit_weights or 0,
+                settings=self.current_profile().settings,
+                free_bytes_per_gpu=free)
+            note = ""
         if s is None:
             line = ""
         elif s.fits:
-            line = (f"fit: est ~{s.est_bytes/gib:.1f} / ~{s.free_bytes/gib:.1f} "
+            line = (f"fit{note}: est ~{s.est_bytes/gib:.1f} / ~{s.free_bytes/gib:.1f} "
                     f"GiB free (margin {s.margin/gib:.1f} GiB) ✓")
         else:
-            line = (f'<span style="color:#c62828">may not fit: est '
+            line = (f'<span style="color:#c62828">may not fit{note}: est '
                     f"~{s.est_bytes/gib:.1f} GiB &gt; ~{s.free_bytes/gib:.1f} GiB "
                     f"free (short {-s.margin/gib:.1f} GiB)</span>")
         self._set_fit_line(line)
@@ -1135,7 +1198,10 @@ class ConfigurePanel(QWidget):
         may carry a styled span, so the whole label goes through rich text with
         the plain meta part escaped."""
         self._fit_line = line
-        base = _html.escape(self._meta_text) if self._meta_text else ""
+        # A router serves its members' models; the leftover form model's
+        # meta/caps text would be misinformation next to a member-based fit.
+        meta_text = "" if self._is_router_mode() else self._meta_text
+        base = _html.escape(meta_text) if meta_text else ""
         sep = "<br>" if base and line else ""
         self.model_meta_label.setText(base + sep + line)
 

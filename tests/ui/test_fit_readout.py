@@ -109,3 +109,59 @@ def test_fit_gather_probes_profile_node(main_window, monkeypatch, qtbot):
     qtbot.waitUntil(lambda: "ssh" in seen, timeout=3000)
     assert seen["ssh"] == "me@10.0.0.2"
     qtbot.waitUntil(lambda: "fit" in panel.model_meta_label.text(), timeout=3000)
+
+
+# -- router mode: the fit line comes from the MEMBERS, not the stale form model
+
+
+def _patch_models_by_path(monkeypatch, sizes_gib_by_host):
+    meta = GgufMeta(arch="llama", n_layers=80, n_head=64, n_head_kv=8,
+                    n_embd=8192, ctx_train=131072, quant="Q8_0")
+    monkeypatch.setattr(mw.model_info, "read_gguf_meta", lambda path: meta)
+    monkeypatch.setattr(
+        mw.model_info, "file_size",
+        lambda path: int(sizes_gib_by_host.get(str(path), 1) * 1024**3))
+
+
+def _router_with_member(main_window, member_gib, monkeypatch, stale_gib=40):
+    """Load a profile whose own model is huge, switch to router mode, add a
+    small saved member. The estimate must track the member, not the leftover."""
+    from llama_launcher.core.spec import RouterMember
+    from llama_launcher.store import profiles as store
+    _patch_models_by_path(monkeypatch, {"/h/m.gguf": stale_gib,
+                                        "/mnt/models/small.gguf": member_gib})
+    store.save_profile(
+        Profile(name="Small", image="img", model="/models/small.gguf",
+                mounts=[Mount(host="/mnt/models", container="/models", role="model")],
+                settings={"ctx-size": 4096}),
+        main_window.router_base_dir())
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))          # form still holds /models/m.gguf
+    panel.mode_combo.setCurrentIndex(panel.mode_combo.findData("router"))
+    panel._add_member_item(RouterMember(profile="Small"))
+    return panel
+
+
+def test_router_fit_uses_member_model_not_stale_form_model(main_window, monkeypatch):
+    panel = _router_with_member(main_window, member_gib=4, monkeypatch=monkeypatch)
+    _seed_gpus(panel, [_gpu_stat(30000)])       # 4 GiB member fits; 40 GiB stale would not
+    panel._refresh_fit_line()
+    t = panel.model_meta_label.text()
+    assert "fit" in t
+    assert "may not fit" not in t
+
+
+def test_router_fit_warns_when_member_too_big(main_window, monkeypatch):
+    panel = _router_with_member(main_window, member_gib=40, monkeypatch=monkeypatch)
+    _seed_gpus(panel, [_gpu_stat(30000)])
+    panel._refresh_fit_line()
+    assert "may not fit" in panel.model_meta_label.text()
+
+
+def test_router_fit_hides_stale_model_meta(main_window, monkeypatch):
+    """A router serves its members' models; the leftover form model's meta/caps
+    text must not linger next to the member-based fit line."""
+    panel = _router_with_member(main_window, member_gib=4, monkeypatch=monkeypatch)
+    _seed_gpus(panel, [_gpu_stat(30000)])
+    panel._refresh_fit_line()
+    assert "Q8_0" not in panel.model_meta_label.text()

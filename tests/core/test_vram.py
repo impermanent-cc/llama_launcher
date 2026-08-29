@@ -160,3 +160,24 @@ def test_fit_summary_none_when_unknowable():
     assert fit_summary(_meta(n_layers=0), 1000, settings={},
                        free_bytes_per_gpu=[10**9]) is None
     assert fit_summary(_meta(), 1000, settings={}, free_bytes_per_gpu=[]) is None
+
+
+def test_router_fit_sums_k_largest():
+    from llama_launcher.core.vram import router_fit_summary
+    s = router_fit_summary([10, 30, 20], models_max=2, free_bytes_per_gpu=[60])
+    assert s.est_bytes == 50            # 30 + 20, the two largest
+    assert s.models_counted == 2 and s.models_total == 3
+    assert s.fits and s.margin == 10
+
+
+def test_router_fit_models_max_zero_is_unlimited():
+    from llama_launcher.core.vram import router_fit_summary
+    s = router_fit_summary([10, 30, 20], models_max=0, free_bytes_per_gpu=[50])
+    assert s.est_bytes == 60 and not s.fits and s.models_counted == 3
+
+
+def test_router_fit_none_when_unknowable():
+    from llama_launcher.core.vram import router_fit_summary
+    assert router_fit_summary([], models_max=4, free_bytes_per_gpu=[10**9]) is None
+    assert router_fit_summary([0, 0], models_max=4, free_bytes_per_gpu=[10**9]) is None
+    assert router_fit_summary([100], models_max=4, free_bytes_per_gpu=[]) is None

@@ -115,6 +115,42 @@ def fit_summary(meta, weights_bytes, *, settings: dict,
 
 
 @dataclass
+class RouterFit:
+    est_bytes: int
+    free_bytes: int
+    free_per_gpu: tuple
+    fits: bool
+    margin: int
+    models_counted: int   # members the worst case sums (min(models-max, total))
+    models_total: int
+
+
+def router_fit_summary(member_estimates, *, models_max,
+                       free_bytes_per_gpu) -> RouterFit | None:
+    """Estimate-vs-free for a router profile's Configure-tab fit readout.
+
+    A router has no model of its own; it keeps up to --models-max member
+    models resident at once (0 = unlimited), so the worst case sums the
+    models-max LARGEST per-member estimates. The budget is the combined free
+    VRAM (children are placed like the default layer split). None when
+    unknowable -- no usable member estimate, or no GPU info -- so callers show
+    nothing rather than wrong numbers.
+    """
+    ests = sorted((int(e) for e in member_estimates if e and int(e) > 0),
+                  reverse=True)
+    if not ests or not free_bytes_per_gpu:
+        return None
+    counted = len(ests) if int(models_max) <= 0 else min(int(models_max), len(ests))
+    est = sum(ests[:counted])
+    free = available_free_bytes(free_bytes_per_gpu)
+    ok, margin = fits(est, free)
+    return RouterFit(est_bytes=est, free_bytes=free,
+                     free_per_gpu=tuple(int(b) for b in free_bytes_per_gpu),
+                     fits=ok, margin=margin,
+                     models_counted=counted, models_total=len(ests))
+
+
+@dataclass
 class PooledFit:
     fits: bool
     margin: int
