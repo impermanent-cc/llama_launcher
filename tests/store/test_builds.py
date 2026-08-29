@@ -55,3 +55,13 @@ def test_write_containerfile(tmp_path):
 def test_new_output_id_shape():
     a, b = new_output_id(), new_output_id()
     assert a != b and len(a) == 12
+
+
+def test_save_refuses_reserved_outputs_slug(tmp_path):
+    # A config named "outputs" would slug to the registry's own filename and
+    # overwrite it; the save must refuse instead of destroying the registry.
+    import pytest
+    add_output(_out(), tmp_path)
+    with pytest.raises(ValueError):
+        save_build_config(BuildConfig(name="Outputs"), tmp_path)
+    assert len(load_outputs(tmp_path)) == 1     # registry untouched

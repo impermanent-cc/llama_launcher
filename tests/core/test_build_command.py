@@ -116,3 +116,28 @@ def test_render_defines_skips_blank_non_bool_values():
     # (mirrors command_builder._render_setting's blank guard).
     c = BuildConfig(options={"blas-vendor": ""})
     assert render_defines(c) == []
+
+
+def test_parse_raw_defines_never_raises_on_unbalanced_quote():
+    # Fires per keystroke from the Raw defines field; a half-typed quote must
+    # degrade to whitespace splitting, not raise ValueError into the Qt slot.
+    assert parse_raw_defines('-DFOO="bar') == ['-DFOO="bar']
+    assert parse_raw_defines('-DA=1 "') == ["-DA=1"]
+
+
+def test_rpc_target_detected_for_cmake_spellings():
+    from llama_launcher.core.build_command import render_native
+    for raw in ("-DGGML_RPC=1", "-DGGML_RPC=on", "-DGGML_RPC:BOOL=TRUE"):
+        c = BuildConfig(name="w", source_dir="/s", raw_defines=raw)
+        assert "rpc-server" in render_native(c).build_cmd, raw
+    c = BuildConfig(name="w", source_dir="/s", raw_defines="-DGGML_RPC=OFF")
+    assert "rpc-server" not in render_native(c).build_cmd
+
+
+def test_rpc_raw_override_of_checkbox_still_builds_target():
+    # raw -DGGML_RPC=1 replaces the catalog's =ON rendering via the dedup;
+    # the rpc-server target must survive that.
+    c = BuildConfig(name="w", source_dir="/s",
+                    options={"rpc": True}, raw_defines="-DGGML_RPC=1")
+    from llama_launcher.core.build_command import render_native
+    assert "rpc-server" in render_native(c).build_cmd

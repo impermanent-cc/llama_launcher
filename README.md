@@ -9,7 +9,9 @@ throughput/MTP monitor, and a repeatable speed benchmark for A/B-ing config chan
 
 Beyond single-container launches it can also run a **prebuilt binary natively** (no container),
 drive **remote machines** over podman-over-SSH, **pool VRAM+RAM across nodes** via llama.cpp
-RPC, and show a live **CPU/GPU/memory stats dock**.
+RPC, show a live **CPU/GPU/memory stats dock**, and write **custom build commands** for both
+engines from a CMake-flag catalog (the Build tab), tracking the image tags and binaries those
+builds produce.
 
 ## Requirements
 

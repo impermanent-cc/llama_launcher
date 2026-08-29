@@ -78,3 +78,21 @@ def test_profiles_using_binary_build_dir_containment():
 def test_untracked_custom_tags_registry_port():
     images = {"registry:5000/x-custom:v1": FakeImage("registry:5000/x-custom:v1")}
     assert untracked_custom_tags(images, []) == ["registry:5000/x-custom:v1"]
+
+
+def test_rootless_localhost_prefix_matches_registry_tag():
+    # Rootless podman reports locally built images as localhost/<repo>:<tag>;
+    # the registry stores the unqualified tag the user was told to build.
+    outs = [_out(ident="llama-custom:x-20260828")]
+    images = {"localhost/llama-custom:x-20260828":
+              FakeImage("localhost/llama-custom:x-20260828")}
+    rows = classify_outputs(outs, images, binary_exists=lambda p: False)
+    assert rows[0].status == "built"
+    # ...and the same image must NOT double-report as untracked.
+    assert untracked_custom_tags(images, outs) == []
+
+
+def test_untracked_reports_podman_spelling():
+    # An untracked row must carry podman's own name so rmi works verbatim.
+    images = {"localhost/ik-custom:mystery-1": FakeImage("localhost/ik-custom:mystery-1")}
+    assert untracked_custom_tags(images, []) == ["localhost/ik-custom:mystery-1"]

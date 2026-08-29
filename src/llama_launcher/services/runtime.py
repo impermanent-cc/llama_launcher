@@ -175,8 +175,13 @@ def list_images_detailed(binary: str, connection: str = "") -> dict[str, ImageIn
 
 
 def remove_image(binary: str, tag: str, connection: str = "") -> tuple[bool, str]:
-    """Remove an image by tag (`<binary> rmi <tag>`), returns (success, stderr)."""
-    res = _run([*_base(binary, connection), "rmi", tag])
+    """Remove an image by tag (`<binary> rmi <tag>`), returns (success, stderr).
+
+    Gets its own generous timeout: rmi of a multi-GB layered image can exceed
+    the default 10s, and a SIGKILL mid-removal leaves the image store and the
+    build-outputs registry inconsistent (partially untagged image, entry kept).
+    """
+    res = _run([*_base(binary, connection), "rmi", tag], timeout=120)
     return (res.returncode == 0, res.stderr)
 
 

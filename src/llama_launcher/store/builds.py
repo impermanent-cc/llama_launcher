@@ -18,7 +18,13 @@ def builds_dir(base_dir: Path) -> Path:
 
 
 def save_build_config(cfg: BuildConfig, base_dir: Path) -> Path:
-    path = builds_dir(base_dir) / f"{config_slug(cfg.name)}.json"
+    slug = config_slug(cfg.name)
+    if slug == "outputs":
+        # builds/outputs.json is the registry; a config named "outputs" would
+        # slug onto it and silently destroy every recorded build.
+        raise ValueError(
+            'The name "outputs" is reserved; pick another config name.')
+    path = builds_dir(base_dir) / f"{slug}.json"
     write_private(path, json.dumps(build_config_to_dict(cfg), indent=2))
     return path
 

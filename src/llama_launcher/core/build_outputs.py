@@ -12,6 +12,14 @@ class OutputRow:
     created: str = ""
 
 
+def _normalize_tag(tag: str) -> str:
+    """Rootless podman names locally built images ``localhost/<repo>:<tag>``
+    while the registry stores the unqualified tag the user was told to build.
+    Strip that prefix so the two spellings compare equal; podman itself
+    resolves either spelling (rmi included)."""
+    return tag[len("localhost/"):] if tag.startswith("localhost/") else tag
+
+
 def classify_outputs(
     outputs: list[BuildOutput],
     images: dict[str, "ImageInfo"],
@@ -27,12 +35,13 @@ def classify_outputs(
     Returns:
         List of OutputRow with status in {"built", "missing"}.
     """
+    by_normalized = {_normalize_tag(t): img for t, img in images.items()}
     rows = []
     for output in outputs:
         if output.kind == "tag":
-            # Tag kind: check if in images dict
-            if output.identifier in images:
-                img = images[output.identifier]
+            # Tag kind: check if in images dict (localhost/-insensitive)
+            if _normalize_tag(output.identifier) in by_normalized:
+                img = by_normalized[_normalize_tag(output.identifier)]
                 rows.append(OutputRow(
                     output=output,
                     identifier=output.identifier,
@@ -77,16 +86,17 @@ def untracked_custom_tags(
         List of tag strings where repo part ends with "-custom" and no output
         has that identifier.
     """
-    # Collect all identifiers from tag-kind outputs
-    claimed_tags = {o.identifier for o in outputs if o.kind == "tag"}
+    # Collect all identifiers from tag-kind outputs (localhost/-insensitive)
+    claimed_tags = {_normalize_tag(o.identifier) for o in outputs if o.kind == "tag"}
 
-    # Find tags with custom repo and not claimed
+    # Find tags with custom repo and not claimed. Report podman's OWN
+    # spelling (prefix kept) so rmi on an untracked row works verbatim.
     untracked = []
     for tag in images.keys():
         # Extract repo part (before the trailing tag version)
         # Use rsplit to handle registry:port formats like registry:5000/x-custom:v1
         repo_part = tag.rsplit(":", 1)[0] if ":" in tag else tag
-        if repo_part.endswith("-custom") and tag not in claimed_tags:
+        if repo_part.endswith("-custom") and _normalize_tag(tag) not in claimed_tags:
             untracked.append(tag)
 
     return untracked

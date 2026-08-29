@@ -343,7 +343,11 @@ class BuildPanel(QWidget):
             self.load_build_config(cfg)
 
     def _on_save(self) -> None:
-        save_build_config(self.current_build_config(), self.base_dir)
+        try:
+            save_build_config(self.current_build_config(), self.base_dir)
+        except ValueError as e:            # reserved name ("outputs")
+            self._error(str(e))
+            return
         self._reload_config_combo()
 
     # -- marshalling ------------------------------------------------------------

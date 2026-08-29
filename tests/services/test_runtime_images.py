@@ -23,3 +23,15 @@ def test_remove_image_success_and_failure(monkeypatch):
     monkeypatch.setattr(runtime, "_run", lambda a, timeout=30: subprocess.CompletedProcess(a, 125, "", "in use"))
     ok, err = runtime.remove_image("podman", "t:1")
     assert not ok and "in use" in err
+
+
+def test_remove_image_uses_long_timeout(monkeypatch):
+    # A multi-GB rmi can exceed _run's default 10s; SIGKILL mid-removal leaves
+    # the image store and our registry inconsistent. rmi gets its own budget.
+    seen = {}
+    def fake_run(args, timeout=10):
+        seen["timeout"] = timeout
+        return subprocess.CompletedProcess(args, 0, stdout="", stderr="")
+    monkeypatch.setattr(runtime, "_run", fake_run)
+    runtime.remove_image("podman", "t:1")
+    assert seen["timeout"] >= 120

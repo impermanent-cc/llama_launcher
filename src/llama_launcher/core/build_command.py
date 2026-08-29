@@ -25,7 +25,29 @@ def auto_tag(cfg: BuildConfig, existing: set, today) -> str:
 
 
 def parse_raw_defines(raw: str) -> list[str]:
-    return [t for t in shlex.split(raw or "") if t.startswith("-D")]
+    # Fires per keystroke from the Raw defines field: a half-typed quote makes
+    # shlex raise ValueError, which must not escape into the Qt slot. Degrade
+    # to whitespace splitting until the quote is closed.
+    try:
+        tokens = shlex.split(raw or "")
+    except ValueError:
+        tokens = (raw or "").split()
+    return [t for t in tokens if t.startswith("-D")]
+
+
+_RPC_DEFINE = re.compile(r"^-DGGML_RPC(?::[A-Za-z]+)?=(.*)$")
+
+
+def _rpc_enabled(defines: list[str]) -> bool:
+    """Whether the rendered defines turn GGML_RPC on, accepting every CMake
+    truthy spelling (ON/1/TRUE/YES, any case, optional :BOOL type suffix) --
+    a raw '-DGGML_RPC=1' must still build the rpc-server target."""
+    enabled = False
+    for d in defines:
+        m = _RPC_DEFINE.match(d)
+        if m:
+            enabled = m.group(1).strip("'\"").upper() in ("ON", "1", "TRUE", "YES")
+    return enabled
 
 
 _DEFINE_NAME = re.compile(r"^-D([A-Za-z0-9_]+)")
@@ -68,7 +90,7 @@ def render_native(cfg: BuildConfig) -> NativeBuild:
     build_dir = f"build-{slug}"
     defines = render_defines(cfg)
     targets = "llama-server"
-    if "-DGGML_RPC=ON" in defines:
+    if _rpc_enabled(defines):
         targets += " rpc-server"
     configure = " ".join(["cmake", "-B", build_dir, *defines])
     build = f"cmake --build {build_dir} -j$(nproc) --target {targets}"
@@ -113,7 +135,7 @@ def render_container(cfg: BuildConfig, tag: str,
                      containerfile_path: str) -> ContainerBuild:
     defines = render_defines(cfg)
     targets = "llama-server"
-    if "-DGGML_RPC=ON" in defines:
+    if _rpc_enabled(defines):
         targets += " rpc-server"
     cf = _CONTAINERFILE.format(
         builder=cfg.builder_image,
