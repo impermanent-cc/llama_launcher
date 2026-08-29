@@ -18,7 +18,7 @@ from llama_launcher.core.nodes import LOCAL_NODE, connection_for
 from llama_launcher.core.pathmap import host_to_container, container_to_host
 from llama_launcher.core.settings_catalog import (
     CATALOG, member_catalog, router_catalog, for_engine,
-    KV_CACHE_TYPES, IK_EXTRA_KV_CACHE_TYPES,
+    KV_CACHE_TYPES, IK_EXTRA_KV_CACHE_TYPES, IK_EXTRA_SPEC_TYPES,
 )
 from llama_launcher.core.spec import (
     DEFAULT_STOP_TIMEOUT, Profile, Runtime, RouterMember, member_model_id,
@@ -689,13 +689,19 @@ class ConfigurePanel(QWidget):
         self._schedule_fit_refresh()    # the fit budget is the new node's GPUs
 
     def _apply_engine_enums(self) -> None:
-        """Extend/revert -ctk/-ctv enum choices for the current engine."""
+        """Extend/revert -ctk/-ctv and spec-type enum choices for the engine."""
         engine = self.engine_combo.currentData() or "llama.cpp"
-        extra = IK_EXTRA_KV_CACHE_TYPES if engine == "ik_llama.cpp" else ()
+        is_ik = engine == "ik_llama.cpp"
+        extra = IK_EXTRA_KV_CACHE_TYPES if is_ik else ()
         for k in ("cache-type-k", "cache-type-v"):
             w = self._widgets.get(k)
             if w is not None:
                 w.set_enum_choices(tuple(KV_CACHE_TYPES) + tuple(extra))
+        spec = self._widgets.get("spec-type")
+        if spec is not None:
+            extra_spec = IK_EXTRA_SPEC_TYPES if is_ik else ()
+            spec.set_enum_choices(
+                tuple(CATALOG["spec-type"].enum) + tuple(extra_spec))
 
     def _maybe_seed_default_image(self, engine: str) -> None:
         """Seed a sensible default image only when the field is empty or still

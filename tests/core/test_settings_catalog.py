@@ -224,8 +224,10 @@ def test_load_mode_setting():
     s = CATALOG["load-mode"]
     assert s.flag == "--load-mode"
     assert s.type == "enum"
-    assert s.default == "mmap"
-    assert s.enum == ("mmap", "none", "mlock", "mmap+mlock", "dio")
+    # upstream default flipped mmap -> auto (llama.cpp #26081); ours must mirror
+    # it so "auto" is the leave-alone sentinel and "mmap" becomes expressible.
+    assert s.default == "auto"
+    assert s.enum == ("auto", "mmap", "none", "mlock", "mmap+mlock", "dio")
     assert "-lm" in s.aliases
     # legacy bools retained for older images
     assert CATALOG["no-mmap"].type == "bool"
@@ -237,7 +239,8 @@ from llama_launcher.core.settings_catalog import (
 )
 
 _IK_KEYS = {"run-time-repack", "no-fused-moe", "mla-use",
-            "attention-max-batch", "smart-expert-reduction"}
+            "attention-max-batch", "smart-expert-reduction",
+            "ctx-size-draft", "swa-compress", "indexer-cache-type-k"}
 
 
 def test_ik_flags_exist_and_are_engine_tagged():
@@ -267,3 +270,62 @@ def test_ik_extra_kv_cache_types_are_additive():
     from llama_launcher.core.settings_catalog import KV_CACHE_TYPES
     assert set(IK_EXTRA_KV_CACHE_TYPES).isdisjoint(KV_CACHE_TYPES)
     assert "q6_0" in IK_EXTRA_KV_CACHE_TYPES
+
+
+def test_attention_max_batch_default_tracks_current_ik():
+    # ik changed the -amb default 0 -> 256 (ik PR #2312). The catalog default
+    # must mirror upstream so 0 ("no cap") is non-default and actually emits.
+    s = CATALOG["attention-max-batch"]
+    assert s.default == 256
+    assert s.minimum == 0
+
+
+def test_tools_options_match_upstream():
+    # llama.cpp #27255 dropped get_datetime (moved to the webui); apply_diff is
+    # not in upstream's set; get_info (OS/cwd runtime info) is.
+    s = CATALOG["tools"]
+    assert set(s.enum) == {"read_file", "write_file", "edit_file",
+                           "file_glob_search", "grep_search",
+                           "exec_shell_command", "get_info"}
+    assert {opt for opt, _ in s.option_help} == set(s.enum)
+
+
+def test_flag_additions_2026_08():
+    s = CATALOG["n-cpu-ffn"]
+    assert s.flag == "--n-cpu-ffn" and s.type == "int" and s.default == 0
+    assert "-ncffn" in s.aliases and s.engine == "any"
+
+    s = CATALOG["tensor-read-lazy"]
+    assert s.type == "enum" and s.default == "auto"
+    assert s.enum == ("on", "auto", "off") and s.engine == "any"
+
+    s = CATALOG["ctx-size-draft"]
+    assert s.flag == "--ctx-size-draft" and s.type == "int" and s.default == 0
+    assert "-cd" in s.aliases and s.engine == "ik_llama.cpp"
+
+    s = CATALOG["swa-compress"]
+    assert s.type == "bool" and s.default is False and s.engine == "ik_llama.cpp"
+
+    s = CATALOG["indexer-cache-type-k"]
+    assert s.type == "enum" and s.default == "f16" and s.enum == ("f16", "q8_0")
+    assert "-ictk" in s.aliases and s.engine == "ik_llama.cpp"
+
+
+def test_ik_spec_type_translation_table():
+    # ik's parser map (common/speculative.cpp) has no draft- prefix on the
+    # draft-model types; mainline's does. The renames bridge our shared enum.
+    from llama_launcher.core.settings_catalog import (
+        IK_SPEC_TYPE_RENAMES, IK_EXTRA_SPEC_TYPES,
+    )
+    assert IK_SPEC_TYPE_RENAMES == {
+        "draft-simple": "draft",
+        "draft-eagle3": "eagle3",
+        "draft-dflash": "dflash",
+        "draft-dspark": "dspark",
+        "draft-mtp": "mtp",
+    }
+    spec_enum = set(CATALOG["spec-type"].enum)
+    assert set(IK_SPEC_TYPE_RENAMES) <= spec_enum
+    # ngram-* need no rename: ik normalizes '-' to '_' before its map lookup.
+    assert IK_EXTRA_SPEC_TYPES == ("suffix",)
+    assert set(IK_EXTRA_SPEC_TYPES).isdisjoint(spec_enum)

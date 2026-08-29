@@ -318,6 +318,22 @@ def test_legacy_mmap_mlock_still_emit_without_load_mode():
     assert "--load-mode" not in argv
 
 
+def test_load_mode_mmap_emits_and_suppresses_legacy():
+    # With the default now "auto", an explicit mmap choice is non-default:
+    # it must emit and still win over the legacy pair.
+    argv = build_command(_srv(**{"load-mode": "mmap", "no-mmap": True}))
+    assert argv[argv.index("--load-mode") + 1] == "mmap"
+    assert "--no-mmap" not in argv
+
+
+def test_load_mode_at_default_does_not_suppress_legacy():
+    # A JSON leftover load-mode equal to its default emits nothing, so it must
+    # not eat the legacy flags either (nothing would carry the intent at all).
+    argv = build_command(_srv(**{"load-mode": "auto", "no-mmap": True}))
+    assert "--load-mode" not in argv
+    assert "--no-mmap" in argv
+
+
 def _ik_profile(engine):
     return Profile(
         name="p", image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
@@ -337,6 +353,44 @@ def test_ik_flag_never_emitted_on_llama_cpp_engine():
     # Same settings dict, mainline engine (JSON-leftover scenario) -> dropped.
     argv = build_command(_ik_profile("llama.cpp"))
     assert "--run-time-repack" not in argv
+
+
+def _ik_srv(**settings):
+    return Profile(
+        name="p", image="ik-img", runtime=Runtime(engine="ik_llama.cpp"),
+        mounts=[Mount(host="/m", container="/models", role="model")],
+        model="/models/x.gguf", settings={"port": 8080, **settings},
+    )
+
+
+def test_spec_type_translated_for_ik_engine():
+    # ik's parser wants 'dflash', not mainline's 'draft-dflash'.
+    argv = build_command(_ik_srv(**{"spec-type": "draft-dflash"}))
+    assert argv[argv.index("--spec-type") + 1] == "dflash"
+
+
+def test_spec_type_untranslated_on_mainline():
+    argv = build_command(_srv(**{"spec-type": "draft-dflash"}))
+    assert argv[argv.index("--spec-type") + 1] == "draft-dflash"
+
+
+def test_spec_type_ngram_passes_through_on_ik():
+    # ik normalizes '-' to '_' itself; ngram names need no translation.
+    argv = build_command(_ik_srv(**{"spec-type": "ngram-map-k"}))
+    assert argv[argv.index("--spec-type") + 1] == "ngram-map-k"
+
+
+def test_ik_suffix_spec_type_dropped_on_mainline():
+    # 'suffix' exists only in ik's parser; a JSON leftover must not reach a
+    # mainline launch (same guard as the ik-only KV-cache quant values).
+    argv = build_command(_srv(**{"spec-type": "suffix"}))
+    assert "--spec-type" not in argv
+
+
+def test_amb_zero_emits_explicit_no_cap():
+    # ik's -amb default is now 256; 0 (= no cap) is non-default and must emit.
+    argv = build_command(_ik_srv(**{"attention-max-batch": 0}))
+    assert argv[argv.index("--attention-max-batch") + 1] == "0"
 
 
 def test_ik_kv_enum_value_dropped_on_mainline_engine():

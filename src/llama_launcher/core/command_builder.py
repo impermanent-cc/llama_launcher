@@ -4,7 +4,7 @@ import shlex
 
 from .settings_catalog import (
     CATALOG,
-    IK_EXTRA_KV_CACHE_TYPES,
+    IK_EXTRA_KV_CACHE_TYPES, IK_EXTRA_SPEC_TYPES, IK_SPEC_TYPE_RENAMES,
     ROUTER_ONLY_KEYS,
     router_catalog,
 )
@@ -412,11 +412,16 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
 
     port = profile.settings.get("port", 8080)
     # --load-mode supersedes the legacy --no-mmap/--mlock flags upstream; mixing
-    # them makes llama.cpp warn and only honour the last. When load-mode is set
-    # (it's only stored when non-default), drop the legacy flags so argv carries
-    # one or the other, never both. Enforced here, not just in the UI, so the
-    # CLI/headless path (which skips the form) stays consistent too.
-    suppress = {"no-mmap", "mlock"} if "load-mode" in profile.settings else set()
+    # them makes llama.cpp warn and only honour the last. When load-mode will
+    # actually emit (a value at its default is skipped as an enum sentinel),
+    # drop the legacy flags so argv carries one or the other, never both.
+    # Enforced here, not just in the UI, so the CLI/headless path (which skips
+    # the form) stays consistent too.
+    lm = catalog.get("load-mode")
+    suppress = ({"no-mmap", "mlock"}
+                if lm is not None
+                and profile.settings.get("load-mode", lm.default) != lm.default
+                else set())
     # Emit changed settings in catalog order, skipping port (handled below).
     for key, setting in catalog.items():
         if key == "port":
@@ -444,6 +449,15 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
                     and value in IK_EXTRA_KV_CACHE_TYPES
                     and profile.runtime.engine != "ik_llama.cpp"):
                 continue
+            # Same layering for spec-type: ik-only values (suffix) are dropped
+            # on a mainline launch, and the shared draft-* spellings are
+            # renamed to ik's un-prefixed ones on an ik launch.
+            if key == "spec-type":
+                if (value in IK_EXTRA_SPEC_TYPES
+                        and profile.runtime.engine != "ik_llama.cpp"):
+                    continue
+                if profile.runtime.engine == "ik_llama.cpp":
+                    value = IK_SPEC_TYPE_RENAMES.get(value, value)
             # An enum value equal to its own default is a "leave it at the
             # engine's default" sentinel (auto/off/model default). Re-emitting
             # it is redundant at best and, for ik's --mla-use "auto", invalid

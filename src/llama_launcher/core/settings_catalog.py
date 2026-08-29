@@ -31,6 +31,24 @@ KV_CACHE_TYPES = ("f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0"
 # case-sensitive. The wider ik iq-quants need GGML_IQK_FA_ALL_QUANTS=ON images.
 IK_EXTRA_KV_CACHE_TYPES = ("q6_0", "q8_KV")
 
+# The shared spec-type enum uses mainline's spellings (common/speculative.cpp
+# name map). ik's map (also common/speculative.cpp there) has no "draft-"
+# prefix on the draft-model types, so these are renamed at emit time on an ik
+# launch. The ngram-* names need no entry: ik normalizes '-' to '_' before its
+# map lookup, which makes mainline's spellings land on the same keys.
+IK_SPEC_TYPE_RENAMES = {
+    "draft-simple": "draft",
+    "draft-eagle3": "eagle3",
+    "draft-dflash": "dflash",
+    "draft-dspark": "dspark",
+    "draft-mtp": "mtp",
+}
+
+# ik-only spec-type values, layered onto the shared enum like the KV-cache
+# extras: offered by the UI only on the ik engine, dropped at emit time on a
+# mainline launch (mainline's parser has no such type).
+IK_EXTRA_SPEC_TYPES = ("suffix",)
+
 _ALL = [
     # Model & Context
     Setting("ctx-size", "--ctx-size", "int", 0, "Model & Context", ("-c",), 0, 1048576, 1024,
@@ -61,6 +79,10 @@ _ALL = [
             tooltip="For Mixture-of-Experts models: keep the experts of the first N layers "
                     "on the CPU to fit a large model in limited VRAM. Higher N = less VRAM, "
                     "slower."),
+    Setting("n-cpu-ffn", "--n-cpu-ffn", "int", 0, "GPU & Memory", ("-ncffn",), 0, 999, 1,
+            tooltip="For dense (non-MoE) models: keep the FFN weights of the first N layers "
+                    "on the CPU to fit a large model in limited VRAM. The dense counterpart "
+                    "of --n-cpu-moe. Newer llama.cpp only."),
     Setting("cpu-moe", "--cpu-moe", "bool", False, "GPU & Memory", ("-cmoe",),
             tooltip="For Mixture-of-Experts models: keep ALL expert weights on the CPU, "
                     "leaving only attention/shared weights on the GPU. Saves the most VRAM "
@@ -77,14 +99,22 @@ _ALL = [
             enum=KV_CACHE_TYPES,
             tooltip="Quantization of the V KV-cache. Lower precision (e.g. q8_0, q4_0) saves "
                     "a lot of VRAM at a small quality cost; f16 (the default) is half precision, f32 is full."),
-    Setting("load-mode", "--load-mode", "enum", "mmap", "GPU & Memory", ("-lm",),
-            enum=("mmap", "none", "mlock", "mmap+mlock", "dio"),
+    Setting("load-mode", "--load-mode", "enum", "auto", "GPU & Memory", ("-lm",),
+            enum=("auto", "mmap", "none", "mlock", "mmap+mlock", "dio"),
             tooltip="How the model file is loaded (newer llama.cpp; supersedes "
-                    "--no-mmap/--mlock). mmap (default) memory-maps it; none loads fully "
-                    "into RAM (slower, more RAM); mlock/mmap+mlock also lock it in RAM so "
-                    "it's never swapped; dio uses DirectIO if available. Set to anything "
-                    "other than mmap and the legacy no-mmap/mlock flags below are ignored. "
-                    "Needs an image new enough to know --load-mode."),
+                    "--no-mmap/--mlock). auto (the upstream default) memory-maps unless a "
+                    "device does not support it; mmap forces memory-mapping; none loads "
+                    "fully into RAM (slower, more RAM); mlock/mmap+mlock also lock it in "
+                    "RAM so it's never swapped; dio uses DirectIO if available. Set to "
+                    "anything other than auto and the legacy no-mmap/mlock flags below are "
+                    "ignored. Needs an image new enough to know --load-mode; the auto "
+                    "value itself needs images from 2026-08-11 or later."),
+    Setting("tensor-read-lazy", "--tensor-read-lazy", "enum", "auto", "GPU & Memory", (),
+            enum=("on", "auto", "off"),
+            tooltip="On-demand reading of certain tensors, e.g. per-layer embeddings. "
+                    "'on' reads their rows from disk on demand instead of keeping them "
+                    "resident (requires mmap); 'auto' (default) does so only for tensors "
+                    "larger than 4 GiB; 'off' keeps them resident. Newer llama.cpp only."),
     Setting("no-mmap", "--no-mmap", "bool", False, "GPU & Memory", (), deprecated=True,
             tooltip="Legacy (deprecated upstream in favor of --load-mode, but works on "
                     "all image versions). Disable memory-mapping of the model file, loading "
@@ -275,9 +305,9 @@ _ALL = [
                     "e.g. '{\"enable_thinking\":false}'. Must be a valid JSON object. "
                     "Empty = pass nothing extra."),
     Setting("tools", "--tools", "multiselect", "", "Server & Tools", (), danger=True,
-            enum=("read_file", "write_file", "edit_file", "apply_diff",
+            enum=("read_file", "write_file", "edit_file",
                   "file_glob_search", "grep_search", "exec_shell_command",
-                  "get_datetime"),
+                  "get_info"),
             tooltip="Built-in server-side agent tools the model can call. DANGER: "
                     "exec_shell_command runs arbitrary commands inside the container; only "
                     "enable in trusted setups - your mounted folders are the only sandbox.",
@@ -285,11 +315,10 @@ _ALL = [
                 ("read_file", "Read the contents of a file inside the mounted folders."),
                 ("write_file", "Create or overwrite a file. Writes into any :rw mount (e.g. your workspace)."),
                 ("edit_file", "Make targeted edits to an existing file. Writes into :rw mounts."),
-                ("apply_diff", "Apply a patch/diff to a file. Writes into :rw mounts."),
                 ("file_glob_search", "Find files by name pattern (glob), e.g. **/*.py."),
                 ("grep_search", "Search inside file contents (like grep) across the mounted folders."),
                 ("exec_shell_command", "DANGER: runs ARBITRARY shell commands inside the container. Trusted models only."),
-                ("get_datetime", "Return the current date and time. Harmless."),
+                ("get_info", "Return runtime info: OS name/version and the working directory. Harmless."),
             )),
     Setting("reasoning", "--reasoning", "enum", "auto", "Server & Tools", ("-rea",),
             enum=("on", "off", "auto"),
@@ -448,14 +477,35 @@ _ALL = [
             tooltip="ik_llama.cpp only. Multi-head Latent Attention for DeepSeek-style "
                     "models. 'auto' leaves ik's default; 0 disables; 1/2/3 select MLA "
                     "variants."),
-    Setting("attention-max-batch", "--attention-max-batch", "int", 0, "ik_llama.cpp", ("-amb",),
+    # Default MUST mirror current ik upstream (256 since ik PR #2312), not our
+    # advice: widgets emit only when value != default, so with the old default
+    # of 0 "no cap" emitted nothing and current ik silently ran 256.
+    Setting("attention-max-batch", "--attention-max-batch", "int", 256, "ik_llama.cpp", ("-amb",),
             0, 65536, 64, engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only. Cap the K*Q attention buffer (MiB) to bound memory "
-                    "on long contexts. 0 = no cap (ik default). ik raises values 1-127 to 128."),
+                    "on long contexts; only applies when flash-attn is off. 0 = no cap. "
+                    "256 is the ik default (older ik builds defaulted to 0 = no cap). "
+                    "ik raises values 1-127 to 128."),
     Setting("smart-expert-reduction", "--smart-expert-reduction", "string", "", "ik_llama.cpp",
             ("-ser",), engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only. Custom active-expert count for MoE models, form "
                     "'Kmin,t' (e.g. '4,0.5'). Empty = leave at the model default."),
+    Setting("ctx-size-draft", "--ctx-size-draft", "int", 0, "ik_llama.cpp", ("-cd",),
+            0, 1048576, 1024, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only (mainline removed this flag). Prompt-context size "
+                    "for the speculative-decoding draft model. 0 = inherit the target "
+                    "context for DFlash/DSpark (their capacity knob), otherwise load from "
+                    "the model."),
+    Setting("swa-compress", "--swa-compress", "bool", False, "ik_llama.cpp", (),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Allocate sliding-window-attention layers at the "
+                    "window size instead of the full context, saving KV-cache memory on "
+                    "SWA models (e.g. Gemma). Off by default."),
+    Setting("indexer-cache-type-k", "--indexer-cache-type-k", "enum", "f16", "ik_llama.cpp",
+            ("-ictk",), enum=("f16", "q8_0"), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Data type of the indexer K-cache used by "
+                    "DeepSeek-style sparse attention (DSA) models. q8_0 saves memory; "
+                    "f16 is the default."),
 ]
 
 CATALOG: dict = {s.key: s for s in _ALL}

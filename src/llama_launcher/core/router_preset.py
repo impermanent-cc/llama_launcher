@@ -11,7 +11,10 @@ import re
 import shlex
 from dataclasses import dataclass, field
 
-from .settings_catalog import CATALOG, ROUTER_ONLY_KEYS, IK_EXTRA_KV_CACHE_TYPES
+from .settings_catalog import (
+    CATALOG, ROUTER_ONLY_KEYS,
+    IK_EXTRA_KV_CACHE_TYPES, IK_EXTRA_SPEC_TYPES, IK_SPEC_TYPE_RENAMES,
+)
 from .spec import Profile, RouterMember, member_model_id
 
 # Keys the router owns. llama.cpp strips or overwrites these when it launches a
@@ -88,7 +91,12 @@ def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
     """
     out: list[tuple[str, str]] = []
     engine = profile.runtime.engine
-    suppress = {"no-mmap", "mlock"} if "load-mode" in profile.settings else set()
+    # Parity with command_builder: suppress the legacy pair only when load-mode
+    # will actually emit (a value at its default is skipped as an enum sentinel).
+    _lm_default = CATALOG["load-mode"].default
+    suppress = ({"no-mmap", "mlock"}
+                if profile.settings.get("load-mode", _lm_default) != _lm_default
+                else set())
     for key, setting in catalog.items():
         if key in EXCLUDED_PRESET_KEYS or key in suppress or key not in profile.settings:
             continue
@@ -98,6 +106,13 @@ def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
         if (key in ("cache-type-k", "cache-type-v")
                 and value in IK_EXTRA_KV_CACHE_TYPES and engine != "ik_llama.cpp"):
             continue
+        # Same layering for spec-type: drop ik-only values on mainline, rename
+        # the shared draft-* spellings to ik's un-prefixed ones on ik.
+        if key == "spec-type":
+            if value in IK_EXTRA_SPEC_TYPES and engine != "ik_llama.cpp":
+                continue
+            if engine == "ik_llama.cpp":
+                value = IK_SPEC_TYPE_RENAMES.get(value, value)
         if setting.type == "enum" and value == setting.default:
             continue
         # The INI key is the flag itself, minus dashes, including negative

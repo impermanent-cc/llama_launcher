@@ -13,4 +13,4 @@ def test_each_tool_checkbox_has_distinct_tooltip(qtbot):
     # spot-check a few are actually about the right tool
     assert "read" in tips["read_file"].lower()
     assert "DANGER" in tips["exec_shell_command"]
-    assert "date" in tips["get_datetime"].lower()
+    assert "runtime info" in tips["get_info"].lower()
