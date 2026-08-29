@@ -777,3 +777,50 @@ def test_configure_form_reloads_after_build_use_in_profile(qtbot):
     save_profile(Profile(name="uip-serv", image="new:2"), base_dir())
     w.build_panel.profile_updated.emit("uip-serv")
     assert w._configure_panel.current_profile().image == "new:2"
+
+
+def test_save_in_router_mode_keeps_single_server_settings(win):
+    """Pressing Save while the form is flipped to router mode must not strip
+    the profile's member-level settings (ctx-size came back 0 after a reopen).
+    Mode purity is enforced at argv time, not by destroying the saved dict."""
+    from llama_launcher.core.command_builder import build_command
+    win._configure_panel.load_profile(Profile(
+        name="M", image="img", model="/models/m.gguf",
+        mounts=[Mount(host="/h", container="/models")],
+        settings={"port": 8080, "ctx-size": 8192, "spec-type": "draft-mtp"}))
+    mc = win._configure_panel.mode_combo
+    mc.setCurrentIndex(mc.findData("router"))
+    cur = win._configure_panel.current_profile()
+    assert cur.settings.get("ctx-size") == 8192
+    assert cur.settings.get("spec-type") == "draft-mtp"
+    # argv purity still holds: no member-level flags on the router command.
+    argv = build_command(cur, router_host_dir="/routerdir")
+    assert "--ctx-size" not in argv and "--spec-type" not in argv
+
+
+def test_settings_survive_router_save_and_reload_round_trip(win):
+    win._configure_panel.load_profile(Profile(
+        name="RT", image="img", model="/models/m.gguf",
+        mounts=[Mount(host="/h", container="/models")],
+        settings={"port": 8080, "ctx-size": 8192}))
+    mc = win._configure_panel.mode_combo
+    mc.setCurrentIndex(mc.findData("router"))
+    win.save_current_profile()
+    saved = {p.name: p for p in store.list_profiles(store.default_base_dir())}["RT"]
+    assert saved.settings.get("ctx-size") == 8192
+    # flipping the saved profile back to server mode gets the value back
+    win._configure_panel.load_profile(saved)
+    mc.setCurrentIndex(mc.findData("server"))
+    assert win._configure_panel.current_profile().settings.get("ctx-size") == 8192
+
+
+def test_exposure_banner_tracks_bind_host_edit_in_router_mode(win):
+    """Switching 0.0.0.0 -> 127.0.0.1 while IN router mode must clear the
+    exposure banner immediately (it used to need a mode round-trip)."""
+    _member_profile(store.default_base_dir())
+    _router_win(win, runtime=Runtime(bind_host="0.0.0.0"))
+    assert "0.0.0.0" in win.monitor_status.banner.text()
+    win._configure_panel.bind_host_combo.setCurrentText("127.0.0.1")
+    assert win.monitor_status.banner.text() == ""
+    win._configure_panel.bind_host_combo.setCurrentText("0.0.0.0")
+    assert "0.0.0.0" in win.monitor_status.banner.text()

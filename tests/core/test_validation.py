@@ -478,3 +478,25 @@ def test_member_without_port_setting_does_not_warn_about_ports():
     issues = validate(_router(), members=[(RouterMember(profile="Qwen"), _member_profile())],
                       api_key_present=True)
     assert not any("random" in m for m in _warnings(issues))
+
+
+def test_router_ignores_leftover_single_server_warnings():
+    """A router profile can carry the form's leftover draft model and member
+    settings (kept so a Save in router mode is not destructive); the
+    single-server launch warnings (inert draft, MTP limits) must not fire on
+    a router launch -- the router itself loads no model."""
+    p = _router(draft_model="/models/d.gguf",
+                settings={"port": 8080, "spec-type": "draft-mtp",
+                          "parallel": 4, "ctx-size": 8192})
+    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
+                      api_key_present=True)
+    assert not any("draft" in m.lower() or "mtp" in m.lower()
+                   for m in _warnings(issues))
+
+
+def test_server_inert_draft_warning_still_fires():
+    p = Profile(name="S", image="img", model="/models/m.gguf",
+                mounts=[Mount(host="/h", container="/models")],
+                draft_model="/models/d.gguf", settings={"port": 8080})
+    issues = validate(p)
+    assert any("never used" in m for m in _warnings(issues))

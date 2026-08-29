@@ -193,7 +193,11 @@ def validate(profile: Profile, running_ports: tuple = (),
     # MTP speculative decoding (--spec-type draft-mtp) has two known limitations
     # in llama.cpp: it ignores the multimodal projector and only supports a
     # single slot. Warn (don't block); these run but silently lose the feature.
-    if profile.settings.get("spec-type") == "draft-mtp":
+    # Router-gated: a router profile keeps the form's leftover draft/model
+    # fields and member-level settings (so a Save in router mode is not
+    # destructive), but the router process itself loads no model -- these
+    # single-server launch warnings would be false alarms there.
+    if profile.mode != "router" and profile.settings.get("spec-type") == "draft-mtp":
         if profile.mmproj:
             issues.append(Issue("warning",
                                 "MTP (--spec-type draft-mtp) doesn't support --mmproj; the "
@@ -208,13 +212,15 @@ def validate(profile: Profile, running_ports: tuple = (),
     # A draft model is inert unless a speculation strategy is selected: llama.cpp
     # defaults --spec-type to 'none', so the draft is loaded (costing VRAM) and
     # never used. Warn (don't block).
-    if profile.draft_model and profile.settings.get("spec-type", "none") in ("none", "", None):
+    if profile.mode != "router" and profile.draft_model \
+            and profile.settings.get("spec-type", "none") in ("none", "", None):
         issues.append(Issue("warning",
                             "A draft model is selected but spec-type is 'none', so the draft "
                             "model is loaded and never used. Set spec-type (e.g. draft-simple) "
                             "to enable speculative decoding, or clear the draft model."))
 
-    if profile.runtime.engine == "ik_llama.cpp" and profile.settings.get("run-time-repack"):
+    if profile.mode != "router" and profile.runtime.engine == "ik_llama.cpp" \
+            and profile.settings.get("run-time-repack"):
         msg = ("Run-time repack (--run-time-repack) disables mmap and increases load "
                "time and RAM.")
         if profile.settings.get("load-mode", "mmap") == "mmap":
@@ -223,7 +229,8 @@ def validate(profile: Profile, running_ports: tuple = (),
 
     # Embedding / reranking bad-combo warnings. A reranker needs all three of
     # --reranking, --pooling rank, and --embeddings; sampling is ignored here.
-    if profile.settings.get("embeddings") or profile.settings.get("reranking"):
+    if profile.mode != "router" and (profile.settings.get("embeddings")
+                                     or profile.settings.get("reranking")):
         if profile.settings.get("reranking"):
             if profile.settings.get("pooling") != "rank":
                 issues.append(Issue("warning",

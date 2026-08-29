@@ -226,7 +226,7 @@ class ConfigurePanel(QWidget):
         self.bind_host_combo = NoWheelComboBox()
         self.bind_host_combo.setEditable(True)
         self.bind_host_combo.addItems(["127.0.0.1", "0.0.0.0"])
-        self.bind_host_combo.currentTextChanged.connect(self.refresh_preview)
+        self.bind_host_combo.currentTextChanged.connect(self._on_bind_host_changed)
 
         # Launch mode: container (podman/docker, default) vs native (a
         # directly-run prebuilt llama-server binary). NoWheel for the same
@@ -685,6 +685,15 @@ class ConfigurePanel(QWidget):
         self.node_combo.blockSignals(False)
         self.rpc_workers_table.set_node_names(self._node_names())
 
+    def _on_bind_host_changed(self, *_) -> None:
+        """The exposure banner is derived from the bind address, so it must
+        track edits live in router mode -- it used to update only on a mode
+        round-trip, leaving a stale "you are exposed" (or worse, a stale
+        all-clear) on a security-critical surface."""
+        self.refresh_preview()
+        if self.mode_combo.currentData() == "router":
+            self.window.refresh_router_panel_header()
+
     def _on_node_changed(self, *_) -> None:
         """A remote server must publish on a LAN interface so the GUI host can
         reach /health and /metrics; loopback would be unreachable. Flip the bind
@@ -1006,13 +1015,16 @@ class ConfigurePanel(QWidget):
         self.window.refresh_router_panel_header()
 
     def current_profile(self) -> Profile:
-        # Filtering lives here, in the UI, per the project's catalog contract --
-        # never in command_builder. A value left over from the other mode (or
-        # loaded from older profile JSON) must not reach argv.
-        active = self.active_catalog()
+        # Collect EVERY set widget, not just the active mode/engine catalog's:
+        # a Save while the form is flipped to router mode must not strip the
+        # profile's single-server settings (ctx-size came back 0 after a
+        # reopen). Mode/engine purity is enforced where argv is rendered --
+        # command_builder gates by mode catalog, ROUTER_ONLY_KEYS, and engine
+        # for the headless path too -- so a carried value can never reach a
+        # mismatched command line.
         settings = {}
         for key, w in self._widgets.items():
-            if key in active and w.is_set():
+            if w.is_set():
                 settings[key] = w.value()
         # port is always stored
         settings["port"] = self._widgets["port"].value()
