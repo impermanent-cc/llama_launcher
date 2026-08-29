@@ -345,7 +345,9 @@ class ConfigurePanel(QWidget):
         members_box.addLayout(members_row)
         self.members_guidance = QLabel(
             "Each member is a saved model profile: set its GPU layers, MoE offload, "
-            "and context in that profile (single-server mode), then add it here.")
+            "and context in that profile (single-server mode), then add it here. "
+            "Members are served through the router's port; a member's own --port "
+            "is ignored (llama.cpp gives each instance a random internal port).")
         self.members_guidance.setWordWrap(True)
         self.members_guidance.setStyleSheet("QLabel { color: palette(mid); }")
         members_box.addWidget(self.members_guidance)

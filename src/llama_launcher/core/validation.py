@@ -28,11 +28,6 @@ def _bind_host_is_addressish(bind_host: str) -> bool:
     except ValueError:
         return False
 
-# Ports Odysseus scans when discovering local model servers
-# (src/model_discovery.py). A router outside these ranges is reachable but will
-# not be found automatically.
-ODYSSEUS_SCAN_PORTS: frozenset = frozenset(range(8000, 8021)) | {8080, 1234, 11434, 11435}
-
 # Addresses that keep a published port on this machine. Anything else is
 # reachable from the network. Kept deliberately narrow: an unlisted address is
 # treated as exposed, which is the safe direction to be wrong in.
@@ -332,6 +327,20 @@ def _validate_router(profile: Profile, members: tuple,
                 f"Member '{member_profile.name}' raw args can't all be expressed in a "
                 f"preset and will be dropped: {'; '.join(problems)}"))
 
+        # llama.cpp spawns each member instance on its OWN random loopback port
+        # and strips/overrides --port from the preset (verified live b10298:
+        # "spawning server instance ... on port 45001"). A port set on a member
+        # profile therefore does nothing here -- warn, or a user watching the
+        # logs concludes the router itself is randomizing its port. Clients
+        # always connect through the router's port.
+        if member_profile.settings.get("port") not in (None, 8080):
+            issues.append(Issue(
+                "warning",
+                f"Member '{member_profile.name}' sets port "
+                f"{member_profile.settings['port']}, but the router assigns member "
+                f"instances their own internal ports; clients connect through the "
+                f"router's port ({profile.settings.get('port', 8080)})."))
+
     # NB: the non-loopback-without-a-key error is raised in validate() for both
     # modes, so it is deliberately not repeated here.
 
@@ -342,13 +351,6 @@ def _validate_router(profile: Profile, members: tuple,
             f"models-max is {models_max}: the router may hold that many models resident "
             f"at once, which can exceed VRAM. Use 1 unless the members are small."))
 
-    port = profile.settings.get("port", 8080)
-    if port not in ODYSSEUS_SCAN_PORTS:
-        issues.append(Issue(
-            "warning",
-            f"Port {port} is outside the ranges Odysseus scans when it discovers model "
-            f"servers (8000-8020, 8080, 1234, 11434, 11435), so it won't be found "
-            f"automatically."))
 
     # Default to the CATALOG default, not "": cors-origins defaults to "*", so
     # reading absence as "" made the most dangerous configuration unwarnable.

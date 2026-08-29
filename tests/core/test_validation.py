@@ -227,18 +227,13 @@ def test_models_max_above_one_warns():
     assert any("models-max" in m for m in _warnings(issues))
 
 
-def test_port_outside_discovery_ranges_warns():
-    p = _router(settings={"port": 9999})
-    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
-                      api_key_present=True)
-    assert any("discover" in m.lower() for m in _warnings(issues))
-
-
-def test_port_inside_discovery_ranges_does_not_warn():
-    p = _router(settings={"port": 8080})
-    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
-                      api_key_present=True)
-    assert not any("discover" in m.lower() for m in _warnings(issues))
+def test_port_choice_never_warns_about_discovery():
+    # The old outside-harness discovery-scan warning is gone: any port is fine.
+    for port in (8080, 9999):
+        p = _router(settings={"port": port})
+        issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
+                          api_key_present=True)
+        assert not any("discover" in m.lower() for m in _warnings(issues))
 
 
 def test_multi_lora_member_warns():
@@ -457,3 +452,29 @@ def test_rpc_router_mode_is_error():
     p.mode = "router"
     issues = validate(p, worker_image_present={"local": True})
     assert "error" in _levels(issues, "does not support router")
+
+
+def test_router_port_choice_raises_no_discovery_warning():
+    """No outside-harness coupling: any router port is fine (the old rule
+    warned when the port fell outside a specific tool's discovery scan)."""
+    p = _router(settings={"port": 9123})
+    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
+                      api_key_present=True)
+    assert not any("scan" in m.lower() or "odysseus" in m.lower()
+                   for m in _warnings(issues) + _errors(issues))
+
+
+def test_member_port_setting_warns_it_is_ignored():
+    """llama.cpp spawns each member on its own random loopback port and strips
+    --port from the preset, so a port set on a member profile silently does
+    nothing; say so instead of letting it look like the router is randomizing."""
+    member = _member_profile(settings={"port": 8090})
+    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), member)],
+                      api_key_present=True)
+    assert any("port" in m and "router" in m for m in _warnings(issues))
+
+
+def test_member_without_port_setting_does_not_warn_about_ports():
+    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), _member_profile())],
+                      api_key_present=True)
+    assert not any("random" in m for m in _warnings(issues))
