@@ -130,3 +130,32 @@ def test_delete_built_tag_confirms_then_removes(qtbot, tmp_path, monkeypatch):
 
     assert calls and calls[0][1] == "t:1"
     assert load_outputs(tmp_path) == []
+
+
+def test_delete_binary_refuses_non_build_dir(qtbot, tmp_path, monkeypatch):
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.store.builds import add_output, load_outputs
+    from llama_launcher.core.build_spec import BuildOutput
+
+    add_output(BuildOutput(id="b1", kind="binary", identifier="/usr/bin/llama-server",
+                           config_name="x", engine="llama.cpp", git_ref="m",
+                           options={}, created="2026-08-28"), tmp_path)
+
+    monkeypatch.setattr(bp, "list_images_detailed", lambda *a, **k: {})
+
+    p = _panel(qtbot, tmp_path)
+    # Force this binary's status to "built" regardless of whether the path
+    # actually exists on the test machine -- the point of this test is the
+    # rmtree safety guard, not binary_exists's own logic.
+    monkeypatch.setattr(p, "_binary_exists", lambda path: True)
+    p.refresh_outputs_sync()
+
+    errors = []
+    monkeypatch.setattr(p, "_confirm", lambda text: True)
+    monkeypatch.setattr(p, "_error", lambda text: errors.append(text))
+
+    p.outputs_table.setCurrentCell(0, 0)
+    p.delete_selected_output()
+
+    assert errors
+    assert len(load_outputs(tmp_path)) == 1

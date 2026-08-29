@@ -296,16 +296,7 @@ class BuildPanel(QWidget):
     # -- saved configs --------------------------------------------------------
 
     def _reload_config_combo(self) -> None:
-        try:
-            configs = list_build_configs(self.base_dir)
-        except AttributeError:
-            # store.builds.list_build_configs globs builds_dir for "*.json",
-            # which also matches builds/outputs.json (a JSON array, not a
-            # BuildConfig dict) once any output has been recorded -- that
-            # mis-parse raises AttributeError instead of being skipped like
-            # other corrupt configs. Degrade to an empty saved-config list
-            # rather than let it crash the whole panel.
-            configs = []
+        configs = list_build_configs(self.base_dir)
         self._saved_configs = {c.name: c for c in configs}
         self.config_combo.blockSignals(True)
         self.config_combo.clear()
@@ -502,8 +493,9 @@ class BuildPanel(QWidget):
                     return
             else:
                 build_dir = Path(identifier).parent.parent
-                assert build_dir.name.startswith("build-"), (
-                    f"refusing to delete non-build directory: {build_dir}")
+                if not build_dir.name.startswith("build-"):
+                    self._error(f"Refusing to delete non-build directory: {build_dir}")
+                    return
                 if not self._confirm(f"Delete build dir {build_dir}?"):
                     return
                 try:
