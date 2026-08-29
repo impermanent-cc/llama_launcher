@@ -68,3 +68,29 @@ def test_render_native_adds_rpc_target():
     from llama_launcher.core.build_command import render_native
     c = BuildConfig(name="w", source_dir="/s", options={"rpc": True})
     assert "--target llama-server rpc-server" in render_native(c).build_cmd
+
+
+def test_render_container_structure():
+    from llama_launcher.core.build_command import render_container
+    c = BuildConfig(name="srv", engine="ik_llama.cpp", target="container",
+                    options={"cuda": True},
+                    builder_image="docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04",
+                    runtime_image="docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04")
+    cb = render_container(c, "ik-custom:srv-20260828", "/store/srv.containerfile")
+    cf = cb.containerfile
+    assert cf.startswith("FROM docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04 AS build")
+    assert "git clone https://github.com/ikawrakow/ik_llama.cpp src" in cf
+    assert "git -C src checkout main" in cf          # default branch fallback
+    assert "-DGGML_CUDA=ON" in cf
+    assert "FROM docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04" in cf
+    assert 'ENTRYPOINT ["/usr/local/bin/llama-server"]' in cf
+    assert cb.build_cmd == \
+        "podman build -t ik-custom:srv-20260828 -f /store/srv.containerfile ."
+
+
+def test_render_container_pinned_ref():
+    from llama_launcher.core.build_command import render_container
+    c = BuildConfig(name="x", git_ref="b6789",
+                    builder_image="b", runtime_image="r")
+    cf = render_container(c, "t:1", "/p").containerfile
+    assert "git -C src checkout b6789" in cf

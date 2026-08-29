@@ -69,3 +69,53 @@ def render_native(cfg: BuildConfig) -> NativeBuild:
     build = f"cmake --build {build_dir} -j$(nproc) --target {targets}"
     binary = f"{cfg.source_dir.rstrip('/')}/{build_dir}/bin/llama-server"
     return NativeBuild(configure, build, binary)
+
+
+@dataclass
+class ContainerBuild:
+    containerfile: str
+    build_cmd: str
+
+
+_CONTAINERFILE = """\
+FROM {builder} AS build
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    git cmake build-essential curl ca-certificates && rm -rf /var/lib/apt/lists/*
+WORKDIR /opt
+RUN git clone {repo} src
+RUN git -C src checkout {ref}
+WORKDIR /opt/src
+RUN cmake -B build {defines} && \\
+    cmake --build build -j$(nproc) --target {targets}
+FROM {runtime}
+RUN apt-get update && apt-get install -y --no-install-recommends \\
+    libgomp1 curl ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /opt/src/build/bin/ /usr/local/bin/
+EXPOSE 8080
+ENTRYPOINT ["/usr/local/bin/llama-server"]
+"""
+
+
+def default_images(cfg: BuildConfig) -> tuple:
+    if cfg.options.get("cuda"):
+        return ("docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04",
+                "docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04")
+    return ("docker.io/library/debian:bookworm",
+            "docker.io/library/debian:bookworm-slim")
+
+
+def render_container(cfg: BuildConfig, tag: str,
+                     containerfile_path: str) -> ContainerBuild:
+    defines = render_defines(cfg)
+    targets = "llama-server"
+    if "-DGGML_RPC=ON" in defines:
+        targets += " rpc-server"
+    cf = _CONTAINERFILE.format(
+        builder=cfg.builder_image,
+        runtime=cfg.runtime_image,
+        repo=REPO_URL[cfg.engine],
+        ref=cfg.git_ref or DEFAULT_BRANCH[cfg.engine],
+        defines=" ".join(defines),
+        targets=targets,
+    )
+    return ContainerBuild(cf, f"podman build -t {tag} -f {containerfile_path} .")
