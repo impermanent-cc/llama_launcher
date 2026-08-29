@@ -27,11 +27,13 @@ def list_build_configs(base_dir: Path) -> list[BuildConfig]:
     d = builds_dir(base_dir)
     out: list[BuildConfig] = []
     for p in sorted(d.glob("*.json")):
+        if p.name == "outputs.json":
+            continue  # reserved registry filename, not a config
         # One truncated/corrupt config must not brick the Build tab -- skip
         # it, keep the rest. Mirrors store.profiles.list_profiles.
         try:
             out.append(build_config_from_dict(json.loads(p.read_text())))
-        except (OSError, ValueError, TypeError, KeyError):
+        except (OSError, ValueError, TypeError, KeyError, AttributeError):
             continue
     return out
 

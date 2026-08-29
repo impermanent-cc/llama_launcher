@@ -40,6 +40,12 @@ def test_corrupt_outputs_recovers_empty(tmp_path):
     assert (tmp_path / "builds" / "outputs.json.bad").exists()
 
 
+def test_list_configs_ignores_outputs_registry(tmp_path):
+    save_build_config(BuildConfig(name="ok"), tmp_path)
+    add_output(_out(), tmp_path)
+    assert [c.name for c in list_build_configs(tmp_path)] == ["ok"]
+
+
 def test_write_containerfile(tmp_path):
     p = write_containerfile(BuildConfig(name="srv"), "FROM x\n", tmp_path)
     assert p.name == "srv.containerfile"
