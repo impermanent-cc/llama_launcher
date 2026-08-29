@@ -73,3 +73,8 @@ def test_profiles_using_binary_build_dir_containment():
     # Identifier with /s/build-x/something should match
     result = profiles_using("/s/build-x/other/path", "binary", [p_match])
     assert result == ["a"]
+
+
+def test_untracked_custom_tags_registry_port():
+    images = {"registry:5000/x-custom:v1": FakeImage("registry:5000/x-custom:v1")}
+    assert untracked_custom_tags(images, []) == ["registry:5000/x-custom:v1"]

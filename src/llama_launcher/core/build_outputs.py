@@ -83,8 +83,9 @@ def untracked_custom_tags(
     # Find tags with custom repo and not claimed
     untracked = []
     for tag in images.keys():
-        # Extract repo part (before the colon)
-        repo_part = tag.split(":")[0] if ":" in tag else tag
+        # Extract repo part (before the trailing tag version)
+        # Use rsplit to handle registry:port formats like registry:5000/x-custom:v1
+        repo_part = tag.rsplit(":", 1)[0] if ":" in tag else tag
         if repo_part.endswith("-custom") and tag not in claimed_tags:
             untracked.append(tag)
 
