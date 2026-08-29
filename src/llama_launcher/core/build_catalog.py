@@ -10,8 +10,10 @@ Deviations from a literal grep (documented in task-2-report.md):
   option()/set() CACHE), so it never appears in either repo's CMakeLists.txt;
   kept with engine "any" and an empty default (CMake/nvcc auto-detects).
 - GGML_SCHED_MAX_COPIES exists in both repos with different literal defaults
-  (mainline "4", ik "1"); the mainline value is used as the single catalog
-  default and the difference is called out in the tooltip.
+  (mainline "4", ik "1"); modeled as two engine-gated Settings (sched-max-copies
+  for llama.cpp, sched-max-copies-ik for ik_llama.cpp) sharing the same flag,
+  each defaulting to its own repo's literal, rather than one "any"-gated entry
+  that would show an ik user mainline's default.
 - GGML_MAX_CONTEXTS (ik only) has an empty-string CACHE default that means
   "use the compiled-in default of 64"; catalog uses the int sentinel 0 for
   that, matching the 0 = auto/default convention used elsewhere in this app.
@@ -377,12 +379,15 @@ _ALL = [
             tooltip="Use ccache to speed up rebuilds when it's available on the "
                     "system. On by default."),
     Setting("sched-max-copies", "GGML_SCHED_MAX_COPIES", "int", 4,
-            "Build type & misc", (), 1, 16, 1,
+            "Build type & misc", (), 1, 16, 1, engine="llama.cpp",
             tooltip="Max input-buffer copies ggml's scheduler keeps for pipeline "
-                    "parallelism across compute streams. Mainline defaults to 4; "
-                    "ik_llama.cpp defaults to 1 (its scheduler doesn't pipeline "
-                    "the same way), shown here as 4 since that is the value used "
-                    "when this project isn't explicitly overridden."),
+                    "parallelism across compute streams. Mainline defaults to 4."),
+    Setting("sched-max-copies-ik", "GGML_SCHED_MAX_COPIES", "int", 1,
+            "Build type & misc", (), 1, 16, 1, engine="ik_llama.cpp",
+            tooltip="Max input-buffer copies ggml's scheduler keeps for pipeline "
+                    "parallelism across compute streams. ik_llama.cpp defaults to "
+                    "1 (its scheduler doesn't pipeline the same way as mainline, "
+                    "whose default is 4)."),
     Setting("max-contexts", "GGML_MAX_CONTEXTS", "int", 0, "Build type & misc", (),
             0, 4096, 1, engine="ik_llama.cpp",
             tooltip="Override ik_llama.cpp's compiled-in limit on simultaneous "

@@ -39,6 +39,22 @@ def test_core_entries_present_with_expected_flags():
     assert BUILD_CATALOG["native-opt"].flag == "GGML_NATIVE"
 
 
+def test_sched_max_copies_split_by_engine():
+    # An "any"-gated single entry defaulting to mainline's 4 misled ik users
+    # who left it alone into building with 4 instead of ik's own default of
+    # 1. Each engine gets its own gated Setting for the same CMake flag.
+    ml = for_engine(BUILD_CATALOG, "llama.cpp")
+    ik = for_engine(BUILD_CATALOG, "ik_llama.cpp")
+
+    assert ml["sched-max-copies"].flag == "GGML_SCHED_MAX_COPIES"
+    assert ml["sched-max-copies"].default == 4
+    assert "sched-max-copies-ik" not in ml
+
+    assert ik["sched-max-copies-ik"].flag == "GGML_SCHED_MAX_COPIES"
+    assert ik["sched-max-copies-ik"].default == 1
+    assert "sched-max-copies" not in ik
+
+
 def test_repo_constants():
     assert set(REPO_URL) == set(DEFAULT_BRANCH) == set(ENGINE_SHORT) == {
         "llama.cpp", "ik_llama.cpp"}

@@ -168,10 +168,11 @@ CMake flags like `-DGGML_CUDA=ON` or `-DGGML_CUDA_FA=ON`.
 Saved build configs remember your choices. Each generated build is recorded with its
 output (image tag or binary path) and tracked as **built** (exists locally), **missing**
 (generated but not yet built), or **untracked** (custom-tagged images built outside the
-app). The **Outputs** table shows all of them with creation date, engine, git ref, and
-build parameters; you can delete stale builds or use the **Use in profile** action to
-write an image tag into a container profile's **Image** field, or point a native profile
-at a freshly-built binary.
+app). The **Outputs** table shows all of them by identifier, status, size, creation
+date, and saved-config name; hover a row for engine, git ref, and build parameters.
+You can delete stale builds or use the **Use in profile** action to write an image
+tag into a container profile's **Image** field, or point a native profile at a
+freshly-built binary.
 
 Image management is local to this machine only; remote nodes manage their own images.
 Native binaries are machine-specific and do not work remotely yet.
