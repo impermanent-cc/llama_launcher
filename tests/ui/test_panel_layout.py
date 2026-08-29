@@ -66,3 +66,11 @@ def test_ik_engine_extends_spec_type_enum(qtbot):
     # flipping back to mainline drops the ik-only choice to the default
     combo.setCurrentIndex(combo.findData("llama.cpp"))
     assert spec.value() == CATALOG["spec-type"].default
+
+
+def test_build_tab_present(qtbot):
+    from llama_launcher.ui.main_window import MainWindow
+    w = MainWindow()
+    qtbot.addWidget(w)
+    labels = [w.tabs.tabText(i) for i in range(w.tabs.count())]
+    assert "Build" in labels

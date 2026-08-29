@@ -19,6 +19,8 @@ class Setting:
     option_help: tuple = ()   # multiselect only: ((option, help_text), ...)
     suggestions: tuple = ()   # int only: preset values offered in an editable combo
     engine: str = "any"       # "any" | "ik_llama.cpp"  (which engine surfaces this flag)
+                              # build_catalog additionally uses "llama.cpp" for
+                              # mainline-only CMake options
     deprecated: bool = False  # upstream emits DEPRECATED warnings; kept for old images
     secret: bool = False      # mask the editor (password field) -- e.g. api-key
 

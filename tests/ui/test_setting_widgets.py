@@ -166,3 +166,13 @@ def test_api_key_widget_is_password_masked(qtbot):
     w.set_value("sk-secret")
     assert w._editor.echoMode() == QLineEdit.Password
     assert w.value() == "sk-secret"          # value still readable programmatically
+
+
+def test_bool_widget_initializes_to_setting_default(qtbot):
+    # The build catalog has default-True bools (the runtime catalog never did);
+    # an unchecked box for a default-ON option would read as "explicitly OFF".
+    from llama_launcher.core.build_catalog import BUILD_CATALOG
+    w = make_widget(BUILD_CATALOG["cuda-fa"])   # GGML_CUDA_FA, default True
+    qtbot.addWidget(w)
+    assert w.value() is True
+    assert w.is_set() is False

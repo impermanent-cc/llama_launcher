@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+from dataclasses import dataclass
 
 
 _DEFAULT_TIMEOUT = 10        # seconds; bounds a hung container binary
@@ -135,6 +136,48 @@ def list_local_images(binary: str, engine: str = "llama.cpp", connection: str = 
     if res.returncode != 0:
         return []
     return parse_images(res.stdout, engine)
+
+
+@dataclass
+class ImageInfo:
+    """Image metadata: tag, size, and creation time."""
+    tag: str
+    size: str
+    created: str
+
+
+def parse_images_detailed(output: str) -> dict[str, ImageInfo]:
+    """Parse `<binary> images --format {{.Repository}}:{{.Tag}}|{{.Size}}|{{.CreatedAt}}`
+    lines into a dict mapping full image tag to ImageInfo. Skips malformed lines
+    and <none> repositories, {} on error."""
+    result: dict[str, ImageInfo] = {}
+    for line in output.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("|")
+        if len(parts) != 3:
+            continue
+        tag, size, created = parts[0].strip(), parts[1].strip(), parts[2].strip()
+        if "<none>" in tag:
+            continue
+        result[tag] = ImageInfo(tag=tag, size=size, created=created)
+    return result
+
+
+def list_images_detailed(binary: str, connection: str = "") -> dict[str, ImageInfo]:
+    """Locally-pulled images with metadata (`<binary> images`), {} on error."""
+    res = _run([*_base(binary, connection), "images", "--format",
+                "{{.Repository}}:{{.Tag}}|{{.Size}}|{{.CreatedAt}}"])
+    if res.returncode != 0:
+        return {}
+    return parse_images_detailed(res.stdout)
+
+
+def remove_image(binary: str, tag: str, connection: str = "") -> tuple[bool, str]:
+    """Remove an image by tag (`<binary> rmi <tag>`), returns (success, stderr)."""
+    res = _run([*_base(binary, connection), "rmi", tag])
+    return (res.returncode == 0, res.stderr)
 
 
 _PROFILE_LABEL = "llama-launcher.profile"

@@ -64,6 +64,11 @@ class SettingWidget(QWidget):
 
         if t == "bool":
             self._editor = QCheckBox(setting.flag)
+            # Start at the catalog default. A no-op for the runtime catalog
+            # (every bool there defaults False) but load-bearing for the build
+            # catalog's default-ON CMake options: an unchecked box for those
+            # would read as "explicitly OFF" and emit -DNAME=OFF.
+            self._editor.setChecked(bool(setting.default))
             self._editor.toggled.connect(lambda: self.changed.emit())
         elif t == "enum":
             self._editor = NoWheelComboBox()

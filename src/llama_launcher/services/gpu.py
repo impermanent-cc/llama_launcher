@@ -73,3 +73,42 @@ def query_gpus(ssh_target: str = "") -> list[GpuStat]:
     if res.returncode != 0:
         return []
     return parse_nvidia_smi(res.stdout)
+
+
+def parse_compute_caps(text: str) -> list[str]:
+    """Parse `nvidia-smi --query-gpu=compute_cap` csv lines like '12.0' into
+    CMAKE_CUDA_ARCHITECTURES-style tokens like '120'. Malformed lines (e.g.
+    'N/A', blanks) are skipped rather than aborting the whole parse."""
+    out = []
+    for line in text.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            major, minor = line.split(".")
+            out.append(f"{int(major)}{int(minor)}")
+        except ValueError:
+            continue
+    return out
+
+
+def compute_caps_argv(ssh_target: str = "") -> list[str]:
+    cmd = ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"]
+    if not ssh_target:
+        return cmd
+    if not valid_ssh_target(ssh_target):
+        raise ValueError(f"unsafe ssh target: {ssh_target!r}")
+    return ["ssh", *SSH_OPTS, ssh_target, *cmd]
+
+
+def query_compute_caps(ssh_target: str = "") -> list[str]:
+    if not ssh_target and shutil.which("nvidia-smi") is None:
+        return []
+    try:
+        res = subprocess.run(compute_caps_argv(ssh_target),
+                             capture_output=True, text=True, check=False, timeout=5)
+    except (OSError, subprocess.SubprocessError, ValueError):
+        return []
+    if res.returncode != 0:
+        return []
+    return parse_compute_caps(res.stdout)
