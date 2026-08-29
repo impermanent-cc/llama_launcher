@@ -287,12 +287,24 @@ class BuildPanel(QWidget):
 
     def _maybe_seed_default_images(self) -> None:
         """Seed builder/runtime image fields from default_images(cfg) only
-        when empty; never clobber a user-typed value. Same rule as
-        ConfigurePanel._maybe_seed_default_image."""
+        when the field is empty or still holds ANY generator output (either
+        the CUDA or the non-CUDA pair); never clobber genuinely user-typed
+        text. Same value-set idiom as ConfigurePanel._maybe_seed_default_image
+        -- without this, picking Container before ticking cuda seeds the
+        debian pair and then the cuda branch of default_images() is
+        unreachable, since the plain "only when empty" rule never re-seeds a
+        field that already has generator text in it."""
+        cuda_builder, cuda_runtime = default_images(BuildConfig(options={"cuda": True}))
+        cpu_builder, cpu_runtime = default_images(BuildConfig(options={"cuda": False}))
+        builder_pool = {cuda_builder, cpu_builder}
+        runtime_pool = {cuda_runtime, cpu_runtime}
+
         builder, runtime_img = default_images(self.current_build_config())
-        if not self.builder_image_edit.text().strip():
+        cur_builder = self.builder_image_edit.text().strip()
+        if cur_builder == "" or cur_builder in builder_pool:
             self.builder_image_edit.setText(builder)
-        if not self.runtime_image_edit.text().strip():
+        cur_runtime = self.runtime_image_edit.text().strip()
+        if cur_runtime == "" or cur_runtime in runtime_pool:
             self.runtime_image_edit.setText(runtime_img)
 
     # -- saved configs --------------------------------------------------------
@@ -359,9 +371,18 @@ class BuildPanel(QWidget):
     def _containerfile_path(self, cfg: BuildConfig) -> Path:
         return builds_dir(self.base_dir) / f"{config_slug(cfg.name)}.containerfile"
 
+    def _current_tag(self, cfg: BuildConfig) -> str:
+        """The tag `generate()` would record for `cfg` right now: auto_tag()
+        against the REAL existing-tags set from the on-disk registry, not an
+        empty set. Shared by refresh_preview and generate so a same-day
+        second generate never shows one tag in the preview/copy and records a
+        different (collision-bumped) one in the registry."""
+        existing = {o.identifier for o in load_outputs(self.base_dir)}
+        return auto_tag(cfg, existing, datetime.date.today())
+
     def _render_container(self, cfg: BuildConfig | None = None, tag: str | None = None):
         cfg = cfg or self.current_build_config()
-        tag = tag or auto_tag(cfg, set(), datetime.date.today())
+        tag = tag or self._current_tag(cfg)
         return render_container(cfg, tag, str(self._containerfile_path(cfg)))
 
     def refresh_preview(self) -> None:
@@ -379,8 +400,7 @@ class BuildPanel(QWidget):
         cfg = self.current_build_config()
         today = datetime.date.today()
         if cfg.target == "container":
-            existing = {o.identifier for o in load_outputs(self.base_dir)}
-            tag = auto_tag(cfg, existing, today)
+            tag = self._current_tag(cfg)
             cb = self._render_container(cfg, tag)
             write_containerfile(cfg, cb.containerfile, self.base_dir)
             identifier, kind = tag, "tag"
@@ -507,14 +527,14 @@ class BuildPanel(QWidget):
                     return
             if output is not None:
                 remove_output(output.id, self.base_dir)
-            self.refresh_outputs_sync()
+            self.refresh_outputs()
             return
 
         if row.status == "missing":
             if output is not None and self._confirm(
                     f"Remove {identifier} from the build registry?"):
                 remove_output(output.id, self.base_dir)
-                self.refresh_outputs_sync()
+                self.refresh_outputs()
             return
 
         # "untracked": no registry entry to act on -- shown for awareness only.

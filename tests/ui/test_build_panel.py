@@ -175,6 +175,105 @@ def test_eligible_profiles_filtered_by_kind(qtbot, tmp_path, monkeypatch):
     assert p.outputs_table.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
 
 
+def test_maybe_seed_reseeds_generated_values_but_not_user_typed(qtbot, tmp_path):
+    # Container target seeds the debian (non-CUDA) pair first.
+    p = _panel(qtbot, tmp_path)
+    p.target_combo.setCurrentIndex(p.target_combo.findData("container"))
+    assert p.builder_image_edit.text() == "docker.io/library/debian:bookworm"
+    assert p.runtime_image_edit.text() == "docker.io/library/debian:bookworm-slim"
+
+    # Ticking cuda AFTER picking container must re-seed to the CUDA pair --
+    # the fields still hold generator output, not user-typed text.
+    p._widgets["cuda"].set_value(True)
+    assert p.builder_image_edit.text() == \
+        "docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04"
+    assert p.runtime_image_edit.text() == \
+        "docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04"
+
+    # A genuinely user-typed builder value must survive further cuda toggles.
+    p.builder_image_edit.setText("my/custom:builder")
+    p._widgets["cuda"].set_value(False)
+    p._widgets["cuda"].set_value(True)
+    assert p.builder_image_edit.text() == "my/custom:builder"
+    # The untouched runtime field keeps tracking the generator's output.
+    assert p.runtime_image_edit.text() == \
+        "docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04"
+
+
+def test_refresh_preview_matches_generate_tag_on_collision(qtbot, tmp_path):
+    import datetime
+    from llama_launcher.core.build_command import auto_tag
+    from llama_launcher.store.builds import load_outputs
+
+    p = _panel(qtbot, tmp_path)
+    p.target_combo.setCurrentIndex(p.target_combo.findData("container"))
+    p.name_edit.setText("srv")
+    p.generate()          # first generate: records the base tag
+
+    cfg = p.current_build_config()
+    existing = {o.identifier for o in load_outputs(tmp_path)}
+    expected_tag = auto_tag(cfg, existing, datetime.date.today())
+    assert expected_tag.endswith("-2")   # sanity: a collision really occurred
+
+    p.refresh_preview()
+    podman_line = p.preview.toPlainText().splitlines()[-1]
+    assert expected_tag in podman_line
+
+
+def test_delete_built_calls_pooled_refresh_not_sync(qtbot, tmp_path, monkeypatch):
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.store.builds import add_output
+    from llama_launcher.core.build_spec import BuildOutput
+    from llama_launcher.services.runtime import ImageInfo
+
+    add_output(BuildOutput(id="t1", kind="tag", identifier="t:1",
+                           config_name="x", engine="llama.cpp", git_ref="m",
+                           options={}, created="2026-08-28"), tmp_path)
+    monkeypatch.setattr(
+        bp, "list_images_detailed",
+        lambda *a, **k: {"t:1": ImageInfo(tag="t:1", size="10MB", created="now")})
+    monkeypatch.setattr(bp, "remove_image", lambda *a, **k: (True, ""))
+
+    p = _panel(qtbot, tmp_path)
+    p.refresh_outputs_sync()
+    monkeypatch.setattr(p, "_confirm", lambda text: True)
+
+    pooled_calls, sync_calls = [], []
+    monkeypatch.setattr(p, "refresh_outputs", lambda *a, **k: pooled_calls.append(1))
+    monkeypatch.setattr(p, "refresh_outputs_sync", lambda *a, **k: sync_calls.append(1))
+
+    p.outputs_table.setCurrentCell(0, 0)
+    p.delete_selected_output()
+
+    assert pooled_calls == [1]
+    assert sync_calls == []
+
+
+def test_delete_missing_calls_pooled_refresh_not_sync(qtbot, tmp_path, monkeypatch):
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.store.builds import add_output
+    from llama_launcher.core.build_spec import BuildOutput
+
+    add_output(BuildOutput(id="m1", kind="tag", identifier="t:missing",
+                           config_name="x", engine="llama.cpp", git_ref="m",
+                           options={}, created="2026-08-28"), tmp_path)
+    monkeypatch.setattr(bp, "list_images_detailed", lambda *a, **k: {})
+
+    p = _panel(qtbot, tmp_path)
+    p.refresh_outputs_sync()
+    monkeypatch.setattr(p, "_confirm", lambda text: True)
+
+    pooled_calls, sync_calls = [], []
+    monkeypatch.setattr(p, "refresh_outputs", lambda *a, **k: pooled_calls.append(1))
+    monkeypatch.setattr(p, "refresh_outputs_sync", lambda *a, **k: sync_calls.append(1))
+
+    p.outputs_table.setCurrentCell(0, 0)
+    p.delete_selected_output()
+
+    assert pooled_calls == [1]
+    assert sync_calls == []
+
+
 def test_use_in_profile_sets_image(qtbot, tmp_path, monkeypatch):
     import llama_launcher.ui.panels.build_panel as bp
     from llama_launcher.core.spec import Profile
