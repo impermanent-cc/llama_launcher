@@ -3,11 +3,12 @@ import os
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QCheckBox, QFileDialog, QHeaderView
+    QTableWidgetItem, QCheckBox, QFileDialog
 )
 
 from llama_launcher.core.spec import Mount
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
+from llama_launcher.ui.widgets.table_columns import set_resizable_columns
 
 _ROLES = ["model", "workspace", "custom"]
 _MODES = ["ro", "rw"]
@@ -35,12 +36,8 @@ class MountsPanel(QWidget):
             item = self.table.horizontalHeaderItem(_col)
             if item is not None:
                 item.setToolTip(_tip)
-        hdr = self.table.horizontalHeader()
-        # Interactive everywhere: Stretch/ResizeToContents lock the columns
-        # against dragging, and mount paths routinely need more room.
-        hdr.setSectionResizeMode(QHeaderView.Interactive)
-        for _c, _w in enumerate((190, 130, 90, 60, 74, 66)):
-            self.table.setColumnWidth(_c, _w)
+        # Mount paths routinely need more room, so every column is draggable.
+        set_resizable_columns(self.table, (190, 130, 90, 60, 74, 66))
         # Floor the table so it can't be squeezed to ~1 row when the Environment
         # form is crowded -- keep 2-4 folder rows visible (header + ~4 rows).
         self.table.setMinimumHeight(148)

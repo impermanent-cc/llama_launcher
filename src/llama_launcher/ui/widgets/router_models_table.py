@@ -1,10 +1,11 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QHeaderView, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
+    QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
     QVBoxLayout, QWidget,
 )
 
 from llama_launcher.ui.widgets.info_button import InfoButton
+from llama_launcher.ui.widgets.table_columns import set_resizable_columns
 
 
 def _status_text(model) -> str:
@@ -41,14 +42,9 @@ class RouterModelsTable(QWidget):
         root.addLayout(header)
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Model id", "Status", ""])
-        hdr = self.table.horizontalHeader()
-        # Data columns Interactive so they stay user-resizable; only the
-        # fixed Load/Unload-buttons column keeps sizing itself to content.
-        hdr.setSectionResizeMode(0, QHeaderView.Interactive)
-        hdr.setSectionResizeMode(1, QHeaderView.Interactive)
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
-        self.table.setColumnWidth(0, 170)
-        self.table.setColumnWidth(1, 110)
+        # Data columns user-resizable; the fixed Load/Unload-buttons column
+        # keeps sizing itself to content.
+        set_resizable_columns(self.table, (170, 110), content_cols=(2,))
         self.table.verticalHeader().setVisible(False)
         self.table.setMaximumHeight(140)   # ~3-4 rows, own scrollbar past that
         root.addWidget(self.table)

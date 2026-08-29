@@ -108,7 +108,6 @@ class _CheckFitGather(QRunnable):
 
 
 _FIT_GPU_TTL = 5.0    # seconds a free-VRAM probe stays fresh for the fit readout
-_MEMBER_META_TTL = 15.0   # seconds a member GGUF header read stays fresh
 
 
 class _FitGpusGather(QRunnable):
@@ -154,7 +153,8 @@ class ConfigurePanel(QWidget):
         self._fit_gpus = None
         self._fit_gpus_ssh = None
         self._fit_gpus_at = 0.0
-        self._member_meta_cache: dict = {}   # host path -> (at, meta, weights)
+        self._member_meta_cache: dict = {}   # host path -> (stamp, meta, weights)
+        self._member_pairs_cache: tuple | None = None   # (at, members-key, pairs)
         self._fit_gather_inflight = False
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
@@ -214,7 +214,9 @@ class ConfigurePanel(QWidget):
         image_widget = QWidget()
         image_widget.setLayout(image_row)
         self._image_row = image_widget   # container-only row, hidden in native mode
-        from PySide6.QtWidgets import QTableWidget, QHeaderView
+        from PySide6.QtWidgets import QTableWidget
+
+        from llama_launcher.ui.widgets.table_columns import set_resizable_columns
 
         # NoWheel: an unfocused scroll over these must not silently flip launch
         # semantics (terminal vs detached) or expose the port to the network.
@@ -316,10 +318,7 @@ class ConfigurePanel(QWidget):
             item = self.members_list.horizontalHeaderItem(_col)
             if item is not None:
                 item.setToolTip(_tip)
-        # Interactive (not Stretch): every column stays user-resizable.
-        self.members_list.horizontalHeader().setSectionResizeMode(QHeaderView.Interactive)
-        for _col, _w in enumerate((150, 170, 90, 110)):
-            self.members_list.setColumnWidth(_col, _w)
+        set_resizable_columns(self.members_list, (150, 170, 90, 110))
         self.members_list.verticalHeader().setVisible(False)
         self.members_list.setMaximumHeight(140)
         self.members_list.itemChanged.connect(lambda _i: self.refresh_preview())
@@ -692,7 +691,9 @@ class ConfigurePanel(QWidget):
         all-clear) on a security-critical surface."""
         self.refresh_preview()
         if self.mode_combo.currentData() == "router":
-            self.window.refresh_router_panel_header()
+            # ensure_key=False: this fires per keystroke; it must never mint
+            # an on-disk key dir for a half-typed profile name.
+            self.window.refresh_router_panel_header(ensure_key=False)
 
     def _on_node_changed(self, *_) -> None:
         """A remote server must publish on a LAN interface so the GUI host can
@@ -874,6 +875,20 @@ class ConfigurePanel(QWidget):
     def member_pairs(self) -> list:
         """(RouterMember, member Profile) pairs for members whose profile exists."""
         return resolve_member_pairs(self.members(), self.window.router_base_dir())
+
+    def _member_pairs_cached(self) -> list:
+        """member_pairs() behind a short TTL, for the debounced fit readout
+        ONLY: each resolve globs and parses every profile JSON on disk, and
+        the fit line re-renders on every form edit. Launch/validation paths
+        keep calling member_pairs() directly for a fresh read."""
+        now = time.monotonic()
+        key = tuple((m.profile, m.model_id) for m in self.members())
+        cached = self._member_pairs_cache
+        if cached is not None and cached[1] == key and now - cached[0] < 2.0:
+            return cached[2]
+        pairs = self.member_pairs()
+        self._member_pairs_cache = (now, key, pairs)
+        return pairs
 
     def missing_member_profiles(self) -> list:
         """Member profile names that no longer exist on disk.
@@ -1143,7 +1158,7 @@ class ConfigurePanel(QWidget):
         the router itself has no model, and whatever lingers in the (disabled)
         model field must not leak into the estimate."""
         out: list[int] = []
-        for _member, prof in self.member_pairs():
+        for _member, prof in self._member_pairs_cached():
             if not prof.model:
                 continue
             meta, weights = self._cached_meta_weights(prof.model, prof.mounts)
@@ -1157,18 +1172,29 @@ class ConfigurePanel(QWidget):
         return out
 
     def _cached_meta_weights(self, container_path: str, mounts) -> tuple:
-        """(meta, weights_bytes) with a short TTL cache: a GGUF header read
-        is a 64MB file read, and the debounced fit refresh re-runs on every
-        form edit -- without the cache each edit would re-read every member."""
+        """(meta, weights_bytes) cached by the file's (mtime, size) stamp: a
+        GGUF header read is a 64MB file read, and the debounced fit refresh
+        re-runs on every form edit. A stat per render replaces the old
+        wall-clock TTL, so an unchanged header is NEVER re-read (the TTL
+        forced a fresh 64MB read every 15s on the UI thread) while a swapped
+        model file invalidates instantly."""
         host = container_to_host(container_path, mounts)
         if host is None:
             return None, None
+        try:
+            st = os.stat(host)
+            stamp = (st.st_mtime_ns, st.st_size)
+        except OSError:
+            stamp = None
         hit = self._member_meta_cache.get(host)
-        if hit is not None and time.monotonic() - hit[0] < _MEMBER_META_TTL:
+        if hit is not None and stamp is not None and hit[0] == stamp:
             return hit[1], hit[2]
         meta = model_info.read_gguf_meta(host)
         weights = model_info.file_size(host)
-        self._member_meta_cache[host] = (time.monotonic(), meta, weights)
+        if stamp is not None:
+            self._member_meta_cache[host] = (stamp, meta, weights)
+        else:
+            self._member_meta_cache.pop(host, None)   # unreadable: don't cache
         return meta, weights
 
     @staticmethod

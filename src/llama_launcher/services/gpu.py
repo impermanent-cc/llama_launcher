@@ -53,8 +53,10 @@ def parse_nvidia_smi(text: str) -> list[GpuStat]:
     return out
 
 
-def nvidia_smi_argv(ssh_target: str = "") -> list[str]:
-    cmd = ["nvidia-smi", f"--query-gpu={_QUERY}", "--format=csv,noheader,nounits"]
+def _smi_argv(query_flag: str, format_flag: str, ssh_target: str) -> list[str]:
+    """Shared nvidia-smi argv builder: local invocation, or wrapped through
+    ssh after the same target validation every ssh boundary uses."""
+    cmd = ["nvidia-smi", query_flag, format_flag]
     if not ssh_target:
         return cmd
     if not valid_ssh_target(ssh_target):
@@ -62,17 +64,29 @@ def nvidia_smi_argv(ssh_target: str = "") -> list[str]:
     return ["ssh", *SSH_OPTS, ssh_target, *cmd]
 
 
-def query_gpus(ssh_target: str = "") -> list[GpuStat]:
+def _smi_stdout(argv_fn, ssh_target: str) -> str | None:
+    """Shared nvidia-smi runner: which-guard for local runs, bounded timeout,
+    and the full swallow-to-empty error contract. Returns stdout or None."""
     if not ssh_target and shutil.which("nvidia-smi") is None:
-        return []
+        return None
     try:
-        res = subprocess.run(nvidia_smi_argv(ssh_target),
+        res = subprocess.run(argv_fn(ssh_target),
                              capture_output=True, text=True, check=False, timeout=5)
     except (OSError, subprocess.SubprocessError, ValueError):
-        return []
+        return None
     if res.returncode != 0:
-        return []
-    return parse_nvidia_smi(res.stdout)
+        return None
+    return res.stdout
+
+
+def nvidia_smi_argv(ssh_target: str = "") -> list[str]:
+    return _smi_argv(f"--query-gpu={_QUERY}", "--format=csv,noheader,nounits",
+                     ssh_target)
+
+
+def query_gpus(ssh_target: str = "") -> list[GpuStat]:
+    out = _smi_stdout(nvidia_smi_argv, ssh_target)
+    return parse_nvidia_smi(out) if out is not None else []
 
 
 def parse_compute_caps(text: str) -> list[str]:
@@ -93,22 +107,10 @@ def parse_compute_caps(text: str) -> list[str]:
 
 
 def compute_caps_argv(ssh_target: str = "") -> list[str]:
-    cmd = ["nvidia-smi", "--query-gpu=compute_cap", "--format=csv,noheader"]
-    if not ssh_target:
-        return cmd
-    if not valid_ssh_target(ssh_target):
-        raise ValueError(f"unsafe ssh target: {ssh_target!r}")
-    return ["ssh", *SSH_OPTS, ssh_target, *cmd]
+    return _smi_argv("--query-gpu=compute_cap", "--format=csv,noheader",
+                     ssh_target)
 
 
 def query_compute_caps(ssh_target: str = "") -> list[str]:
-    if not ssh_target and shutil.which("nvidia-smi") is None:
-        return []
-    try:
-        res = subprocess.run(compute_caps_argv(ssh_target),
-                             capture_output=True, text=True, check=False, timeout=5)
-    except (OSError, subprocess.SubprocessError, ValueError):
-        return []
-    if res.returncode != 0:
-        return []
-    return parse_compute_caps(res.stdout)
+    out = _smi_stdout(compute_caps_argv, ssh_target)
+    return parse_compute_caps(out) if out is not None else []

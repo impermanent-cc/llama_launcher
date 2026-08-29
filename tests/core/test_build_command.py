@@ -24,11 +24,48 @@ def test_tag_override_wins():
     assert auto_tag(c, {"me/mine:v1"}, D) == "me/mine:v1"
 
 
-def test_render_defines_bool_and_quoting():
+def test_render_defines_bool_and_unquoted_tokens():
+    # Tokens are UNQUOTED here; the join sites (render_native /
+    # render_container) shell-quote each token exactly once.
     c = BuildConfig(options={"cuda": True, "cuda-architectures": "86;120"})
     out = render_defines(c)
     assert "-DGGML_CUDA=ON" in out
-    assert "-DCMAKE_CUDA_ARCHITECTURES='86;120'" in out
+    assert "-DCMAKE_CUDA_ARCHITECTURES=86;120" in out
+
+
+def test_render_native_quotes_special_tokens_once():
+    from llama_launcher.core.build_command import render_native
+    c = BuildConfig(name="w", source_dir="/s",
+                    options={"cuda-architectures": "86;120"})
+    assert "'-DCMAKE_CUDA_ARCHITECTURES=86;120'" in render_native(c).configure_cmd
+
+
+def test_multiword_raw_define_survives_quoted():
+    # -DCMAKE_CXX_FLAGS="-O3 -funroll-loops" must stay ONE argument in the
+    # copyable command, not split into a broken positional arg.
+    from llama_launcher.core.build_command import render_container, render_native
+    c = BuildConfig(name="perf", source_dir="/s",
+                    raw_defines='-DCMAKE_CXX_FLAGS="-O3 -funroll-loops"')
+    assert "'-DCMAKE_CXX_FLAGS=-O3 -funroll-loops'" in render_native(c).configure_cmd
+    cf = render_container(
+        BuildConfig(name="perf", builder_image="b", runtime_image="r",
+                    raw_defines='-DCMAKE_CXX_FLAGS="-O3 -funroll-loops"'),
+        "t:1", "/p/x.containerfile").containerfile
+    assert "'-DCMAKE_CXX_FLAGS=-O3 -funroll-loops'" in cf
+
+
+def test_build_cmd_quotes_path_with_spaces():
+    from llama_launcher.core.build_command import render_container
+    c = BuildConfig(name="x", builder_image="b", runtime_image="r")
+    cb = render_container(c, "t:1", "/con fig/x.containerfile")
+    assert "-f '/con fig/x.containerfile' '/con fig'" in cb.build_cmd
+
+
+def test_parse_raw_defines_two_token_form():
+    # CMake accepts `-D FOO=1`; the value must fold into the define, and a
+    # trailing bare -D (still being typed) is dropped, not emitted.
+    assert parse_raw_defines("-D FOO=1 -DB=2") == ["-DFOO=1", "-DB=2"]
+    assert parse_raw_defines("-D") == []
 
 
 def test_render_defines_skips_defaults_and_wrong_engine():

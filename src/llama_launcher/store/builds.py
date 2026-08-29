@@ -93,8 +93,16 @@ def remove_output(output_id: str, base_dir: Path) -> None:
     _save_outputs(outputs, base_dir)
 
 
+def containerfile_path(cfg: BuildConfig, base_dir: Path) -> Path:
+    """Where write_containerfile puts (and the generated `podman build -f`
+    command expects) this config's Containerfile. The single source for the
+    path formula: the UI must never re-derive it, or the written file and the
+    copyable command could point at different places."""
+    return builds_dir(base_dir) / f"{config_slug(cfg.name)}.containerfile"
+
+
 def write_containerfile(cfg: BuildConfig, text: str, base_dir: Path) -> Path:
-    path = builds_dir(base_dir) / f"{config_slug(cfg.name)}.containerfile"
+    path = containerfile_path(cfg, base_dir)
     write_private(path, text)
     return path
 

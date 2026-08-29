@@ -81,11 +81,11 @@ class Profile:
     members: list[RouterMember] = field(default_factory=list)
 
 
-def slugify(name: str) -> str:
+def slugify(name: str, fallback: str = "unnamed") -> str:
     s = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
     # An all-symbol / empty name would collapse to "" -> a ".json" filename or a
     # "llama-" container name; fall back to a stable placeholder.
-    return s or "unnamed"
+    return s or fallback
 
 
 def member_model_id(m: RouterMember) -> str:

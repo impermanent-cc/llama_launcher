@@ -143,9 +143,10 @@ def test_delete_built_tag_confirms_then_removes(qtbot, tmp_path, monkeypatch):
 
     p.outputs_table.setCurrentCell(0, 0)
     p.delete_selected_output()
+    # rmi runs off-thread now; wait for the poll chain to finish the delete.
+    qtbot.waitUntil(lambda: load_outputs(tmp_path) == [], timeout=3000)
 
     assert calls and calls[0][1] == "t:1"
-    assert load_outputs(tmp_path) == []
 
 
 def test_delete_binary_refuses_non_build_dir(qtbot, tmp_path, monkeypatch):
@@ -347,8 +348,9 @@ def test_delete_built_calls_pooled_refresh_not_sync(qtbot, tmp_path, monkeypatch
 
     p.outputs_table.setCurrentCell(0, 0)
     p.delete_selected_output()
+    # rmi runs off-thread; the pooled refresh fires from the poll chain.
+    qtbot.waitUntil(lambda: pooled_calls == [1], timeout=3000)
 
-    assert pooled_calls == [1]
     assert sync_calls == []
 
 
@@ -421,3 +423,109 @@ def test_fresh_panel_emits_only_touched_options(qtbot, tmp_path):
     assert "-DGGML_CUDA=ON" in text
     assert "=OFF" not in text
     assert "=''" not in text
+
+
+def test_fresh_form_has_no_phantom_options(qtbot, tmp_path):
+    # Untouched string widgets with non-empty defaults (blas-vendor,
+    # sycl-target) must not appear in options as "" -- they polluted saved
+    # configs and broke _matching_entry equality across load round-trips.
+    p = _panel(qtbot, tmp_path)
+    assert p.current_build_config().options == {}
+
+
+def test_cross_engine_load_does_not_leak_stash(qtbot, tmp_path):
+    # Loading an ik config over a llama form must not re-stash the outgoing
+    # llama-only values: flipping back to llama.cpp silently re-applied a
+    # cuda-fa=False the loaded config never contained.
+    from llama_launcher.core.build_spec import BuildConfig
+    p = _panel(qtbot, tmp_path)
+    p.engine_combo.setCurrentIndex(p.engine_combo.findData("llama.cpp"))
+    p._widgets["cuda-fa"].set_value(False)      # llama-only, default True
+    p.load_build_config(BuildConfig(name="ik", engine="ik_llama.cpp"))
+    p.engine_combo.setCurrentIndex(p.engine_combo.findData("llama.cpp"))
+    assert p._widgets["cuda-fa"].is_set() is False
+    assert p._widgets["cuda-fa"].value() is True
+
+
+def test_generate_binary_replaces_entry_on_ref_change(qtbot, tmp_path):
+    # Same build dir + same options but a NEW git ref supersedes the entry:
+    # the registry must not keep reporting the old ref as provenance.
+    from llama_launcher.store.builds import load_outputs
+    p = _panel(qtbot, tmp_path)
+    p.target_combo.setCurrentIndex(p.target_combo.findData("native"))
+    p.name_edit.setText("nat")
+    p.source_dir_edit.setText("/s")
+    p.ref_edit.setText("b6789")
+    p.generate()
+    p.ref_edit.setText("b7000")
+    p.generate()
+    outs = load_outputs(tmp_path)
+    assert [o.git_ref for o in outs] == ["b7000"]
+
+
+def test_overlapping_outputs_refresh_renders_newest(qtbot, tmp_path, monkeypatch):
+    # Two refreshes in flight: only the NEWEST gather's result may render --
+    # the first (stale) snapshot must be dropped, not painted last.
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.store.builds import add_output
+    from llama_launcher.core.build_spec import BuildOutput
+    from llama_launcher.services.runtime import ImageInfo
+
+    add_output(BuildOutput(id="t1", kind="tag", identifier="t:1",
+                           config_name="x", engine="llama.cpp", git_ref="m",
+                           options={}, created="2026-08-28"), tmp_path)
+    p = _panel(qtbot, tmp_path)
+
+    stale = {}   # first gather: image gone (pretend pre-delete snapshot)
+    fresh = {"t:1": ImageInfo(tag="t:1", size="10MB", created="now")}
+    results = iter([stale, fresh])
+    monkeypatch.setattr(bp, "list_images_detailed",
+                        lambda *a, **k: next(results))
+
+    # Synchronous pool: the real global pool gives no ordering guarantee
+    # between the two gathers, so the iterator could feed 'stale' to the
+    # NEWER gather (seen flaking under the slower localci container). Running
+    # each gather inline pins gather 1 = stale and, deliberately, has the
+    # stale gather FINISH FIRST -- the exact case the superseding logic must
+    # drop on render.
+    class _InlinePool:
+        @staticmethod
+        def globalInstance():
+            return _InlinePool()
+
+        @staticmethod
+        def start(runnable):
+            runnable.run()
+
+    monkeypatch.setattr(bp, "QThreadPool", _InlinePool)
+
+    p.refresh_outputs()   # gather 1 (stale), completes immediately
+    p.refresh_outputs()   # gather 2 (fresh) supersedes it
+    qtbot.waitUntil(lambda: p._outputs_gather is None
+                    and p.outputs_table.rowCount() > 0, timeout=3000)
+    assert p.outputs_table.item(0, 1).text() == "built"
+
+
+def test_delete_binary_uses_shared_build_dir_rule(qtbot, tmp_path, monkeypatch):
+    # The rmtree target comes from the same extract_build_dir rule the in-use
+    # guard uses; a real build-<slug> dir is deleted, others are refused.
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.store.builds import add_output, load_outputs
+    from llama_launcher.core.build_spec import BuildOutput
+
+    build_dir = tmp_path / "src" / "build-nat"
+    (build_dir / "bin").mkdir(parents=True)
+    binary = build_dir / "bin" / "llama-server"
+    binary.write_text("x")
+    add_output(BuildOutput(id="b1", kind="binary", identifier=str(binary),
+                           config_name="nat", engine="llama.cpp", git_ref="m",
+                           options={}, created="2026-08-28"), tmp_path)
+    monkeypatch.setattr(bp, "list_images_detailed", lambda *a, **k: {})
+
+    p = _panel(qtbot, tmp_path)
+    p.refresh_outputs_sync()
+    monkeypatch.setattr(p, "_confirm", lambda text: True)
+    p.outputs_table.setCurrentCell(0, 0)
+    p.delete_selected_output()
+    qtbot.waitUntil(lambda: load_outputs(tmp_path) == [], timeout=3000)
+    assert not build_dir.exists()

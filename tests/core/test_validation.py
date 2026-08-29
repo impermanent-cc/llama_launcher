@@ -252,6 +252,18 @@ def test_unconvertible_member_raw_args_warns():
     assert any("preset" in m.lower() for m in _warnings(issues))
 
 
+def test_blank_cors_origins_reads_as_upstream_wildcard():
+    # A stored "" means --cors-origins is omitted, so the server runs with
+    # upstream's '*' default: the exposed-bind wildcard warning must still
+    # fire (older UI versions saved cors-origins as "" on untouched forms).
+    from llama_launcher.core.spec import Runtime
+    p = _router(runtime=Runtime(bind_host="0.0.0.0"),
+                settings={"port": 8080, "cors-origins": ""})
+    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
+                      api_key_present=True)
+    assert any("CORS origins '*'" in m for m in _warnings(issues))
+
+
 def test_tools_with_lan_cors_origin_warns():
     p = _router(settings={"port": 8080, "tools": "all",
                           "cors-origins": "http://vm.local"})

@@ -1,10 +1,11 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget, QHeaderView,
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
 )
 
 from llama_launcher.core.spec import RpcWorker
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox, NoWheelSpinBox
+from llama_launcher.ui.widgets.table_columns import set_resizable_columns
 
 _DEVICES = ["CPU", "CUDA0", "CUDA1"]
 
@@ -32,11 +33,7 @@ class RpcWorkersTable(QWidget):
         self.table.horizontalHeaderItem(2).setToolTip(
             "Estimate only: how much memory you expect this worker to donate, "
             "used by 'Check fit'. Not enforced (rpc-server has no memory cap).")
-        hdr = self.table.horizontalHeader()
-        # Interactive (not Stretch/ResizeToContents): columns stay user-resizable.
-        hdr.setSectionResizeMode(QHeaderView.Interactive)
-        for col, w in enumerate((140, 90, 130, 70)):
-            self.table.setColumnWidth(col, w)
+        set_resizable_columns(self.table, (140, 90, 130, 70))
         self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table)
 

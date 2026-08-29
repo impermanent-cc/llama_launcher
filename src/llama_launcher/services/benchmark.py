@@ -74,8 +74,15 @@ _SNAP_FLAGS = {"ngl": "n-gpu-layers", "fa": "flash-attn", "ctk": "cache-type-k",
 
 
 def build_snapshot(profile, member=None) -> dict:
-    src = member if member is not None else profile
-    model = getattr(member, "model", None) or getattr(profile, "model", None) or ""
+    # A router whose loaded model resolves to no member records blanks: the
+    # router profile's own settings/model are leftover single-server form
+    # fields (a router Save keeps every set widget), values the members never
+    # ran with -- honest Nones beat a confidently wrong config row.
+    if member is None and getattr(profile, "mode", "server") == "router":
+        src, model = None, ""
+    else:
+        src = member if member is not None else profile
+        model = getattr(member, "model", None) or getattr(profile, "model", None) or ""
     snap = {"model": os.path.basename(model) if model else None,
             "image": profile.image, "mode": profile.mode}
     for short, key in _SNAP_FLAGS.items():

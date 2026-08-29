@@ -1,11 +1,12 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QHeaderView, QFileDialog
+    QTableWidgetItem, QFileDialog
 )
 
 from llama_launcher.core.spec import LoraRef
 from llama_launcher.ui.widgets.no_wheel import NoWheelDoubleSpinBox
+from llama_launcher.ui.widgets.table_columns import set_resizable_columns
 
 
 class LoraPanel(QWidget):
@@ -17,14 +18,9 @@ class LoraPanel(QWidget):
         layout = QVBoxLayout(self)
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Path", "Scale", ""])
-        hdr = self.table.horizontalHeader()
-        # Data columns Interactive so they stay user-resizable; only the
-        # fixed Browse-button column keeps sizing itself to its content.
-        hdr.setSectionResizeMode(0, QHeaderView.Interactive)        # Path
-        hdr.setSectionResizeMode(1, QHeaderView.Interactive)        # Scale
-        hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)   # Browse
-        self.table.setColumnWidth(0, 240)
-        self.table.setColumnWidth(1, 60)
+        # Path + Scale user-resizable; the fixed Browse-button column keeps
+        # sizing itself to its content.
+        set_resizable_columns(self.table, (240, 60), content_cols=(2,))
         layout.addWidget(self.table)
         row = QHBoxLayout()
         add = QPushButton("+ Add")

@@ -47,6 +47,21 @@ def test_profiles_using_tag():
     assert profiles_using("t:1", "tag", [P("a", "t:1"), P("b", "other")]) == ["a"]
 
 
+def test_profiles_using_tag_localhost_insensitive():
+    # use-in-profile on an untracked row writes podman's own localhost/
+    # spelling into profile.image; the in-use guard must match it against the
+    # registry's unqualified tag (and vice versa) or delete rmi's an image a
+    # profile still uses.
+    @dataclass
+    class P:
+        name: str
+        image: str
+    profs = [P("a", "localhost/llama-custom:x")]
+    assert profiles_using("llama-custom:x", "tag", profs) == ["a"]
+    assert profiles_using("localhost/llama-custom:x", "tag",
+                          [P("b", "llama-custom:x")]) == ["b"]
+
+
 def test_profiles_using_binary_direct_match():
     @dataclass
     class R:

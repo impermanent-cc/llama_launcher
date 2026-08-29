@@ -78,8 +78,9 @@ class BenchmarkController:
 
         build_snapshot() requires a Profile (it reads .settings/.model), never
         a RouterMember -- a RouterMember has neither and raises AttributeError.
-        Falling back to None (profile.settings, i.e. the router's own -- empty
-        -- settings) is a lesser-quality snapshot but never crashes.
+        Falling back to None makes build_snapshot record blank config fields
+        for a router (its own settings are leftover form state, not what the
+        member ran with) -- a lesser-quality snapshot but never a wrong one.
         """
         if p.mode != "router" or model_scope is None:
             return None

@@ -6,11 +6,11 @@ from dataclasses import dataclass
 from .build_catalog import BUILD_CATALOG, DEFAULT_BRANCH, ENGINE_SHORT, REPO_URL
 from .build_spec import BuildConfig
 from .settings_catalog import for_engine
+from .spec import slugify
 
 
 def config_slug(name: str) -> str:
-    slug = re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
-    return slug or "config"
+    return slugify(name, fallback="config")
 
 
 def auto_tag(cfg: BuildConfig, existing: set, today) -> str:
@@ -32,7 +32,22 @@ def parse_raw_defines(raw: str) -> list[str]:
         tokens = shlex.split(raw or "")
     except ValueError:
         tokens = (raw or "").split()
-    return [t for t in tokens if t.startswith("-D")]
+    # CMake accepts the two-token spelling `-D FOO=1`; fold it into the
+    # one-token form so the value isn't dropped. A trailing bare `-D` (still
+    # being typed) is discarded rather than emitted as a broken define.
+    out: list[str] = []
+    i = 0
+    while i < len(tokens):
+        t = tokens[i]
+        if t == "-D":
+            if i + 1 < len(tokens):
+                out.append("-D" + tokens[i + 1])
+                i += 2
+                continue
+        elif t.startswith("-D"):
+            out.append(t)
+        i += 1
+    return out
 
 
 _RPC_DEFINE = re.compile(r"^-DGGML_RPC(?::[A-Za-z]+)?=(.*)$")
@@ -69,7 +84,10 @@ def render_defines(cfg: BuildConfig) -> list[str]:
             # same blank guard as command_builder._render_setting.
             if not str(value).strip():
                 continue
-            rendered = shlex.quote(str(value))
+            rendered = str(value)
+        # Tokens stay UNQUOTED here; the join sites shell-quote each token
+        # exactly once (raw defines included), so a multi-word value like
+        # -DCMAKE_CXX_FLAGS="-O3 -funroll-loops" survives the copyable string.
         out.append(f"-D{setting.flag}={rendered}")
     raw = parse_raw_defines(cfg.raw_defines)
     raw_names = {m.group(1) for d in raw if (m := _DEFINE_NAME.match(d))}
@@ -92,7 +110,9 @@ def render_native(cfg: BuildConfig) -> NativeBuild:
     targets = "llama-server"
     if _rpc_enabled(defines):
         targets += " rpc-server"
-    configure = " ".join(["cmake", "-B", build_dir, *defines])
+    configure = shlex.join(["cmake", "-B", build_dir, *defines])
+    # build_dir is slug-derived ([a-z0-9-] only) and $(nproc) must stay a
+    # live shell substitution, so this line needs no quoting.
     build = f"cmake --build {build_dir} -j$(nproc) --target {targets}"
     binary = f"{cfg.source_dir.rstrip('/')}/{build_dir}/bin/llama-server"
     return NativeBuild(configure, build, binary)
@@ -131,8 +151,23 @@ def default_images(cfg: BuildConfig) -> tuple:
             "docker.io/library/debian:bookworm-slim")
 
 
+def default_image_pool() -> tuple[set, set]:
+    """Every (builder, runtime) image string default_images() can produce, as
+    (builder_pool, runtime_pool). The seeding UI uses this to tell generator
+    output apart from user-typed text; keeping the enumeration NEXT to
+    default_images means a new backend branch there can't silently leave the
+    pool stale."""
+    builders, runtimes = set(), set()
+    for cuda in (False, True):
+        b, r = default_images(BuildConfig(options={"cuda": cuda}))
+        builders.add(b)
+        runtimes.add(r)
+    return builders, runtimes
+
+
 def render_container(cfg: BuildConfig, tag: str,
-                     containerfile_path: str) -> ContainerBuild:
+                     containerfile_path: str,
+                     binary: str = "podman") -> ContainerBuild:
     defines = render_defines(cfg)
     targets = "llama-server"
     if _rpc_enabled(defines):
@@ -142,12 +177,13 @@ def render_container(cfg: BuildConfig, tag: str,
         runtime=cfg.runtime_image,
         repo=REPO_URL[cfg.engine],
         ref=cfg.git_ref or DEFAULT_BRANCH[cfg.engine],
-        defines=" ".join(defines),
+        defines=shlex.join(defines),
         targets=targets,
     )
     # Build context is the Containerfile's own parent dir, not the caller's
     # CWD: the Containerfile clones its own source from REPO_URL, so tarring
     # an unrelated CWD as build context is both wrong and wasteful.
     context_dir = posixpath.dirname(containerfile_path) or "."
-    return ContainerBuild(
-        cf, f"podman build -t {tag} -f {containerfile_path} {context_dir}")
+    build_cmd = shlex.join(
+        [binary, "build", "-t", tag, "-f", containerfile_path, context_dir])
+    return ContainerBuild(cf, build_cmd)

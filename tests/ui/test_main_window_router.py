@@ -779,6 +779,26 @@ def test_configure_form_reloads_after_build_use_in_profile(qtbot):
     assert w._configure_panel.current_profile().image == "new:2"
 
 
+def test_build_profile_update_detected_after_combo_reset(qtbot):
+    # _reload_profile_list resets the combo to -1 while the form keeps its
+    # profile; "loaded" must be judged by the Name field, not combo text, or
+    # the second use-in-profile leaves a stale form whose Save reverts it.
+    from llama_launcher.ui.main_window import MainWindow, base_dir
+    from llama_launcher.core.spec import Profile
+    from llama_launcher.store.profiles import save_profile
+    save_profile(Profile(name="uip-serv2", image="old:1"), base_dir())
+    w = MainWindow()
+    qtbot.addWidget(w)
+    w._reload_profile_list()
+    w._configure_panel.profile_combo.setCurrentText("uip-serv2")
+    w._on_pick_profile(0)
+    w._reload_profile_list()          # combo -> -1, form still holds uip-serv2
+    assert w._configure_panel.profile_combo.currentText() == ""
+    save_profile(Profile(name="uip-serv2", image="new:2"), base_dir())
+    w.build_panel.profile_updated.emit("uip-serv2")
+    assert w._configure_panel.current_profile().image == "new:2"
+
+
 def test_save_in_router_mode_keeps_single_server_settings(win):
     """Pressing Save while the form is flipped to router mode must not strip
     the profile's member-level settings (ctx-size came back 0 after a reopen).

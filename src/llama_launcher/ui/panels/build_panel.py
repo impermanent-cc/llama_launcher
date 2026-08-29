@@ -19,53 +19,72 @@ from PySide6.QtWidgets import (
 
 from llama_launcher.core.build_catalog import BUILD_CATALOG
 from llama_launcher.core.build_command import (
-    config_slug, auto_tag, render_native, render_container, default_images,
+    auto_tag, render_native, render_container, default_image_pool,
+    default_images,
 )
 from llama_launcher.core.build_outputs import (
-    OutputRow, classify_outputs, untracked_custom_tags, profiles_using,
+    OutputRow, classify_outputs, extract_build_dir, untracked_custom_tags,
+    profiles_using,
 )
 from llama_launcher.core.build_spec import BuildConfig, BuildOutput
 from llama_launcher.core.settings_catalog import for_engine
 from llama_launcher.services.gpu import query_compute_caps
 from llama_launcher.services.runtime import list_images_detailed, remove_image
 from llama_launcher.store.builds import (
-    builds_dir, save_build_config, list_build_configs, load_outputs,
+    containerfile_path, save_build_config, list_build_configs, load_outputs,
     add_output, remove_output, write_containerfile, new_output_id,
 )
 from llama_launcher.store.profiles import list_profiles, save_profile
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.widgets.setting_widgets import make_widget, make_row_label
-
-
-# BuildPanel is constructed with only a base_dir (no Profile/runtime context
-# to read a container binary from, unlike ConfigurePanel/MonitorController),
-# so podman calls here use a fixed default -- same default Runtime.binary
-# uses everywhere else in the app (core/spec.py).
-_BUILD_BINARY = "podman"
+from llama_launcher.ui.widgets.table_columns import set_resizable_columns
 
 
 class _OutputsGather(QRunnable):
     """Off-UI-thread body of refresh_outputs(): the only slow part is the
     `podman images` subprocess call, so that's all this does. Same delivery
-    model as ConfigurePanel's _CheckFitGather/_FitGpusGather -- write the
-    result onto a plain attribute of the owning BuildPanel (atomic under the
-    GIL) instead of a cross-thread Qt signal, and hold a reference to the
-    panel so it can't be garbage-collected mid-gather. The actual
-    classify+render work happens back on the UI thread in refresh_outputs_sync,
-    called by _poll_outputs once _outputs_inflight flips back to False.
+    model as _CapsGather below -- results live on the gather object itself
+    and the panel keeps a reference to the CURRENT gather, so overlapping
+    refreshes can't race: a newer refresh replaces the reference and every
+    poll loop renders only the newest gather's result (a superseded gather's
+    result is simply dropped). The classify+render work happens back on the
+    UI thread in refresh_outputs_sync, called by _poll_outputs.
     """
-    def __init__(self, owner, binary: str):
+    def __init__(self, binary: str):
         super().__init__()
-        self._owner = owner
         self._binary = binary
+        self.done = False
+        self.images: dict = {}
 
     def run(self):
         try:
-            images = list_images_detailed(self._binary)
+            self.images = list_images_detailed(self._binary)
         except Exception:            # noqa: BLE001 - worker must never raise
-            images = {}
-        self._owner._outputs_images_result = images
-        self._owner._outputs_inflight = False
+            self.images = {}
+        finally:
+            self.done = True
+
+
+class _WorkGather(QRunnable):
+    """Off-UI-thread wrapper for a blocking (ok, error) callable -- used by
+    delete_selected_output so `podman rmi` (up to 120s) and rmtree of a big
+    build dir never freeze the window. Same done-flag poll shape as
+    _CapsGather."""
+
+    def __init__(self, fn):
+        super().__init__()
+        self._fn = fn
+        self.done = False
+        self.ok = False
+        self.error = ""
+
+    def run(self):
+        try:
+            self.ok, self.error = self._fn()
+        except Exception as exc:     # noqa: BLE001 - worker must never raise
+            self.ok, self.error = False, str(exc)
+        finally:
+            self.done = True
 
 
 class _CapsGather(QRunnable):
@@ -97,15 +116,24 @@ class BuildPanel(QWidget):
     so tests never touch the user's real config dir.
     """
 
-    def __init__(self, *, base_dir, parent=None):
+    def __init__(self, *, base_dir, binary_provider=None, parent=None):
         super().__init__(parent)
         self.base_dir = Path(base_dir)
+        # Which container binary the Outputs join/deletion talks to. The
+        # Build tab has no Profile of its own, so the owner passes a provider
+        # (MainWindow wires the Configure form's runtime choice); standalone
+        # construction falls back to the same default Runtime.binary uses
+        # everywhere else (core/spec.py).
+        self._binary_provider = binary_provider or (lambda: "podman")
         self._widgets: dict[str, object] = {}
         self._group_boxes: dict[str, QGroupBox] = {}
         self._saved_configs: dict[str, BuildConfig] = {}
         self._outputs_rows: list[OutputRow] = []
-        self._outputs_inflight = False
-        self._outputs_images_result: dict = {}
+        self._outputs_gather: _OutputsGather | None = None
+        self._delete_gather: _WorkGather | None = None
+        # In-memory copy of the outputs registry so per-keystroke previews
+        # don't re-read outputs.json from disk; invalidated on every write.
+        self._outputs_cache: list | None = None
         # Programmatic-load guard: seeding/prefill react to user gestures
         # only, never to load_build_config's own set_value cascade.
         self._loading = False
@@ -260,7 +288,7 @@ class BuildPanel(QWidget):
         self.outputs_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.outputs_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.outputs_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self.outputs_table.horizontalHeader().setStretchLastSection(True)
+        set_resizable_columns(self.outputs_table, (240, 80, 80, 100, 120))
         self.outputs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.outputs_table.customContextMenuRequested.connect(self._on_outputs_context_menu)
         outputs_layout.addWidget(self.outputs_table)
@@ -395,11 +423,7 @@ class BuildPanel(QWidget):
         with a different cuda state must round-trip unmutated."""
         if self._loading:
             return
-        cuda_builder, cuda_runtime = default_images(BuildConfig(options={"cuda": True}))
-        cpu_builder, cpu_runtime = default_images(BuildConfig(options={"cuda": False}))
-        builder_pool = {cuda_builder, cpu_builder}
-        runtime_pool = {cuda_runtime, cpu_runtime}
-
+        builder_pool, runtime_pool = default_image_pool()
         builder, runtime_img = default_images(self.current_build_config())
         cur_builder = self.builder_image_edit.text().strip()
         if cur_builder == "" or cur_builder in builder_pool:
@@ -458,13 +482,18 @@ class BuildPanel(QWidget):
         self.refresh_preview()
 
     def _load_build_config(self, cfg: BuildConfig) -> None:
-        self._options_stash = {}       # loaded config replaces prior UI state
         self.name_edit.setText(cfg.name)
         self.engine_combo.blockSignals(True)
         idx = self.engine_combo.findData(cfg.engine)
         self.engine_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.engine_combo.blockSignals(False)
         self._rebuild_settings_form(cfg.engine)
+        # Clear the stash AFTER the rebuild: a loaded config replaces prior UI
+        # state, but _rebuild_settings_form re-stashes the OUTGOING form's set
+        # values -- clearing first would let another engine's leftovers (e.g.
+        # a llama-only cuda-fa=False under a loaded ik config) survive the
+        # load and silently re-apply on the next manual engine flip.
+        self._options_stash = {}
         tidx = self.target_combo.findData(cfg.target)
         self.target_combo.setCurrentIndex(tidx if tidx >= 0 else 0)
         self.ref_edit.setText(cfg.git_ref)
@@ -482,7 +511,20 @@ class BuildPanel(QWidget):
     # -- preview / generate -----------------------------------------------------
 
     def _containerfile_path(self, cfg: BuildConfig) -> Path:
-        return builds_dir(self.base_dir) / f"{config_slug(cfg.name)}.containerfile"
+        # Single source: store.builds owns the formula, so the written file
+        # and the copyable `podman build -f` command can never diverge.
+        return containerfile_path(cfg, self.base_dir)
+
+    def _load_outputs_cached(self) -> list:
+        """The outputs registry, from the in-memory copy when it's current.
+        refresh_preview runs per keystroke; without this every keypress in
+        container mode re-read outputs.json from disk."""
+        if self._outputs_cache is None:
+            self._outputs_cache = load_outputs(self.base_dir)
+        return self._outputs_cache
+
+    def _invalidate_outputs_cache(self) -> None:
+        self._outputs_cache = None
 
     @staticmethod
     def _matching_entry(cfg: BuildConfig, kind: str, identifier: str | None,
@@ -502,13 +544,13 @@ class BuildPanel(QWidget):
                 return o
         return None
 
-    def _current_tag(self, cfg: BuildConfig) -> str:
+    def _current_tag(self, cfg: BuildConfig, outs: list | None = None) -> str:
         """The tag `generate()` would record for `cfg` right now: the tag of
         an existing identical-build entry if one is registered (idempotent
         regenerate), else auto_tag() against the REAL existing-tags set from
-        the on-disk registry. Shared by refresh_preview and generate so the
+        the registry. Shared by refresh_preview and generate so the
         previewed/copied tag and the recorded tag never diverge."""
-        outs = load_outputs(self.base_dir)
+        outs = outs if outs is not None else self._load_outputs_cached()
         dup = self._matching_entry(cfg, "tag", None, outs)
         if dup is not None:
             return dup.identifier
@@ -518,9 +560,14 @@ class BuildPanel(QWidget):
     def _render_container(self, cfg: BuildConfig | None = None, tag: str | None = None):
         cfg = cfg or self.current_build_config()
         tag = tag or self._current_tag(cfg)
-        return render_container(cfg, tag, str(self._containerfile_path(cfg)))
+        return render_container(cfg, tag, str(self._containerfile_path(cfg)),
+                                binary=self._binary_provider() or "podman")
 
     def refresh_preview(self) -> None:
+        if self._loading:
+            # load_build_config fires ~a dozen textChanged/changed cascades;
+            # it performs the single real refresh after clearing the flag.
+            return
         cfg = self.current_build_config()
         if cfg.target == "container":
             cb = self._render_container(cfg)
@@ -534,8 +581,9 @@ class BuildPanel(QWidget):
     def generate(self) -> None:
         cfg = self.current_build_config()
         today = datetime.date.today()
+        outs = load_outputs(self.base_dir)   # authoritative read for a write
         if cfg.target == "container":
-            tag = self._current_tag(cfg)
+            tag = self._current_tag(cfg, outs)
             cb = self._render_container(cfg, tag)
             write_containerfile(cfg, cb.containerfile, self.base_dir)
             identifier, kind = tag, "tag"
@@ -544,12 +592,17 @@ class BuildPanel(QWidget):
             identifier, kind = nb.expected_binary, "binary"
         # Re-clicking Generate must not stack registry rows: an identical
         # expected build keeps its entry; a binary regenerate with changed
-        # flags REPLACES the entry for that build dir (the new expectation
-        # supersedes the old one -- same path, one build).
-        outs = load_outputs(self.base_dir)
+        # flags/engine/ref REPLACES the entry for that build dir (the new
+        # expectation supersedes the old one -- same path, one build). For
+        # tags, _matching_entry already matched engine/ref/options, so the
+        # entry is identical by construction; for binaries it matched on the
+        # path alone, so engine/ref must be compared here or a ref change
+        # would leave stale provenance in the registry forever.
         dup = self._matching_entry(cfg, kind, identifier, outs)
         if dup is not None:
-            if kind == "tag" or dup.options == cfg.options:
+            if kind == "tag" or (dup.options == cfg.options
+                                 and dup.engine == cfg.engine
+                                 and dup.git_ref == cfg.git_ref):
                 self.refresh_preview()
                 return
             remove_output(dup.id, self.base_dir)
@@ -558,6 +611,7 @@ class BuildPanel(QWidget):
             config_name=cfg.name, engine=cfg.engine, git_ref=cfg.git_ref,
             options=cfg.options, created=today.isoformat(),
         ), self.base_dir)
+        self._invalidate_outputs_cache()
         self.refresh_preview()
 
     @staticmethod
@@ -575,9 +629,10 @@ class BuildPanel(QWidget):
         if output is None:
             return "Untracked image: no matching entry in the build registry."
         lines = [f"engine: {output.engine}", f"ref: {output.git_ref or '(default)'}"]
-        non_default = {k: v for k, v in (output.options or {}).items()}
-        if non_default:
-            opts = ", ".join(f"{k}={v}" for k, v in non_default.items())
+        if output.options:
+            # options already holds only explicitly-set values (the form's
+            # is_set filter); nothing to strip here.
+            opts = ", ".join(f"{k}={v}" for k, v in output.options.items())
             lines.append(f"options: {opts}")
         if output.notes:
             lines.append(f"notes: {output.notes}")
@@ -586,16 +641,24 @@ class BuildPanel(QWidget):
     def refresh_outputs(self) -> None:
         """Threaded entry point: gather `podman images` off the UI thread,
         then finish (classify + render) on the UI thread via refresh_outputs_sync.
+        A newer call supersedes an in-flight one: only the CURRENT gather's
+        result is ever rendered, so overlapping refreshes (e.g. Refresh
+        clicked mid-delete) can't paint a stale pre-delete snapshot last.
         """
-        self._outputs_inflight = True
-        QThreadPool.globalInstance().start(_OutputsGather(self, _BUILD_BINARY))
+        g = _OutputsGather(self._binary_provider() or "podman")
+        self._outputs_gather = g
+        QThreadPool.globalInstance().start(g)
         QTimer.singleShot(150, self._poll_outputs)
 
     def _poll_outputs(self) -> None:
-        if self._outputs_inflight:
+        g = self._outputs_gather
+        if g is None:
+            return                       # a newer poll chain already rendered
+        if not g.done:
             QTimer.singleShot(150, self._poll_outputs)
             return
-        self.refresh_outputs_sync(images=self._outputs_images_result)
+        self._outputs_gather = None
+        self.refresh_outputs_sync(images=g.images)
 
     def refresh_outputs_sync(self, images: dict | None = None) -> None:
         """Pure logic path, no thread pool: gather (or accept already-gathered)
@@ -604,7 +667,8 @@ class BuildPanel(QWidget):
         background `podman images` gather completes.
         """
         if images is None:
-            images = list_images_detailed(_BUILD_BINARY)
+            images = list_images_detailed(self._binary_provider() or "podman")
+        self._invalidate_outputs_cache()   # pick up external registry edits
         outputs = load_outputs(self.base_dir)
         rows = classify_outputs(outputs, images, self._binary_exists)
         untracked = untracked_custom_tags(images, outputs)
@@ -634,15 +698,26 @@ class BuildPanel(QWidget):
     def _error(self, text: str) -> None:
         QMessageBox.critical(self, "Error", text)
 
-    def delete_selected_output(self) -> None:
+    def _selected_output_row(self) -> OutputRow | None:
+        """The OutputRow behind the table's current selection, or None."""
         row_index = self.outputs_table.currentRow()
         if row_index < 0 or row_index >= len(self._outputs_rows):
+            return None
+        return self._outputs_rows[row_index]
+
+    @staticmethod
+    def _row_kind(row: OutputRow) -> str:
+        # Untracked rows have no registry entry; they are always images.
+        return row.output.kind if row.output is not None else "tag"
+
+    def delete_selected_output(self) -> None:
+        row = self._selected_output_row()
+        if row is None:
             self._error("Select an output to delete first.")
             return
-        row = self._outputs_rows[row_index]
         output = row.output
         identifier = row.identifier
-        kind = output.kind if output is not None else "tag"
+        kind = self._row_kind(row)
 
         using = profiles_using(identifier, kind, list_profiles(self.base_dir))
         if using:
@@ -655,35 +730,70 @@ class BuildPanel(QWidget):
             if kind == "tag":
                 if not self._confirm(f"Delete image {identifier}?"):
                     return
-                ok, stderr = remove_image(_BUILD_BINARY, identifier)
-                if not ok:
-                    self._error(f"Failed to delete image {identifier}: {stderr}")
-                    return
+                binary = self._binary_provider() or "podman"
+
+                def work():
+                    return remove_image(binary, identifier)
+
+                fail_prefix = f"Failed to delete image {identifier}"
             else:
-                build_dir = Path(identifier).parent.parent
+                # Same "which build dir owns this binary" rule the in-use
+                # guard (profiles_using) applies -- never a second derivation.
+                build_dir = Path(extract_build_dir(identifier) or identifier)
                 if not build_dir.name.startswith("build-"):
                     self._error(f"Refusing to delete non-build directory: {build_dir}")
                     return
                 if not self._confirm(f"Delete build dir {build_dir}?"):
                     return
-                try:
-                    shutil.rmtree(build_dir)
-                except OSError as exc:
-                    self._error(f"Failed to delete build dir {build_dir}: {exc}")
-                    return
-            if output is not None:
-                remove_output(output.id, self.base_dir)
-            self.refresh_outputs()
+
+                def work():
+                    try:
+                        shutil.rmtree(build_dir)
+                    except OSError as exc:
+                        return False, str(exc)
+                    return True, ""
+
+                fail_prefix = f"Failed to delete build dir {build_dir}"
+            # `podman rmi` on a big layered image can run for minutes and
+            # rmtree of a build dir isn't cheap either: run the blocking part
+            # off the UI thread (project rule) and finish in _poll_delete.
+            if self._delete_gather is not None:
+                return                     # a delete is already in flight
+            self.delete_output_btn.setEnabled(False)
+            g = _WorkGather(work)
+            g.fail_prefix = fail_prefix
+            g.output_id = output.id if output is not None else None
+            self._delete_gather = g
+            QThreadPool.globalInstance().start(g)
+            QTimer.singleShot(100, self._poll_delete)
             return
 
         if row.status == "missing":
             if output is not None and self._confirm(
                     f"Remove {identifier} from the build registry?"):
                 remove_output(output.id, self.base_dir)
+                self._invalidate_outputs_cache()
                 self.refresh_outputs()
             return
 
         # "untracked": no registry entry to act on -- shown for awareness only.
+
+    def _poll_delete(self) -> None:
+        g = self._delete_gather
+        if g is None:
+            return
+        if not g.done:
+            QTimer.singleShot(100, self._poll_delete)
+            return
+        self._delete_gather = None
+        self.delete_output_btn.setEnabled(True)
+        if not g.ok:
+            self._error(f"{g.fail_prefix}: {g.error}")
+            return
+        if g.output_id is not None:
+            remove_output(g.output_id, self.base_dir)
+            self._invalidate_outputs_cache()
+        self.refresh_outputs()
 
     def _eligible_profiles(self, kind: str) -> list[str]:
         """List profiles eligible for the given output kind.
@@ -700,10 +810,9 @@ class BuildPanel(QWidget):
         row_index = self.outputs_table.rowAt(pos.y())
         if row_index < 0 or row_index >= len(self._outputs_rows):
             return
-
-        row = self._outputs_rows[row_index]
-        output = row.output
-        kind = output.kind if output is not None else "tag"
+        # (The right-click press already moved currentRow here, so
+        # use_in_profile's selection-based lookup acts on this same row.)
+        kind = self._row_kind(self._outputs_rows[row_index])
 
         eligible = self._eligible_profiles(kind)
         if not eligible:
@@ -723,15 +832,12 @@ class BuildPanel(QWidget):
         For tag outputs: sets profile.image
         For binary outputs: sets profile.runtime.native_binary
         """
-        row_index = self.outputs_table.currentRow()
-        if row_index < 0 or row_index >= len(self._outputs_rows):
+        row = self._selected_output_row()
+        if row is None:
             self._error("Select an output first.")
             return
-
-        row = self._outputs_rows[row_index]
-        output = row.output
         identifier = row.identifier
-        kind = output.kind if output is not None else "tag"
+        kind = self._row_kind(row)
 
         # Find the profile
         profiles = {p.name: p for p in list_profiles(self.base_dir)}

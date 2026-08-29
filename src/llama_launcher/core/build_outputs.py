@@ -39,36 +39,21 @@ def classify_outputs(
     rows = []
     for output in outputs:
         if output.kind == "tag":
-            # Tag kind: check if in images dict (localhost/-insensitive)
-            if _normalize_tag(output.identifier) in by_normalized:
-                img = by_normalized[_normalize_tag(output.identifier)]
-                rows.append(OutputRow(
-                    output=output,
-                    identifier=output.identifier,
-                    status="built",
-                    size=getattr(img, "size", ""),
-                    created=getattr(img, "created", ""),
-                ))
-            else:
-                rows.append(OutputRow(
-                    output=output,
-                    identifier=output.identifier,
-                    status="missing",
-                ))
+            # localhost/-insensitive image lookup; only images carry metadata.
+            img = by_normalized.get(_normalize_tag(output.identifier))
+            rows.append(OutputRow(
+                output=output,
+                identifier=output.identifier,
+                status="built" if img is not None else "missing",
+                size=img.size if img is not None else "",
+                created=img.created if img is not None else "",
+            ))
         elif output.kind == "binary":
-            # Binary kind: use binary_exists callable
-            if binary_exists(output.identifier):
-                rows.append(OutputRow(
-                    output=output,
-                    identifier=output.identifier,
-                    status="built",
-                ))
-            else:
-                rows.append(OutputRow(
-                    output=output,
-                    identifier=output.identifier,
-                    status="missing",
-                ))
+            rows.append(OutputRow(
+                output=output,
+                identifier=output.identifier,
+                status="built" if binary_exists(output.identifier) else "missing",
+            ))
     return rows
 
 
@@ -102,14 +87,17 @@ def untracked_custom_tags(
     return untracked
 
 
-def _extract_build_dir(path: str) -> str:
+def extract_build_dir(path: str) -> str:
     """Extract the build directory from a path like /s/build-x/bin/llama-server.
 
     Returns the directory that contains the build (dirname(dirname(path))).
-    Uses string manipulation to avoid filesystem imports.
+    Uses string manipulation to avoid filesystem imports. This is the single
+    "which build dir owns this binary" rule: both the in-use guard below and
+    the Build tab's delete path derive the directory through it, so the
+    layout assumption can never diverge between the check and the rmtree.
     """
     # Split by / and take all parts except the last 2
-    parts = path.split("/")
+    parts = path.rstrip("/").split("/")
     if len(parts) > 2:
         return "/".join(parts[:-2])
     return ""
@@ -131,28 +119,27 @@ def profiles_using(
         List of profile names using the identifier.
     """
     result = []
+    # Tags compare localhost/-insensitively on BOTH sides: profiles can hold
+    # podman's own `localhost/<tag>` spelling (use-in-profile on an untracked
+    # row writes it verbatim) while the registry stores the unqualified tag.
+    want_tag = _normalize_tag(identifier) if kind == "tag" else ""
+    id_build_dir = extract_build_dir(identifier) if kind == "binary" else ""
 
     for profile in profiles:
         if kind == "tag":
-            # Check if profile.image matches identifier
-            if getattr(profile, "image", None) == identifier:
+            image = getattr(profile, "image", None)
+            if image and _normalize_tag(image) == want_tag:
                 result.append(profile.name)
-        elif kind == "binary":
-            # Check if profile.runtime.native_binary equals identifier
-            # or is inside its build-<slug> directory
-            runtime = getattr(profile, "runtime", None)
-            if runtime:
-                native_binary = getattr(runtime, "native_binary", "")
-                if native_binary:
-                    # Direct match
-                    if native_binary == identifier:
-                        result.append(profile.name)
-                    else:
-                        # Check if native_binary is inside identifier's build dir
-                        # Extract build directories and compare
-                        id_build_dir = _extract_build_dir(identifier)
-                        bin_build_dir = _extract_build_dir(native_binary)
-                        if id_build_dir and bin_build_dir and id_build_dir == bin_build_dir:
-                            result.append(profile.name)
+            continue
+        if kind != "binary":
+            continue
+        native_binary = getattr(getattr(profile, "runtime", None),
+                                "native_binary", "")
+        if not native_binary:
+            continue
+        # Direct match, or living inside the identifier's build-<slug> dir.
+        if native_binary == identifier or (
+                id_build_dir and extract_build_dir(native_binary) == id_build_dir):
+            result.append(profile.name)
 
     return result

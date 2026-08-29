@@ -176,3 +176,18 @@ def test_bool_widget_initializes_to_setting_default(qtbot):
     qtbot.addWidget(w)
     assert w.value() is True
     assert w.is_set() is False
+
+
+def test_string_widget_initializes_to_setting_default(qtbot):
+    # Non-empty-default strings exist in BOTH catalogs (build: blas-vendor
+    # "Generic"; runtime: cors-origins "*"). A fresh empty editor would read
+    # as "explicitly set to blank": is_set() True with value "" polluted
+    # saved configs/profiles with phantom entries and made the router's
+    # wildcard-CORS warning unfireable from UI-saved profiles.
+    from llama_launcher.core.build_catalog import BUILD_CATALOG
+    from llama_launcher.core.settings_catalog import CATALOG
+    for setting in (BUILD_CATALOG["blas-vendor"], CATALOG["cors-origins"]):
+        w = make_widget(setting)
+        qtbot.addWidget(w)
+        assert w.value() == setting.default
+        assert w.is_set() is False

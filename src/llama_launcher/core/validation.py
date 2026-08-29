@@ -190,63 +190,67 @@ def validate(profile: Profile, running_ports: tuple = (),
         issues.append(Issue("warning",
                             f"Port {port} is already used by a running launcher container."))
 
-    # MTP speculative decoding (--spec-type draft-mtp) has two known limitations
-    # in llama.cpp: it ignores the multimodal projector and only supports a
-    # single slot. Warn (don't block); these run but silently lose the feature.
-    # Router-gated: a router profile keeps the form's leftover draft/model
-    # fields and member-level settings (so a Save in router mode is not
-    # destructive), but the router process itself loads no model -- these
-    # single-server launch warnings would be false alarms there.
-    if profile.mode != "router" and profile.settings.get("spec-type") == "draft-mtp":
-        if profile.mmproj:
-            issues.append(Issue("warning",
-                                "MTP (--spec-type draft-mtp) doesn't support --mmproj; the "
-                                "multimodal projector is likely ignored. Drop the mmproj for "
-                                "a text-only MTP run, or use a non-MTP draft for vision."))
-        parallel = profile.settings.get("parallel")
-        if isinstance(parallel, int) and parallel > 1:
-            issues.append(Issue("warning",
-                                "MTP (--spec-type draft-mtp) doesn't support --parallel > 1; "
-                                "set parallel = 1 (a single slot)."))
-
-    # A draft model is inert unless a speculation strategy is selected: llama.cpp
-    # defaults --spec-type to 'none', so the draft is loaded (costing VRAM) and
-    # never used. Warn (don't block).
-    if profile.mode != "router" and profile.draft_model \
-            and profile.settings.get("spec-type", "none") in ("none", "", None):
-        issues.append(Issue("warning",
-                            "A draft model is selected but spec-type is 'none', so the draft "
-                            "model is loaded and never used. Set spec-type (e.g. draft-simple) "
-                            "to enable speculative decoding, or clear the draft model."))
-
-    if profile.mode != "router" and profile.runtime.engine == "ik_llama.cpp" \
-            and profile.settings.get("run-time-repack"):
-        msg = ("Run-time repack (--run-time-repack) disables mmap and increases load "
-               "time and RAM.")
-        if profile.settings.get("load-mode", "mmap") == "mmap":
-            msg += " Your load-mode is mmap, which it overrides."
-        issues.append(Issue("warning", msg))
-
-    # Embedding / reranking bad-combo warnings. A reranker needs all three of
-    # --reranking, --pooling rank, and --embeddings; sampling is ignored here.
-    if profile.mode != "router" and (profile.settings.get("embeddings")
-                                     or profile.settings.get("reranking")):
-        if profile.settings.get("reranking"):
-            if profile.settings.get("pooling") != "rank":
+    # Single-server-only launch warnings, router-gated ONCE for the whole
+    # stretch: a router profile keeps the form's leftover draft/model fields
+    # and member-level settings (so a Save in router mode is not destructive),
+    # but the router process itself loads no model -- every settings-derived
+    # single-server warning below would be a false alarm there. New warnings
+    # of this class belong INSIDE this block.
+    if profile.mode != "router":
+        # MTP speculative decoding (--spec-type draft-mtp) has two known
+        # limitations in llama.cpp: it ignores the multimodal projector and
+        # only supports a single slot. Warn (don't block); these run but
+        # silently lose the feature.
+        if profile.settings.get("spec-type") == "draft-mtp":
+            if profile.mmproj:
                 issues.append(Issue("warning",
-                                    "Reranking needs --pooling rank; other pooling types give "
-                                    "near-zero scores. Set pooling = rank."))
-            if not profile.settings.get("embeddings"):
+                                    "MTP (--spec-type draft-mtp) doesn't support --mmproj; the "
+                                    "multimodal projector is likely ignored. Drop the mmproj for "
+                                    "a text-only MTP run, or use a non-MTP draft for vision."))
+            parallel = profile.settings.get("parallel")
+            if isinstance(parallel, int) and parallel > 1:
                 issues.append(Issue("warning",
-                                    "Reranking needs --embeddings enabled (embedding "
-                                    "extraction). Enable it."))
-        changed = sorted(k for k, s in CATALOG.items()
-                         if s.group == "Sampling" and k in profile.settings
-                         and profile.settings[k] != s.default)
-        if changed:
+                                    "MTP (--spec-type draft-mtp) doesn't support --parallel > 1; "
+                                    "set parallel = 1 (a single slot)."))
+
+        # A draft model is inert unless a speculation strategy is selected:
+        # llama.cpp defaults --spec-type to 'none', so the draft is loaded
+        # (costing VRAM) and never used. Warn (don't block).
+        if profile.draft_model \
+                and profile.settings.get("spec-type", "none") in ("none", "", None):
             issues.append(Issue("warning",
-                                "Sampling parameters are ignored in embedding mode "
-                                f"(changed: {', '.join(changed)})."))
+                                "A draft model is selected but spec-type is 'none', so the draft "
+                                "model is loaded and never used. Set spec-type (e.g. draft-simple) "
+                                "to enable speculative decoding, or clear the draft model."))
+
+        if profile.runtime.engine == "ik_llama.cpp" \
+                and profile.settings.get("run-time-repack"):
+            msg = ("Run-time repack (--run-time-repack) disables mmap and increases load "
+                   "time and RAM.")
+            if profile.settings.get("load-mode", "mmap") == "mmap":
+                msg += " Your load-mode is mmap, which it overrides."
+            issues.append(Issue("warning", msg))
+
+        # Embedding / reranking bad-combo warnings. A reranker needs all three
+        # of --reranking, --pooling rank, and --embeddings; sampling is
+        # ignored here.
+        if profile.settings.get("embeddings") or profile.settings.get("reranking"):
+            if profile.settings.get("reranking"):
+                if profile.settings.get("pooling") != "rank":
+                    issues.append(Issue("warning",
+                                        "Reranking needs --pooling rank; other pooling types give "
+                                        "near-zero scores. Set pooling = rank."))
+                if not profile.settings.get("embeddings"):
+                    issues.append(Issue("warning",
+                                        "Reranking needs --embeddings enabled (embedding "
+                                        "extraction). Enable it."))
+            changed = sorted(k for k, s in CATALOG.items()
+                             if s.group == "Sampling" and k in profile.settings
+                             and profile.settings[k] != s.default)
+            if changed:
+                issues.append(Issue("warning",
+                                    "Sampling parameters are ignored in embedding mode "
+                                    f"(changed: {', '.join(changed)})."))
 
     if profile.runtime.launch_mode == "rpc":
         issues += _validate_rpc(profile, worker_image_present or {}, worker_free_mb or {})
@@ -359,9 +363,12 @@ def _validate_router(profile: Profile, members: tuple,
             f"at once, which can exceed VRAM. Use 1 unless the members are small."))
 
 
-    # Default to the CATALOG default, not "": cors-origins defaults to "*", so
-    # reading absence as "" made the most dangerous configuration unwarnable.
-    origins = str(profile.settings.get("cors-origins", CATALOG["cors-origins"].default) or "")
+    # Absent OR blank both mean "--cors-origins is omitted from the argv", so
+    # the server runs with upstream's default "*": read both as the CATALOG
+    # default, else the most dangerous configuration becomes unwarnable
+    # (profiles saved by older UI versions stored cors-origins as "").
+    origins = str(profile.settings.get("cors-origins")
+                  or CATALOG["cors-origins"].default)
     uses_agent_tools = bool(profile.settings.get("tools")
                             or profile.settings.get("agent")
                             or profile.settings.get("mcp-servers-config")

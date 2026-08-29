@@ -148,7 +148,14 @@ class MainWindow(QMainWindow):
         self.benchmark_panel.benchmark_cancel_requested.connect(self._benchmark._on_benchmark_cancel)
         self.benchmark_panel.benchmark_clear_requested.connect(self._benchmark._on_benchmark_clear)
         self.tabs.addTab(self.benchmark_panel, "Benchmark")
-        self.build_panel = BuildPanel(base_dir=default_base_dir())
+        # Same base_dir() indirection every other store access uses (tests
+        # monkeypatch it), and the Configure form's runtime choice decides
+        # which container binary the Outputs join/deletion talks to.
+        self.build_panel = BuildPanel(
+            base_dir=base_dir(),
+            binary_provider=lambda: (
+                self._configure_panel.binary_combo.currentText() or "podman"),
+        )
         self.build_panel.profile_updated.connect(self._on_build_profile_updated)
         self.tabs.addTab(self.build_panel, "Build")
         self.tabs.currentChanged.connect(self._on_tab_changed)
@@ -317,7 +324,11 @@ class MainWindow(QMainWindow):
         in-memory copy, and if that profile is loaded in the Configure form,
         reload the form too -- otherwise its next Save writes the stale image
         or binary path back, silently undoing the action."""
-        was_loaded = self._configure_panel.profile_combo.currentText() == name
+        # "Loaded" is judged by the form's Name field, not the profile combo:
+        # the combo resets to -1 (currentText "") on every _reload_profile_list
+        # while the form keeps its profile, and the actual hazard is a Save --
+        # which writes under the NAME FIELD's text -- clobbering the update.
+        was_loaded = self._configure_panel._profile_name() == name
         self._reload_profile_list()
         if was_loaded and name in self._profiles:
             self._configure_panel.profile_combo.setCurrentText(name)
@@ -410,7 +421,7 @@ class MainWindow(QMainWindow):
         self._configure_panel.configure_status.set_exposure_warning(text)
         self.monitor_status.set_exposure_warning(text)
 
-    def refresh_router_panel_header(self) -> None:
+    def refresh_router_panel_header(self, ensure_key: bool = True) -> None:
         p = self._configure_panel.current_profile()
         if p.mode != "router":
             # Clear relocated router state so a previous router's exposure
@@ -425,9 +436,13 @@ class MainWindow(QMainWindow):
         port = p.settings.get("port", 8080)
         # A router without a key is unusable, and the harness block exists so the
         # key can be copied BEFORE the first launch. Generating here is
-        # idempotent and is the only side effect on this path.
-        key = (api_key_store.resolve_api_key(self.router_base_dir(), p)
-               or api_key_store.ensure_api_key(self.router_base_dir(), p.name))
+        # idempotent and is the only side effect on this path. Per-keystroke
+        # callers (the bind-host edit) pass ensure_key=False: they must not
+        # mint a key dir on disk for whatever half-typed, possibly never-saved
+        # name currently sits in the Name field.
+        key = api_key_store.resolve_api_key(self.router_base_dir(), p)
+        if not key and ensure_key:
+            key = api_key_store.ensure_api_key(self.router_base_dir(), p.name)
         self._configure_panel.api_key_box.set_key(key)
         self._configure_panel.harness_box.set_endpoint(
             f"http://{display_host}:{port}",
