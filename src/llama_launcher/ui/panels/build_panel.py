@@ -7,14 +7,13 @@ store/builds.py for the renderers and store that do the actual work.
 """
 import datetime
 import shutil
-from dataclasses import replace
 from pathlib import Path
 
-from PySide6.QtCore import QRunnable, QThreadPool, QTimer
+from PySide6.QtCore import QRunnable, QThreadPool, QTimer, Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QGroupBox,
     QScrollArea, QPlainTextEdit, QPushButton, QApplication, QTableWidget,
-    QTableWidgetItem, QAbstractItemView, QMessageBox,
+    QTableWidgetItem, QAbstractItemView, QMessageBox, QMenu,
 )
 
 from llama_launcher.core.build_catalog import BUILD_CATALOG
@@ -223,6 +222,8 @@ class BuildPanel(QWidget):
         self.outputs_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         self.outputs_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self.outputs_table.horizontalHeader().setStretchLastSection(True)
+        self.outputs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.outputs_table.customContextMenuRequested.connect(self._on_outputs_context_menu)
         outputs_layout.addWidget(self.outputs_table)
         root.addWidget(outputs_box)
 
@@ -518,6 +519,38 @@ class BuildPanel(QWidget):
 
         # "untracked": no registry entry to act on -- shown for awareness only.
 
+    def _eligible_profiles(self, kind: str) -> list[str]:
+        """List profiles eligible for the given output kind.
+
+        For tag outputs: container-mode profiles (launch_mode == "container")
+        For binary outputs: native-mode profiles (launch_mode == "native")
+        """
+        want = "container" if kind == "tag" else "native"
+        return [p.name for p in list_profiles(self.base_dir)
+                if p.runtime.launch_mode == want]
+
+    def _on_outputs_context_menu(self, pos) -> None:
+        """Show a context menu on the outputs table with "Use in profile" actions."""
+        row_index = self.outputs_table.rowAt(pos.y())
+        if row_index < 0 or row_index >= len(self._outputs_rows):
+            return
+
+        row = self._outputs_rows[row_index]
+        output = row.output
+        kind = output.kind if output is not None else "tag"
+
+        eligible = self._eligible_profiles(kind)
+        if not eligible:
+            return
+
+        menu = QMenu()
+        for profile_name in eligible:
+            action = menu.addAction(f"Use in profile: {profile_name}")
+            action.triggered.connect(
+                lambda checked=False, name=profile_name: self.use_in_profile(name))
+
+        menu.exec(self.outputs_table.viewport().mapToGlobal(pos))
+
     def use_in_profile(self, profile_name: str) -> None:
         """Set the selected output in the specified profile and save it.
 
@@ -546,7 +579,7 @@ class BuildPanel(QWidget):
         if kind == "tag":
             profile.image = identifier
         elif kind == "binary":
-            profile.runtime = replace(profile.runtime, native_binary=identifier)
+            profile.runtime.native_binary = identifier
         else:
             self._error(f"Unknown output kind: {kind}")
             return

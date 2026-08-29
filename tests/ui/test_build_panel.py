@@ -161,6 +161,20 @@ def test_delete_binary_refuses_non_build_dir(qtbot, tmp_path, monkeypatch):
     assert len(load_outputs(tmp_path)) == 1
 
 
+def test_eligible_profiles_filtered_by_kind(qtbot, tmp_path, monkeypatch):
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.core.spec import Profile, Runtime
+    from llama_launcher.store.profiles import save_profile
+    from PySide6.QtCore import Qt
+    save_profile(Profile(name="cont", image="x:1"), tmp_path)
+    save_profile(Profile(name="nat", runtime=Runtime(launch_mode="native")), tmp_path)
+    monkeypatch.setattr(bp, "list_images_detailed", lambda *a, **k: {})
+    p = _panel(qtbot, tmp_path)
+    assert p._eligible_profiles("tag") == ["cont"]
+    assert p._eligible_profiles("binary") == ["nat"]
+    assert p.outputs_table.contextMenuPolicy() == Qt.ContextMenuPolicy.CustomContextMenu
+
+
 def test_use_in_profile_sets_image(qtbot, tmp_path, monkeypatch):
     import llama_launcher.ui.panels.build_panel as bp
     from llama_launcher.core.spec import Profile
