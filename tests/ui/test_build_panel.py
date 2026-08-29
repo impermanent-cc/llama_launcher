@@ -290,3 +290,17 @@ def test_use_in_profile_sets_image(qtbot, tmp_path, monkeypatch):
     p.outputs_table.selectRow(0)
     p.use_in_profile("serv")
     assert [pr.image for pr in list_profiles(tmp_path)] == ["llama-custom:new-1"]
+
+
+def test_preview_and_outputs_share_tabbed_splitter(qtbot, tmp_path):
+    from PySide6.QtWidgets import QSplitter, QTabWidget
+    p = _panel(qtbot, tmp_path)
+    splitters = p.findChildren(QSplitter)
+    assert len(splitters) == 1
+    tabs = p.bottom_tabs
+    assert isinstance(tabs, QTabWidget)
+    assert [tabs.tabText(i) for i in range(tabs.count())] == [
+        "Command preview", "Outputs"]
+    assert tabs.widget(0).isAncestorOf(p.preview)
+    assert tabs.widget(1).isAncestorOf(p.outputs_table)
+    assert splitters[0].isAncestorOf(tabs)

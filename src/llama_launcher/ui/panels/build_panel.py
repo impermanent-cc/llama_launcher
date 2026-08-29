@@ -13,6 +13,7 @@ from PySide6.QtCore import QRunnable, QThreadPool, QTimer, Qt
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QGroupBox,
     QScrollArea, QPlainTextEdit, QPushButton, QApplication, QTableWidget,
+    QSplitter, QTabWidget,
     QTableWidgetItem, QAbstractItemView, QMessageBox, QMenu,
 )
 
@@ -85,8 +86,12 @@ class BuildPanel(QWidget):
 
         root = QVBoxLayout(self)
 
-        body = QHBoxLayout()
-        root.addLayout(body, 1)
+        # The form area and the two big bottom widgets share a draggable
+        # vertical splitter; preview and outputs live in tabs so only one of
+        # them takes height at a time (both stacked squeezed the forms).
+        body_widget = QWidget()
+        body = QHBoxLayout(body_widget)
+        body.setContentsMargins(0, 0, 0, 0)
 
         # LEFT: config identity + engine/target + source/image fields
         left = QGroupBox("Build config")
@@ -174,10 +179,12 @@ class BuildPanel(QWidget):
         right_scroll.setWidget(right_inner)
         body.addWidget(right_scroll, 2)
 
-        # BOTTOM: preview + copy actions + Generate
+        # BOTTOM TAB 1: preview + copy actions + Generate
+        preview_tab = QWidget()
+        preview_layout = QVBoxLayout(preview_tab)
         self.preview = QPlainTextEdit()
         self.preview.setReadOnly(True)
-        root.addWidget(self.preview)
+        preview_layout.addWidget(self.preview)
 
         actions = QHBoxLayout()
         self.copy_configure_btn = QPushButton("Copy configure cmd")
@@ -199,11 +206,12 @@ class BuildPanel(QWidget):
             actions.addWidget(b)
         actions.addStretch(1)
         actions.addWidget(self.generate_btn)
-        root.addLayout(actions)
+        preview_layout.addLayout(actions)
 
-        # OUTPUTS: registry rows joined against `podman images` / on-disk
-        # binaries, with a guarded delete.
-        outputs_box = QGroupBox("Outputs")
+        # BOTTOM TAB 2: registry rows joined against `podman images` /
+        # on-disk binaries, with a guarded delete. (Plain widget: the tab
+        # label already says "Outputs", a group-box title would repeat it.)
+        outputs_box = QWidget()
         outputs_layout = QVBoxLayout(outputs_box)
         outputs_btns = QHBoxLayout()
         self.refresh_outputs_btn = QPushButton("Refresh outputs")
@@ -225,7 +233,18 @@ class BuildPanel(QWidget):
         self.outputs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.outputs_table.customContextMenuRequested.connect(self._on_outputs_context_menu)
         outputs_layout.addWidget(self.outputs_table)
-        root.addWidget(outputs_box)
+
+        self.bottom_tabs = QTabWidget()
+        self.bottom_tabs.addTab(preview_tab, "Command preview")
+        self.bottom_tabs.addTab(outputs_box, "Outputs")
+
+        splitter = QSplitter(Qt.Orientation.Vertical)
+        splitter.addWidget(body_widget)
+        splitter.addWidget(self.bottom_tabs)
+        splitter.setStretchFactor(0, 3)
+        splitter.setStretchFactor(1, 2)
+        splitter.setChildrenCollapsible(False)
+        root.addWidget(splitter, 1)
 
         # Wire engine/target changes now that every field they touch exists.
         self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
