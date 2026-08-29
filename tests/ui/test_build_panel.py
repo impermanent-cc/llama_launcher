@@ -159,3 +159,21 @@ def test_delete_binary_refuses_non_build_dir(qtbot, tmp_path, monkeypatch):
 
     assert errors
     assert len(load_outputs(tmp_path)) == 1
+
+
+def test_use_in_profile_sets_image(qtbot, tmp_path, monkeypatch):
+    import llama_launcher.ui.panels.build_panel as bp
+    from llama_launcher.core.spec import Profile
+    from llama_launcher.store.profiles import save_profile, list_profiles
+    from llama_launcher.store.builds import add_output
+    from llama_launcher.core.build_spec import BuildOutput
+    save_profile(Profile(name="serv", image="old:1"), tmp_path)
+    add_output(BuildOutput(id="a1", kind="tag", identifier="llama-custom:new-1",
+                           config_name="x", engine="llama.cpp", git_ref="m",
+                           options={}, created="2026-08-28"), tmp_path)
+    monkeypatch.setattr(bp, "list_images_detailed", lambda *a, **k: {})
+    p = _panel(qtbot, tmp_path)
+    p.refresh_outputs_sync()
+    p.outputs_table.selectRow(0)
+    p.use_in_profile("serv")
+    assert [pr.image for pr in list_profiles(tmp_path)] == ["llama-custom:new-1"]

@@ -7,6 +7,7 @@ store/builds.py for the renderers and store that do the actual work.
 """
 import datetime
 import shutil
+from dataclasses import replace
 from pathlib import Path
 
 from PySide6.QtCore import QRunnable, QThreadPool, QTimer
@@ -31,7 +32,7 @@ from llama_launcher.store.builds import (
     builds_dir, save_build_config, list_build_configs, load_outputs,
     add_output, remove_output, write_containerfile, new_output_id,
 )
-from llama_launcher.store.profiles import list_profiles
+from llama_launcher.store.profiles import list_profiles, save_profile
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.widgets.setting_widgets import make_widget, make_row_label
 
@@ -516,3 +517,39 @@ class BuildPanel(QWidget):
             return
 
         # "untracked": no registry entry to act on -- shown for awareness only.
+
+    def use_in_profile(self, profile_name: str) -> None:
+        """Set the selected output in the specified profile and save it.
+
+        For tag outputs: sets profile.image
+        For binary outputs: sets profile.runtime.native_binary
+        """
+        row_index = self.outputs_table.currentRow()
+        if row_index < 0 or row_index >= len(self._outputs_rows):
+            self._error("Select an output first.")
+            return
+
+        row = self._outputs_rows[row_index]
+        output = row.output
+        identifier = row.identifier
+        kind = output.kind if output is not None else "tag"
+
+        # Find the profile
+        profiles = {p.name: p for p in list_profiles(self.base_dir)}
+        if profile_name not in profiles:
+            self._error(f"Profile {profile_name} not found.")
+            return
+
+        profile = profiles[profile_name]
+
+        # Update the profile based on kind
+        if kind == "tag":
+            profile.image = identifier
+        elif kind == "binary":
+            profile.runtime = replace(profile.runtime, native_binary=identifier)
+        else:
+            self._error(f"Unknown output kind: {kind}")
+            return
+
+        # Save the profile
+        save_profile(profile, self.base_dir)
