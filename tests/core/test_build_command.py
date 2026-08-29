@@ -94,3 +94,15 @@ def test_render_container_pinned_ref():
                     builder_image="b", runtime_image="r")
     cf = render_container(c, "t:1", "/p").containerfile
     assert "git -C src checkout b6789" in cf
+
+
+def test_default_images_cuda_and_cpu():
+    from llama_launcher.core.build_command import default_images
+    cuda = BuildConfig(options={"cuda": True})
+    assert default_images(cuda) == (
+        "docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04",
+        "docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04")
+    cpu = BuildConfig()
+    assert default_images(cpu) == (
+        "docker.io/library/debian:bookworm",
+        "docker.io/library/debian:bookworm-slim")
