@@ -161,6 +161,10 @@ Either engine can also be run from a self-built binary; see **Native launch** be
 
 ## Build helper
 
+![Build tab: cmake and Containerfile command generator with a CMake option catalog](assets/screenshots/build.png)
+
+*The Build tab: pick engine, target, and CMake options; copy the generated configure/build commands and run them yourself.*
+
 The **Build** tab generates copyable build command strings for compiling llama.cpp
 and ik_llama.cpp from source. Unlike Configure and Launch, it never runs a build; it
 renders command strings (native: a cmake configure and build pair; container: a
@@ -250,6 +254,10 @@ profile you're editing.
 
 ## Benchmark
 
+![Benchmark tab: repeatable tok/s measurement across prompt sizes](assets/screenshots/bench.png)
+
+*The Benchmark tab: pick prompt sizes, warmup, and repeats; results report prompt-eval and generation tok/s per size.*
+
 The **Benchmark** tab runs a controlled, repeatable speed
 measurement so a config change (flags or model) can be compared apples-to-apples.
 It POSTs standardized filler prompts to the running server and reads llama.cpp's
@@ -290,6 +298,10 @@ is reused for native-process and RPC-pool teardown; router *members* have their 
 stop timeout in the Router members table.
 
 ## Router API key
+
+![Router mode: member models served behind one endpoint with a managed API key](assets/screenshots/router.png)
+
+*Router mode: member profiles served through the router's port, with the managed API key and ready-to-copy harness settings.*
 
 A router authenticates clients with a bearer API key (`sk-…`), shown on the
 Router panel with Reveal/Copy. Point your harness at `http://HOST:PORT/v1`
