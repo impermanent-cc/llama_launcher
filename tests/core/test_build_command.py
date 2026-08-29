@@ -49,3 +49,22 @@ def test_raw_defines_win_by_name():
 
 def test_parse_raw_defines_filters_non_defines():
     assert parse_raw_defines("-DA=1 rm -rf / -DB=2") == ["-DA=1", "-DB=2"]
+
+
+def test_render_native_pair():
+    from llama_launcher.core.build_command import render_native
+    c = BuildConfig(name="cuda perf", source_dir="/home/u/src/llama.cpp",
+                    options={"cuda": True})
+    nb = render_native(c)
+    assert nb.configure_cmd == (
+        "cmake -B build-cuda-perf -DGGML_CUDA=ON")
+    assert nb.build_cmd == (
+        "cmake --build build-cuda-perf -j$(nproc) --target llama-server")
+    assert nb.expected_binary == \
+        "/home/u/src/llama.cpp/build-cuda-perf/bin/llama-server"
+
+
+def test_render_native_adds_rpc_target():
+    from llama_launcher.core.build_command import render_native
+    c = BuildConfig(name="w", source_dir="/s", options={"rpc": True})
+    assert "--target llama-server rpc-server" in render_native(c).build_cmd

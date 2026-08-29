@@ -1,5 +1,6 @@
 import re
 import shlex
+from dataclasses import dataclass
 
 from .build_catalog import BUILD_CATALOG, DEFAULT_BRANCH, ENGINE_SHORT, REPO_URL
 from .build_spec import BuildConfig
@@ -48,3 +49,23 @@ def render_defines(cfg: BuildConfig) -> list[str]:
     out = [d for d in out
            if (m := _DEFINE_NAME.match(d)) and m.group(1) not in raw_names]
     return out + raw
+
+
+@dataclass
+class NativeBuild:
+    configure_cmd: str
+    build_cmd: str
+    expected_binary: str
+
+
+def render_native(cfg: BuildConfig) -> NativeBuild:
+    slug = config_slug(cfg.name)
+    build_dir = f"build-{slug}"
+    defines = render_defines(cfg)
+    targets = "llama-server"
+    if "-DGGML_RPC=ON" in defines:
+        targets += " rpc-server"
+    configure = " ".join(["cmake", "-B", build_dir, *defines])
+    build = f"cmake --build {build_dir} -j$(nproc) --target {targets}"
+    binary = f"{cfg.source_dir.rstrip('/')}/{build_dir}/bin/llama-server"
+    return NativeBuild(configure, build, binary)
