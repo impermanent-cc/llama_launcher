@@ -18,9 +18,13 @@ class LoraPanel(QWidget):
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Path", "Scale", ""])
         hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.Stretch)            # Path
-        hdr.setSectionResizeMode(1, QHeaderView.ResizeToContents)   # Scale
+        # Data columns Interactive so they stay user-resizable; only the
+        # fixed Browse-button column keeps sizing itself to its content.
+        hdr.setSectionResizeMode(0, QHeaderView.Interactive)        # Path
+        hdr.setSectionResizeMode(1, QHeaderView.Interactive)        # Scale
         hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)   # Browse
+        self.table.setColumnWidth(0, 240)
+        self.table.setColumnWidth(1, 60)
         layout.addWidget(self.table)
         row = QHBoxLayout()
         add = QPushButton("+ Add")

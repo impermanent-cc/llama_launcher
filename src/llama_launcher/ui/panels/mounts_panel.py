@@ -36,10 +36,11 @@ class MountsPanel(QWidget):
             if item is not None:
                 item.setToolTip(_tip)
         hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.Stretch)            # Host
-        hdr.setSectionResizeMode(1, QHeaderView.Stretch)            # Container
-        for _c in (2, 3, 4, 5):                                     # compact controls
-            hdr.setSectionResizeMode(_c, QHeaderView.ResizeToContents)
+        # Interactive everywhere: Stretch/ResizeToContents lock the columns
+        # against dragging, and mount paths routinely need more room.
+        hdr.setSectionResizeMode(QHeaderView.Interactive)
+        for _c, _w in enumerate((190, 130, 90, 60, 74, 66)):
+            self.table.setColumnWidth(_c, _w)
         # Floor the table so it can't be squeezed to ~1 row when the Environment
         # form is crowded -- keep 2-4 folder rows visible (header + ~4 rows).
         self.table.setMinimumHeight(148)

@@ -33,9 +33,10 @@ class RpcWorkersTable(QWidget):
             "Estimate only: how much memory you expect this worker to donate, "
             "used by 'Check fit'. Not enforced (rpc-server has no memory cap).")
         hdr = self.table.horizontalHeader()
-        hdr.setSectionResizeMode(0, QHeaderView.Stretch)             # Node
-        for col in (1, 2, 3):
-            hdr.setSectionResizeMode(col, QHeaderView.ResizeToContents)
+        # Interactive (not Stretch/ResizeToContents): columns stay user-resizable.
+        hdr.setSectionResizeMode(QHeaderView.Interactive)
+        for col, w in enumerate((140, 90, 130, 70)):
+            self.table.setColumnWidth(col, w)
         self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table)
 

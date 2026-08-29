@@ -1,15 +1,14 @@
-from PySide6.QtWidgets import QHeaderView
-
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.panels.lora_panel import LoraPanel
 
 
-def test_mounts_host_container_columns_stretch(qtbot):
+def test_mounts_host_container_columns_start_wide(qtbot):
+    # Interactive (user-resizable, see test_resizable_columns) with the path
+    # columns given the lion's share of the initial width.
     p = MountsPanel()
     qtbot.addWidget(p)
-    hdr = p.table.horizontalHeader()
-    assert hdr.sectionResizeMode(0) == QHeaderView.Stretch   # Host
-    assert hdr.sectionResizeMode(1) == QHeaderView.Stretch   # Container
+    assert p.table.columnWidth(0) >= 150     # Host
+    assert p.table.columnWidth(1) >= 100     # Container
 
 
 def test_mounts_table_has_a_multi_row_floor(qtbot):
@@ -30,11 +29,10 @@ def test_cards_strip_fits_a_full_card(qtbot):
     assert mp._cards_scroll.minimumHeight() >= StatCard("x").sizeHint().height()
 
 
-def test_lora_path_column_stretches(qtbot):
+def test_lora_path_column_starts_wide(qtbot):
     p = LoraPanel()
     qtbot.addWidget(p)
-    hdr = p.table.horizontalHeader()
-    assert hdr.sectionResizeMode(0) == QHeaderView.Stretch   # Path
+    assert p.table.columnWidth(0) >= 200     # Path
 
 
 def test_new_flags_and_speculative_group_present(qtbot):

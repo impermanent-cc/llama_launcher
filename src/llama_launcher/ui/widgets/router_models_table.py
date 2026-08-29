@@ -41,7 +41,14 @@ class RouterModelsTable(QWidget):
         root.addLayout(header)
         self.table = QTableWidget(0, 3)
         self.table.setHorizontalHeaderLabels(["Model id", "Status", ""])
-        self.table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        hdr = self.table.horizontalHeader()
+        # Data columns Interactive so they stay user-resizable; only the
+        # fixed Load/Unload-buttons column keeps sizing itself to content.
+        hdr.setSectionResizeMode(0, QHeaderView.Interactive)
+        hdr.setSectionResizeMode(1, QHeaderView.Interactive)
+        hdr.setSectionResizeMode(2, QHeaderView.ResizeToContents)
+        self.table.setColumnWidth(0, 170)
+        self.table.setColumnWidth(1, 110)
         self.table.verticalHeader().setVisible(False)
         self.table.setMaximumHeight(140)   # ~3-4 rows, own scrollbar past that
         root.addWidget(self.table)
