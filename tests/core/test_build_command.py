@@ -84,8 +84,11 @@ def test_render_container_structure():
     assert "-DGGML_CUDA=ON" in cf
     assert "FROM docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04" in cf
     assert 'ENTRYPOINT ["/usr/local/bin/llama-server"]' in cf
+    # Build context is the Containerfile's own parent dir, not the caller's
+    # CWD: the Containerfile clones its own source, so tarring an unrelated
+    # CWD as context is both wrong and wasteful.
     assert cb.build_cmd == \
-        "podman build -t ik-custom:srv-20260828 -f /store/srv.containerfile ."
+        "podman build -t ik-custom:srv-20260828 -f /store/srv.containerfile /store"
 
 
 def test_render_container_pinned_ref():

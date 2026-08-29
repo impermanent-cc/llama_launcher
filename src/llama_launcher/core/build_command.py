@@ -1,3 +1,4 @@
+import posixpath
 import re
 import shlex
 from dataclasses import dataclass
@@ -118,4 +119,9 @@ def render_container(cfg: BuildConfig, tag: str,
         defines=" ".join(defines),
         targets=targets,
     )
-    return ContainerBuild(cf, f"podman build -t {tag} -f {containerfile_path} .")
+    # Build context is the Containerfile's own parent dir, not the caller's
+    # CWD: the Containerfile clones its own source from REPO_URL, so tarring
+    # an unrelated CWD as build context is both wrong and wasteful.
+    context_dir = posixpath.dirname(containerfile_path) or "."
+    return ContainerBuild(
+        cf, f"podman build -t {tag} -f {containerfile_path} {context_dir}")
