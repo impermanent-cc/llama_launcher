@@ -1,0 +1,91 @@
+name: Bug report
+description: Something in Llama Launcher behaves incorrectly
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please do not report security vulnerabilities here. Use the Security tab
+        instead; see [SECURITY.md](../blob/main/SECURITY.md).
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open the Configure tab and ...
+        2. Click Launch
+        3. ...
+    validations:
+      required: true
+  - type: textarea
+    id: report
+    attributes:
+      label: Diagnostic report
+      description: >
+        Output of the Generate report button in the app. API keys are redacted
+        automatically. Host paths are not, so glance over it before pasting if
+        your directory names are private.
+      render: markdown
+    validations:
+      required: false
+  - type: input
+    id: version
+    attributes:
+      label: Llama Launcher version or commit
+      placeholder: "v0.1.0, or the commit you are on"
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and distribution
+      placeholder: "Arch, Fedora 42, Ubuntu 24.04, Debian 13, ..."
+    validations:
+      required: true
+  - type: dropdown
+    id: runtime
+    attributes:
+      label: Container runtime
+      options:
+        - podman (rootless)
+        - podman (rootful)
+        - docker
+        - none, native binary launch
+    validations:
+      required: true
+  - type: dropdown
+    id: engine
+    attributes:
+      label: Engine
+      options:
+        - llama.cpp
+        - ik_llama.cpp
+        - not applicable
+    validations:
+      required: true
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Launch mode
+      options:
+        - Single server
+        - Router (headless host)
+        - RPC pool (experimental)
+        - Remote node
+        - Headless CLI
+    validations:
+      required: true
+  - type: input
+    id: gpu
+    attributes:
+      label: GPU
+      placeholder: "RTX 4090, none (CPU only), ..."
+    validations:
+      required: false

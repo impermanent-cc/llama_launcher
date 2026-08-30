@@ -426,6 +426,19 @@ AMD/ROCm GPU offload is **not implemented**; the VRAM/stats probing is NVIDIA-on
 add `rocm-smi` support (GPU stats + VRAM-fit estimation), contributions are very welcome;
 the GPU-probing code lives in `src/llama_launcher/services/gpu.py`.
 
+## Contributing
+
+Bug reports and small fixes are welcome; for anything larger, please open an issue first
+so the shape can be agreed. See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, the two
+areas where help is most wanted, and the two constraints (catalog-driven settings,
+hermetic tests) worth knowing before writing code.
+
+## Security
+
+Please do not report vulnerabilities in a public issue. Use the repository's **Security**
+tab and choose **Report a vulnerability**. [SECURITY.md](SECURITY.md) covers what is in
+scope, what is not, and the hardening already in place.
+
 ## License
 
 MIT. See [LICENSE](LICENSE). Depends on [PySide6](https://doc.qt.io/qtforpython/) (LGPL-3.0),

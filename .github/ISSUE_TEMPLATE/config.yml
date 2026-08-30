@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: Report a security vulnerability
+    url: https://github.com/impermanent-cc/llama_launcher/security/advisories/new
+    about: Report privately through GitHub. Please do not open a public issue.
+  - name: README, setup and troubleshooting
+    url: https://github.com/impermanent-cc/llama_launcher#readme
+    about: Install, podman vs docker, remote nodes, RPC pooling, and troubleshooting.

@@ -1,0 +1,30 @@
+name: Feature request
+description: Suggest an addition or a change
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The app's scope is fairly settled, so please describe the problem before
+        the solution. Catalog driven additions (a new `llama-server` flag, a new
+        CMake option) are usually easy. New tabs and new launch modes usually
+        are not.
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What are you trying to do that the app makes hard today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you would like to happen
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you have considered
+    validations:
+      required: false
