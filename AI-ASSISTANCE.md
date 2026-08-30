@@ -19,9 +19,7 @@ file plus the short pointer in the README, instead of per-commit attribution
 trailers. Credit is presented cohesively here rather than scattered across
 individual commit messages.
 
-This policy takes effect for commits made on or after 2026-08-24. Some earlier
-commits carry a `Co-Authored-By` trailer from the project's previous practice;
-those are left unchanged.
+The git history carries no per-commit attribution trailers.
 
 ## Responsibility
 
