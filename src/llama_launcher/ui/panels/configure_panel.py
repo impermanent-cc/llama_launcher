@@ -167,7 +167,7 @@ class ConfigurePanel(QWidget):
         # compact rather than made draggable).
         body.setContentsMargins(4, 4, 4, 2)
 
-        # LEFT: environment (image + model only for v1 binding; mounts editor TODO-UI)
+        # LEFT: environment (image, model, runtime/GPU, mounts editor)
         left = QGroupBox("Environment")
         left_form = QFormLayout(left)
         self._left_form = left_form
