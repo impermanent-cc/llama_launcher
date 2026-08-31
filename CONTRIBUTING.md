@@ -66,6 +66,27 @@ a pooled `QRunnable` instead.
   `fix(build): scope podman build context to the Containerfile's own dir`.
 - One logical change per pull request.
 
+## Changelog and releases
+
+User-visible changes go in `CHANGELOG.md` under `## [Unreleased]`, in the same
+pull request as the change. Internal refactors and test-only work don't need an
+entry.
+
+Each released section is the single source for that release's GitHub notes, so
+release notes are never written by hand on the release page:
+
+```bash
+# Rename [Unreleased] to the new version, add the date, then:
+git tag -a v0.2.0 -m "llama_launcher v0.2.0"
+git push origin v0.2.0
+gh release create v0.2.0 --notes-file <(./scripts/release-notes.sh 0.2.0)
+```
+
+To correct notes after publishing, edit `CHANGELOG.md` and re-run the same
+extraction with `gh release edit v0.2.0 --notes-file ...`. A test asserts the
+version in `pyproject.toml` always has a section it can publish, so bump both
+together.
+
 ## Reporting bugs
 
 Use the bug report template. The most useful attachment is the output of the
