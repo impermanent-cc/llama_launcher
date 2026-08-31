@@ -35,6 +35,9 @@ fi
 mkdir -p "$DESKTOP_DIR" "$ICON_DIR"
 install -m644 "$REPO/assets/llama-launcher.svg" "$ICON_FILE"
 
+# Categories carries ONE main category on purpose: listing both Development
+# and Utility makes the entry appear twice in spec-following menus
+# (GNOME/XFCE/MATE), which desktop-file-validate flags as a hint.
 cat > "$DESKTOP_FILE" <<EOF
 [Desktop Entry]
 Type=Application
@@ -45,7 +48,7 @@ Exec="$VENV_PY" -m llama_launcher.app
 Path=$REPO
 Icon=$ICON_FILE
 Terminal=false
-Categories=Development;Utility;
+Categories=Development;
 StartupNotify=true
 StartupWMClass=llama-launcher
 EOF

@@ -27,17 +27,99 @@ def test_is_alive_false_for_missing_pid(tmp_path):
     assert native.is_alive(1, "/opt/nonexistent-llama-server") is False
 
 
+def _await_exec(pid: int, timeout: float = 5.0) -> None:
+    """Block until /proc/<pid>/cmdline is populated. Popen returns as soon as
+    posix_spawn has a pid, which can precede the child's execve; the binary
+    guard can only be asserted once the cmdline actually exists."""
+    import time
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                if fh.read().strip(b"\0"):
+                    return
+        except OSError:
+            return
+        time.sleep(0.001)
+    raise AssertionError(f"pid {pid} never populated its cmdline")
+
+
 def test_is_alive_true_for_self():
     import sys
     # Spawn a child launched by ABSOLUTE path so its cmdline argv[0] == sys.executable,
     # matching how launch_native spawns a server by absolute native_binary path.
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
+        # True both before and after execve -- see is_alive's docstring.
         assert native.is_alive(proc.pid, sys.executable) is True
+        _await_exec(proc.pid)
+        assert native.is_alive(proc.pid, sys.executable) is True
+        # The pid-reuse guard, asserted once there is a cmdline to guard on.
         assert native.is_alive(proc.pid, "/opt/nonexistent-binary") is False
     finally:
         proc.send_signal(signal.SIGKILL)
         proc.wait()
+
+
+def test_is_alive_true_immediately_after_spawn():
+    """Regression: Popen returns before the child execs, and /proc/<pid>/cmdline
+    reads empty until it does. is_alive() must not call that dead -- every pid
+    it rejects has its registry entry UNLINKED by list_native_instances(), which
+    would orphan a native server that is merely still starting.
+
+    Checked in a loop because the window is sub-millisecond: a single call hit
+    it only ~10-20% of the time, which is exactly what made the old assertion
+    flaky on every supported Python.
+    """
+    import sys
+    for _ in range(40):
+        proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+        try:
+            assert native.is_alive(proc.pid, sys.executable) is True
+        finally:
+            proc.send_signal(signal.SIGKILL)
+            proc.wait()
+
+
+def test_is_alive_false_for_a_zombie():
+    """The other empty-cmdline case: an exited-but-unreaped child. That one IS
+    dead, so the state fallback must reject it rather than keep its entry."""
+    import sys
+    import time
+    proc = subprocess.Popen([sys.executable, "-c", ""])
+    try:
+        deadline = time.monotonic() + 5.0
+        while native._proc_state(proc.pid) != "Z" and time.monotonic() < deadline:
+            time.sleep(0.001)
+        assert native._proc_state(proc.pid) == "Z", "child never became a zombie"
+        assert native.is_alive(proc.pid, sys.executable) is False
+    finally:
+        proc.wait()
+
+
+def test_proc_state_survives_a_comm_containing_spaces_and_parens(tmp_path):
+    """`comm` in /proc/<pid>/stat is unescaped and capped at 15 chars, so a
+    binary named 'sl (x) eep' lands spaces AND parens inside field 2 -- a naive
+    split()-by-index parse reads the wrong field there."""
+    import shutil
+    src = shutil.which("sleep")
+    assert src, "no sleep(1) on PATH"
+    weird = tmp_path / "sl (x) eep"
+    shutil.copy(src, weird)
+    proc = subprocess.Popen([str(weird), "30"])
+    try:
+        _await_exec(proc.pid)
+        assert Path(f"/proc/{proc.pid}/stat").read_text().count(")") > 1, \
+            "comm did not actually embed a paren; test would prove nothing"
+        assert native._proc_state(proc.pid) in ("R", "S", "D")
+        assert native.is_alive(proc.pid, str(weird)) is True
+    finally:
+        proc.send_signal(signal.SIGKILL)
+        proc.wait()
+
+
+def test_proc_state_none_for_a_pid_that_cannot_exist():
+    assert native._proc_state(2 ** 31 - 1) is None
 
 
 def test_list_native_instances_shape_and_prune(tmp_path):

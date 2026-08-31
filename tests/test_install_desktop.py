@@ -97,3 +97,20 @@ def test_desktop_exec_quotes_python_path_with_spaces(tmp_path):
     # The spec quotes an executable path containing spaces with double quotes.
     assert f'Exec="{venv_py}" -m llama_launcher.app' in text, \
         f"Exec line not spec-quoted for a spaced path:\n{text}"
+
+
+@pytest.mark.skipif(not SCRIPT.exists(), reason="install script missing")
+def test_desktop_categories_has_one_main_category(tmp_path):
+    """Two main categories (e.g. Development;Utility;) make the entry show up
+    twice in spec-following menus (GNOME/XFCE/MATE)."""
+    MAIN = {"AudioVideo", "Audio", "Video", "Development", "Education", "Game",
+            "Graphics", "Network", "Office", "Science", "Settings", "System",
+            "Utility"}
+    r = subprocess.run(["bash", str(SCRIPT)], env=_env(tmp_path),
+                       capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
+    desktop, _ = _paths(tmp_path)
+    line = next(l for l in desktop.read_text().splitlines()
+                if l.startswith("Categories="))
+    cats = [c for c in line.split("=", 1)[1].split(";") if c]
+    assert len(MAIN.intersection(cats)) == 1, f"{line} lists >1 main category"

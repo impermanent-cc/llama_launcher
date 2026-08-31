@@ -63,16 +63,44 @@ def read_entries(base_dir: Path) -> list[dict]:
     return out
 
 
+def _proc_state(pid: int) -> str | None:
+    """The single-letter state from /proc/<pid>/stat ('R', 'S', 'Z', ...), or
+    None if the pid is gone. `comm` (field 2) is parenthesised and may itself
+    contain spaces and parens, so the fields are taken after the LAST ')'."""
+    try:
+        with open(f"/proc/{pid}/stat", "r") as fh:
+            fields = fh.read().rpartition(")")[2].split()
+    except (OSError, ValueError):
+        return None
+    return fields[0] if fields else None
+
+
 def is_alive(pid: int, binary: str) -> bool:
     """True iff /proc/<pid> exists and its cmdline references `binary` -- the
     cmdline check guards against a reused pid after a reboot naming a different
-    process."""
+    process.
+
+    An EMPTY cmdline does NOT mean dead. subprocess.Popen uses posix_spawn and
+    returns as soon as the child pid exists, which can be before the child
+    reaches execve; until it does, /proc/<pid>/cmdline reads empty (so does a
+    kernel thread's, always). Calling that "dead" is destructive rather than
+    merely wrong: list_native_instances() UNLINKS the registry entry of every
+    pid is_alive() rejects, which would orphan a native llama-server that is
+    only still starting -- still holding its port and VRAM, but invisible and
+    unstoppable from the UI, and breaking the "a running native process is
+    never pruned" invariant _sigkill_if_alive relies on. So an empty cmdline
+    falls back to the process state, where only a zombie is really dead. The
+    binary guard is unavoidably relaxed for that sub-millisecond window; a
+    reused pid caught exactly mid-exec is far less likely than the orphaning.
+    """
     try:
         with open(f"/proc/{pid}/cmdline", "rb") as fh:
-            cmdline = fh.read().replace(b"\0", b" ").decode(errors="replace")
+            raw = fh.read()
     except (FileNotFoundError, ProcessLookupError, PermissionError):
         return False
-    return binary in cmdline
+    if not raw.strip(b"\0"):
+        return _proc_state(pid) not in ("Z", None)
+    return binary in raw.replace(b"\0", b" ").decode(errors="replace")
 
 
 def list_native_instances(base_dir: Path) -> list[dict]:
