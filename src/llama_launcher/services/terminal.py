@@ -34,10 +34,18 @@ TERMINALS: list[tuple[str, str, bool]] = [
     ("foot", "foot bash -lc {cmd}", True),          # wlroots/sway native
     ("kgx", "kgx -e {bashcmd}", True),
     ("xfce4-terminal", "xfce4-terminal --hold -x bash -lc {cmd}", False),
+    ("mate-terminal", "mate-terminal -- bash -lc {cmd}", True),
     ("xterm", "xterm -hold -e bash -lc {cmd}", False),
     ("alacritty", "alacritty -e bash -lc {cmd}", True),
     ("kitty", "kitty bash -lc {cmd}", True),
     ("tilix", "tilix -e {bashcmd}", True),
+    # Last resort: the Debian/Ubuntu alternatives symlink, which resolves to
+    # whatever terminal the box actually has. It is only reached when no
+    # terminal we know by name matched, so it costs nothing above, and it keeps
+    # detection from failing outright on a DE whose terminal we don't list.
+    # Debian policy requires an -e that accepts a command, hence {bashcmd}; the
+    # target is unknown, so it gets the portable shell hold.
+    ("x-terminal-emulator", "x-terminal-emulator -e {bashcmd}", True),
 ]
 
 # Backwards-compatible default (konsole) for callers that pass no template.

@@ -158,3 +158,30 @@ def test_launch_wraps_any_oserror_as_no_terminal(monkeypatch):
 
 def test_foot_is_a_known_terminal():
     assert any(b == "foot" for b, _t, _h in terminal.TERMINALS)
+
+
+def test_mate_terminal_is_a_known_terminal():
+    """A MATE session's native terminal. Without it, a MATE box that has no
+    other listed terminal gets NoTerminalError and cannot foreground-launch."""
+    assert any(b == "mate-terminal" for b, _t, _h in terminal.TERMINALS)
+
+
+def test_x_terminal_emulator_is_the_last_resort():
+    """The Debian/Ubuntu alternatives symlink resolves to whatever terminal the
+    box has, so it must come LAST -- ahead of a named terminal it would mask
+    that terminal's native --hold and preferred flags."""
+    assert terminal.TERMINALS[-1][0] == "x-terminal-emulator"
+
+
+def test_detect_prefers_a_named_terminal_over_x_terminal_emulator():
+    tmpl, _hold = detect_terminal(
+        which=_which_only("xfce4-terminal", "x-terminal-emulator"))
+    assert tmpl.startswith("xfce4-terminal")
+
+
+def test_detect_falls_back_to_x_terminal_emulator_on_an_unlisted_de():
+    """A DE whose terminal we don't list still gets a foreground launch as long
+    as it registered the Debian alternative."""
+    tmpl, hold = detect_terminal(which=_which_only("x-terminal-emulator"))
+    assert tmpl.startswith("x-terminal-emulator")
+    assert hold is True  # unknown target -> portable shell hold
