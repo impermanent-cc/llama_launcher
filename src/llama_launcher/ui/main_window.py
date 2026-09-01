@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from llama_launcher.core.spec import (
-    member_model_id, slugify,
+    member_model_id, profile_port, slugify,
 )
 from llama_launcher.core.router_preset import render_preset
 from llama_launcher.core.pathmap import host_to_container
@@ -278,6 +278,7 @@ class MainWindow(QMainWindow):
         self._configure_panel.lora_panel.set_browse_resolver(
             lambda h: host_to_container(h, self._configure_panel.mounts_panel.mounts())
         )
+        self._configure_panel.lora_panel.set_live_resolver(self._lora_live_target)
 
         # Auto-insert the local image when there's exactly one and none is set yet.
         self._launch._autofill_image_if_empty()
@@ -409,6 +410,20 @@ class MainWindow(QMainWindow):
                 "The router is running. Relaunch it for the new API key to "
                 "take effect.")
 
+    def _lora_live_target(self):
+        """Where the LoRA panel should send a live rescale, or None.
+
+        Router profiles get None: a router holds no adapters of its own, each
+        member process does, so there is nothing at the router's port to rescale.
+        Everything else returns a target and lets the request decide whether a
+        server is actually up, which keeps this off the podman path.
+        """
+        p = self._configure_panel.current_profile()
+        if p.mode == "router":
+            return None
+        return (dial_host(p.runtime.bind_host), profile_port(p),
+                p.settings.get("api-key") or None)
+
     def _set_router_connected(self, connected: bool) -> None:
         self._configure_panel.configure_status.set_connected(connected)
         self.monitor_status.set_connected(connected)
@@ -433,7 +448,7 @@ class MainWindow(QMainWindow):
             return
         host = p.runtime.bind_host
         display_host = dial_host(host)
-        port = p.settings.get("port", 8080)
+        port = profile_port(p)
         # A router without a key is unusable, and the harness block exists so the
         # key can be copied BEFORE the first launch. Generating here is
         # idempotent and is the only side effect on this path. Per-keystroke

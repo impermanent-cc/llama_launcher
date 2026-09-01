@@ -6,7 +6,7 @@ joins list_launcher_containers() rows with stored profiles by name. Pure module.
 import re
 from dataclasses import dataclass
 
-from llama_launcher.core.spec import DEFAULT_STOP_TIMEOUT, Profile
+from llama_launcher.core.spec import DEFAULT_STOP_TIMEOUT, Profile, profile_port
 from llama_launcher.core.validation import dial_host
 
 _RPC_WORKER_SUFFIX = re.compile(r"-rpc(\d+)$")
@@ -73,7 +73,7 @@ def build_instances(containers: list[dict], profiles: list[Profile],
         prof = by_name.get(c.get("profile"))
         mode = c.get("mode", "server")
         if prof is not None:
-            port = prof.settings.get("port", 8080)
+            port = profile_port(prof)
             host = node_host if (node != "local" and node_host) else dial_host(prof.runtime.bind_host)
             emb = bool(prof.settings.get("embeddings"))
             rer = bool(prof.settings.get("reranking"))

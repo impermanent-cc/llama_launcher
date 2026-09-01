@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.router_preset import render_preset
-from llama_launcher.core.spec import slugify
+from llama_launcher.core.spec import profile_port, slugify
 from llama_launcher.core.validation import dial_host
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services.health import derive_status, probe_health
@@ -39,7 +39,7 @@ def launch_router(profile, base_dir, binary) -> LaunchResult:
     """Prepare preset + key, then `podman run -d` the router. Synchronous."""
     name = _container_name(profile)
     host = profile.runtime.bind_host
-    port = profile.settings.get("port", 8080)
+    port = profile_port(profile)
 
     pairs = resolve_member_pairs(profile.members, base_dir)
     result = render_preset(pairs)
@@ -66,7 +66,7 @@ def launch_server(profile, base_dir, binary) -> LaunchResult:
     accepted for signature parity with launch_router and is unused."""
     name = _container_name(profile)
     host = profile.runtime.bind_host
-    port = profile.settings.get("port", 8080)
+    port = profile_port(profile)
 
     # Force detached/persistent so --stop/--health can address it by name
     # (the GUI's server launch is foreground --rm and cannot be driven headless).
@@ -88,12 +88,12 @@ def launch(profile, base_dir, binary) -> LaunchResult:
     if profile.runtime.launch_mode == "native":
         return LaunchResult(False, _container_name(profile),
                             profile.runtime.bind_host,
-                            profile.settings.get("port", 8080),
+                            profile_port(profile),
                             [], "native launch is GUI-only in this version")
     if profile.runtime.launch_mode == "rpc":
         return LaunchResult(False, _container_name(profile),
                             profile.runtime.bind_host,
-                            profile.settings.get("port", 8080),
+                            profile_port(profile),
                             [], "RPC pool launch is GUI-only in this version")
     if profile.mode == "router":
         return launch_router(profile, base_dir, binary)
@@ -114,7 +114,7 @@ def router_status(profile, binary) -> str:
     cstate = container_state(name, binary)
     if cstate != "running":
         return derive_status(cstate, "down")
-    health = probe_health(profile.settings.get("port", 8080),
+    health = probe_health(profile_port(profile),
                           host=dial_host(profile.runtime.bind_host))
     return derive_status(cstate, health)
 

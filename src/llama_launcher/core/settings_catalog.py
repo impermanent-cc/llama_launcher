@@ -1,4 +1,6 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
+
+from .spec import DEFAULT_PORT
 
 
 @dataclass(frozen=True)
@@ -111,7 +113,14 @@ _ALL = [
                     "anything other than auto and the legacy no-mmap/mlock flags below are "
                     "ignored. Needs an image new enough to know --load-mode; the auto "
                     "value itself needs images from 2026-08-11 or later."),
-    Setting("tensor-read-lazy", "--tensor-read-lazy", "enum", "auto", "GPU & Memory", (),
+    # Upstream renamed this flag to --lazy-mode; --tensor-read-lazy is not
+    # accepted by current builds (verified against b10711), so setting anything
+    # other than the "auto" sentinel used to fail the launch outright. The KEY
+    # stays "tensor-read-lazy" on purpose: it is internal, saved profiles are
+    # written with it, and the form labels rows by flag, so renaming the key
+    # would silently drop the value from every existing profile for no visible
+    # gain.
+    Setting("tensor-read-lazy", "--lazy-mode", "enum", "auto", "GPU & Memory", ("-lzm",),
             enum=("on", "auto", "off"),
             tooltip="On-demand reading of certain tensors, e.g. per-layer embeddings. "
                     "'on' reads their rows from disk on demand instead of keeping them "
@@ -287,9 +296,9 @@ _ALL = [
                     "removal. Lower = removes more aggressively. Above 0.5 disables XTC."),
 
     # Server & Tools
-    Setting("port", "--port", "int", 8080, "Server & Tools", (), 1, 65535, 1,
+    Setting("port", "--port", "int", DEFAULT_PORT, "Server & Tools", (), 1, 65535, 1,
             tooltip="TCP port the server listens on (bound to 127.0.0.1). Connect clients to "
-                    "http://localhost:<port>. Default 8080."),
+                    f"http://localhost:<port>. Default {DEFAULT_PORT}."),
     Setting("api-key", "--api-key", "string", "", "Server & Tools", (), secret=True,
             tooltip="Require this key in the Authorization header for API requests; supply "
                     "several comma-separated. Empty = no authentication."),
@@ -463,6 +472,338 @@ _ALL = [
                     "the last assistant message. Needs a template advertising "
                     "'supports_preserve_reasoning'."),
 
+
+    # -- Context Extension (RoPE / YaRN) --------------------------------------
+    # Stretching a model past its trained context. Every value here defaults to
+    # "loaded from the model", so an untouched form emits nothing and the model's
+    # own trained settings win.
+    Setting("rope-scaling", "--rope-scaling", "enum", "unset", "Context Extension", (),
+            enum=("unset", "none", "linear", "yarn"),
+            tooltip="How to stretch the model past its trained context length. 'unset' "
+                    "leaves it to the model (usually linear). 'yarn' is the better choice "
+                    "for large extensions and enables the YaRN values below."),
+    Setting("rope-scale", "--rope-scale", "float", 0.0, "Context Extension", (), 0.0, 128.0, 0.5,
+            tooltip="Context scaling factor N: expands the context by a factor of N. "
+                    "0 = leave at the model's own value. Reciprocal of rope-freq-scale, so "
+                    "set one or the other, not both."),
+    Setting("rope-freq-base", "--rope-freq-base", "float", 0.0, "Context Extension", (),
+            0.0, 10000000.0, 10000.0,
+            tooltip="RoPE base frequency for NTK-aware scaling. 0 = load from the model. "
+                    "Raising it is the manual way to extend context on models that were "
+                    "not trained with a scaling method."),
+    Setting("rope-freq-scale", "--rope-freq-scale", "float", 0.0, "Context Extension", (),
+            0.0, 1.0, 0.05,
+            tooltip="RoPE frequency scaling factor: expands context by 1/N. 0 = load from "
+                    "the model. Inverse of rope-scale; set one, not both."),
+    Setting("yarn-orig-ctx", "--yarn-orig-ctx", "int", 0, "Context Extension", (),
+            0, 1048576, 1024,
+            tooltip="YaRN: the model's ORIGINAL trained context size, the baseline the "
+                    "extension is measured against. 0 = use the model's training context."),
+    Setting("yarn-ext-factor", "--yarn-ext-factor", "float", -1.0, "Context Extension", (),
+            -1.0, 1.0, 0.1,
+            tooltip="YaRN extrapolation mix factor. -1 = leave at the model default; "
+                    "0.0 = full interpolation (the usual choice for long-context use)."),
+    Setting("yarn-attn-factor", "--yarn-attn-factor", "float", -1.0, "Context Extension", (),
+            -1.0, 10.0, 0.1,
+            tooltip="YaRN attention magnitude scale. -1 = model default. Rarely needs "
+                    "changing; adjust only alongside a documented YaRN recipe."),
+    Setting("yarn-beta-slow", "--yarn-beta-slow", "float", -1.0, "Context Extension", (),
+            -1.0, 128.0, 1.0,
+            tooltip="YaRN high correction dimension (alpha). -1 = model default."),
+    Setting("yarn-beta-fast", "--yarn-beta-fast", "float", -1.0, "Context Extension", (),
+            -1.0, 128.0, 1.0,
+            tooltip="YaRN low correction dimension (beta). -1 = model default."),
+
+    # -- Device memory auto-fit ------------------------------------------------
+    # NOTE: upstream defaults --fit to 'on', so llama.cpp may already be shrinking
+    # unset args (notably ctx-size) to make a model fit. That happens INSIDE the
+    # server, after the launcher's own VRAM preflight has run, so the two can
+    # disagree: the preflight can warn about a config the server then quietly
+    # adjusts. Exposing the switch lets a user turn it off and get hard failures.
+    Setting("fit", "--fit", "enum", "unset", "GPU & Memory", ("-fit",),
+            enum=("unset", "on", "off"),
+            tooltip="Let llama.cpp adjust arguments you left unset (context size above "
+                    "all) so the model fits device memory. Upstream default is on. "
+                    "Set 'off' to make an oversized config fail loudly instead of being "
+                    "silently shrunk, which also makes the VRAM estimate above "
+                    "authoritative."),
+    Setting("fit-target", "--fit-target", "string", "", "GPU & Memory", ("-fitt",),
+            tooltip="Memory margin in MiB to leave free per device for --fit. One value "
+                    "is broadcast to every device, or give a comma-separated list per "
+                    "device. Empty = upstream default (1024)."),
+    Setting("fit-ctx", "--fit-ctx", "int", 0, "GPU & Memory", ("-fitc",), 0, 1048576, 1024,
+            tooltip="Floor on the context size --fit is allowed to shrink to. 0 = upstream "
+                    "default (4096). Stops auto-fit from silently giving you a context far "
+                    "smaller than the workload needs."),
+
+    # -- Memory / correctness knobs -------------------------------------------
+    Setting("kv-unified", "--kv-unified", "bool", False, "GPU & Memory", ("-kvu",),
+            tooltip="Share ONE unified KV buffer across all sequences instead of a "
+                    "per-slot buffer. Upstream enables this when the slot count is auto. "
+                    "Usually lowers KV memory with many slots."),
+    Setting("no-op-offload", "--no-op-offload", "bool", False, "GPU & Memory", (),
+            tooltip="Keep host tensor operations on the CPU instead of offloading them to "
+                    "the device. llama.cpp offloads by default; enabling this is a "
+                    "debugging/compatibility escape hatch."),
+    Setting("check-tensors", "--check-tensors", "bool", False, "Model & Context", (),
+            tooltip="Validate model tensor data for invalid values while loading. Slows "
+                    "startup; worth it once when a new or self-quantized GGUF produces "
+                    "garbage output."),
+    Setting("override-kv", "--override-kv", "string", "", "Model & Context", (),
+            tooltip="Override model metadata by key, comma-separated, as "
+                    "KEY=TYPE:VALUE with type int, float, bool or str (e.g. "
+                    "'tokenizer.ggml.add_bos_token=bool:false'). Advanced: wrong values "
+                    "can break tokenization."),
+    Setting("no-warmup", "--no-warmup", "bool", False, "Performance & Batching", (),
+            tooltip="Skip the empty warmup run at startup. Gets the server listening "
+                    "sooner, at the cost of a slower first real request."),
+    Setting("no-repack", "--no-repack", "bool", False, "Performance & Batching", ("-nr",),
+            tooltip="Disable weight repacking. Repacking is enabled upstream and normally "
+                    "speeds up CPU inference; turn it off to rule it out when debugging a "
+                    "CPU performance or correctness problem."),
+    Setting("no-cache-idle-slots", "--no-cache-idle-slots", "bool", False, "Caching", (),
+            tooltip="Stop saving idle slots to the prompt cache when a new task arrives. "
+                    "Upstream caches them (it needs cache-ram set); disabling trades prompt "
+                    "reuse for lower memory churn."),
+
+    # -- CPU & Threading -------------------------------------------------------
+    # Affinity/priority knobs that matter for CPU and hybrid CPU+GPU inference,
+    # especially with MoE offload where CPU work is on the critical path.
+    Setting("cpu-mask", "--cpu-mask", "string", "", "CPU & Threading", ("-C",),
+            tooltip="CPU affinity mask as an arbitrarily long hex string. Complements "
+                    "cpu-range. Empty = let the OS schedule freely."),
+    Setting("cpu-range", "--cpu-range", "string", "", "CPU & Threading", ("-Cr",),
+            tooltip="CPU range for affinity, written lo-hi (e.g. '0-15'). Pin generation "
+                    "threads to physical cores to avoid SMT siblings stealing throughput."),
+    Setting("cpu-strict", "--cpu-strict", "enum", "unset", "CPU & Threading", (),
+            enum=("unset", "0", "1"),
+            tooltip="Strict CPU placement: 1 keeps threads on the masked CPUs instead of "
+                    "letting the scheduler migrate them. 'unset' = upstream default (0)."),
+    Setting("prio", "--prio", "int", 0, "CPU & Threading", (), -1, 3, 1,
+            tooltip="Process/thread priority: -1 low, 0 normal, 1 medium, 2 high, "
+                    "3 realtime. Above normal usually needs elevated privileges."),
+    Setting("poll", "--poll", "int", 50, "CPU & Threading", (), 0, 100, 10,
+            tooltip="Polling level while waiting for work, 0 to 100. 0 sleeps instead of "
+                    "spinning (lower CPU use when idle); upstream default is 50."),
+    Setting("cpu-mask-batch", "--cpu-mask-batch", "string", "", "CPU & Threading", ("-Cb",),
+            tooltip="CPU affinity mask for BATCH/prompt processing, if it should differ "
+                    "from generation. Empty = same as cpu-mask."),
+    Setting("cpu-range-batch", "--cpu-range-batch", "string", "", "CPU & Threading", ("-Crb",),
+            tooltip="CPU range (lo-hi) for batch/prompt processing. Empty = same as "
+                    "cpu-range."),
+    Setting("cpu-strict-batch", "--cpu-strict-batch", "enum", "unset", "CPU & Threading", (),
+            enum=("unset", "0", "1"),
+            tooltip="Strict CPU placement for batch processing. 'unset' = same as "
+                    "cpu-strict."),
+    Setting("prio-batch", "--prio-batch", "int", 0, "CPU & Threading", (), -1, 3, 1,
+            tooltip="Process/thread priority during batch processing, same scale as prio."),
+    Setting("poll-batch", "--poll-batch", "int", 50, "CPU & Threading", (), 0, 100, 10,
+            tooltip="Polling level while waiting for batch work. Defaults to the poll "
+                    "value."),
+
+    # -- Server identity & HTTP surface ---------------------------------------
+    Setting("alias", "--alias", "string", "", "Server & Tools", ("-a",),
+            tooltip="Model name reported to API clients, comma-separated for several. "
+                    "Without it the model id is the full container path of the GGUF, "
+                    "which is what /v1/models and every harness will show. Set a short "
+                    "stable name here and clients keep working across model file changes."),
+    Setting("tags", "--tags", "string", "", "Server & Tools", (),
+            tooltip="Comma-separated model tags. Informational only; llama.cpp does not "
+                    "route on them."),
+    Setting("api-prefix", "--api-prefix", "string", "", "Networking & CORS", (),
+            tooltip="Serve every endpoint under this path prefix, written without a "
+                    "trailing slash (e.g. '/llama'). Needed when a reverse proxy mounts "
+                    "the server somewhere other than the root."),
+    Setting("path", "--path", "string", "", "Networking & CORS", (),
+            tooltip="Directory of static files to serve. Empty = serve the built-in web "
+                    "UI. Container launches need this path to be inside a mount."),
+    Setting("timeout", "--timeout", "int", 3600, "Networking & CORS", ("-to",), 1, 86400, 60,
+            tooltip="Server read/write timeout in seconds (upstream default 3600). Raise "
+                    "it if very long generations are cut off mid-stream by the server "
+                    "itself rather than by the client."),
+    Setting("reuse-port", "--reuse-port", "bool", False, "Networking & CORS", (),
+            tooltip="Allow several sockets to bind the same port (SO_REUSEPORT). Lets a "
+                    "replacement instance bind before the old one has fully released the "
+                    "port; otherwise leave off so a port clash is a loud error."),
+    Setting("ssl-key-file", "--ssl-key-file", "string", "", "Networking & CORS", (),
+            tooltip="PEM-encoded private key, which turns the server HTTPS. Must be set "
+                    "together with ssl-cert-file, and inside a mount for container "
+                    "launches. Without TLS an API key crosses the network in clear text."),
+    Setting("ssl-cert-file", "--ssl-cert-file", "string", "", "Networking & CORS", (),
+            tooltip="PEM-encoded certificate matching ssl-key-file. Set both or neither."),
+    Setting("agent", "--agent", "bool", False, "Server & Tools", ("-ag",),
+            tooltip="Enable the CORS proxy and ALL built-in tools. Upstream warns not to "
+                    "enable this in untrusted environments; it also clamps CORS origins to "
+                    "localhost. Leave off unless you specifically want agent features.",
+            danger=True),
+    Setting("slot-save-path", "--slot-save-path", "string", "", "Server & Tools", (),
+            tooltip="Directory for saving and restoring per-slot KV cache. Empty = "
+                    "disabled. Must be a writable mount on a container launch."),
+    Setting("slot-prompt-similarity", "--slot-prompt-similarity", "float", 0.1,
+            "Server & Tools", ("-sps",), 0.0, 1.0, 0.05,
+            tooltip="How closely a request's prompt must match a slot's cached prompt to "
+                    "reuse that slot (upstream default 0.10, 0.0 = disabled). Higher is "
+                    "stricter and reuses less."),
+    Setting("media-path", "--media-path", "string", "", "Server & Tools", (),
+            tooltip="Directory local media may be loaded from via file:// URLs with "
+                    "relative paths. Empty = disabled. Container launches need it mounted."),
+    Setting("skip-chat-parsing", "--skip-chat-parsing", "bool", False, "Server & Tools", (),
+            tooltip="Force a pure content parser even when a Jinja template is set, so "
+                    "reasoning traces and tool calls stay inline in the content field "
+                    "instead of being split out. Useful when a client wants the raw text."),
+    Setting("no-prefill-assistant", "--no-prefill-assistant", "bool", False, "Server & Tools", (),
+            tooltip="Treat a trailing assistant message as a complete message rather than "
+                    "a prefix to continue. llama.cpp prefills by default; enable this when "
+                    "a client sends full assistant turns it does not want extended."),
+    Setting("lora-init-without-apply", "--lora-init-without-apply", "bool", False,
+            "Server & Tools", (),
+            tooltip="Load the LoRA adapters below but start with all of them inactive, so "
+                    "they can be switched on and rescaled at runtime through the "
+                    "/lora-adapters endpoint without restarting the server."),
+
+    # -- Logging ---------------------------------------------------------------
+    # The Monitor tab tails container logs, so prefix/timestamp/verbosity changes
+    # alter what it parses. Defaults here leave llama.cpp's own format untouched.
+    Setting("log-file", "--log-file", "string", "", "Logging", (),
+            tooltip="Also write the log to this file. Empty = stdout/stderr only, which "
+                    "is what the Monitor tab reads; a container path must be in a "
+                    "writable mount."),
+    Setting("log-colors", "--log-colors", "enum", "unset", "Logging", (),
+            enum=("unset", "on", "off", "auto"),
+            tooltip="ANSI colour in log output. 'auto' (upstream default) colours only a "
+                    "terminal. Set 'off' when the captured log is being read by tooling."),
+    Setting("verbosity", "--verbosity", "int", 0, "Logging", ("-lv",), 0, 10, 1,
+            tooltip="Verbosity threshold: messages above this level are dropped. 0 is the "
+                    "normal level; raise it to debug a launch that fails quietly."),
+    Setting("log-disable", "--log-disable", "bool", False, "Logging", (),
+            tooltip="Silence logging entirely. This also blanks the Monitor tab's log "
+                    "pane and its throughput parsing, so it is rarely what you want.",
+            danger=True),
+    Setting("no-log-prefix", "--no-log-prefix", "bool", False, "Logging", (),
+            tooltip="Drop the level prefix from log lines. Prefixes are on by default."),
+    Setting("no-log-timestamps", "--no-log-timestamps", "bool", False, "Logging", (),
+            tooltip="Drop timestamps from log lines. Timestamps are on by default and "
+                    "make the Monitor log pane far easier to correlate with requests."),
+    Setting("log-prompts-dir", "--log-prompts-dir", "string", "", "Logging", (),
+            tooltip="Write every prompt to this directory, created if missing. Debugging "
+                    "aid only: prompts are stored verbatim, so treat the directory as "
+                    "sensitive. Empty = disabled.",
+            danger=True),
+
+    # -- Multimodal ------------------------------------------------------------
+    Setting("image-min-tokens", "--image-min-tokens", "int", 0, "Multimodal", (), 0, 65536, 64,
+            tooltip="Floor on the tokens one image may use, for vision models with dynamic "
+                    "resolution. 0 = read from the model. Raising it keeps small images "
+                    "legible at the cost of context."),
+    Setting("image-max-tokens", "--image-max-tokens", "int", 0, "Multimodal", (), 0, 65536, 64,
+            tooltip="Ceiling on the tokens one image may use, for dynamic-resolution "
+                    "vision models. 0 = read from the model. Lowering it bounds how much "
+                    "context a large image can consume."),
+    Setting("mtmd-batch-max-tokens", "--mtmd-batch-max-tokens", "int", 1024, "Multimodal", (),
+            64, 65536, 256,
+            tooltip="Maximum image tokens encoded per batch (upstream default 1024). "
+                    "Lower it if encoding a large image runs the GPU out of memory."),
+
+    # -- Embedding -------------------------------------------------------------
+    Setting("embd-normalize", "--embd-normalize", "int", 2, "Embedding & Reranking", (),
+            -1, 8, 1,
+            tooltip="Normalisation applied to returned embeddings: -1 none, 0 max absolute "
+                    "int16, 1 taxicab, 2 euclidean (the default), above 2 = p-norm. Match "
+                    "whatever your vector store expects."),
+
+    # -- Sampling defaults -----------------------------------------------------
+    # Server-wide defaults only; a request body still overrides them per call.
+    Setting("samplers", "--samplers", "string", "", "Sampling", (),
+            tooltip="Sampler chain in application order, separated by ';' (upstream "
+                    "default 'penalties;dry;top_n_sigma;top_k;typ_p;top_p;min_p;xtc;"
+                    "temperature'). Empty = leave at the default."),
+    Setting("sampler-seq", "--sampler-seq", "string", "", "Sampling", (),
+            tooltip="The same chain in short letter form (upstream default 'edskypmxt'). "
+                    "Set this or samplers, not both."),
+    Setting("ignore-eos", "--ignore-eos", "bool", False, "Sampling", (),
+            tooltip="Keep generating past the end-of-stream token. Effectively an infinite "
+                    "'-inf' bias on EOS, so generation stops only at the token limit."),
+    Setting("adaptive-target", "--adaptive-target", "float", -1.0, "Sampling", (), -1.0, 1.0, 0.05,
+            tooltip="adaptive-p: target probability that tokens are selected near. "
+                    "Negative = disabled (the default)."),
+    Setting("adaptive-decay", "--adaptive-decay", "float", 0.9, "Sampling", (), 0.0, 0.99, 0.05,
+            tooltip="adaptive-p: how fast the target adapts. Lower reacts faster, higher "
+                    "is steadier. Only used when adaptive-target is enabled."),
+
+    # -- Speculative decoding: draft-model placement and ngram tuning ----------
+    Setting("spec-default", "--spec-default", "bool", False, "Speculative Decoding", (),
+            tooltip="Turn on llama.cpp's default speculative-decoding configuration "
+                    "instead of configuring each knob by hand."),
+    Setting("spec-draft-p-min", "--spec-draft-p-min", "float", 0.0, "Speculative Decoding", (),
+            0.0, 1.0, 0.05,
+            tooltip="Minimum probability for a greedy draft token to be proposed. 0 = "
+                    "upstream default. Raising it drafts less but wastes fewer rejected "
+                    "tokens."),
+    Setting("spec-draft-p-split", "--spec-draft-p-split", "float", 0.0, "Speculative Decoding", (),
+            0.0, 1.0, 0.05,
+            tooltip="Probability threshold at which the draft splits into a new branch. "
+                    "0 = upstream default."),
+    Setting("spec-draft-device", "--spec-draft-device", "string", "", "Speculative Decoding",
+            ("-devd",),
+            tooltip="Devices the DRAFT model runs on, comma-separated (e.g. 'CUDA1'). "
+                    "Empty = same placement as the target model. Use it to park the draft "
+                    "on a second, smaller GPU."),
+    Setting("spec-draft-threads", "--spec-draft-threads", "int", 0, "Speculative Decoding",
+            ("-td",), 0, 512, 1,
+            tooltip="CPU threads for the draft model. 0 = same as the main threads value."),
+    Setting("spec-draft-cpu-moe", "--spec-draft-cpu-moe", "bool", False, "Speculative Decoding",
+            ("-cmoed",),
+            tooltip="Keep ALL of the draft model's MoE expert weights on the CPU, freeing "
+                    "VRAM for the target model."),
+    Setting("spec-draft-n-cpu-moe", "--spec-draft-n-cpu-moe", "int", 0, "Speculative Decoding",
+            ("-ncmoed",), 0, 512, 1,
+            tooltip="Keep the draft model's first N MoE layers on the CPU. 0 = none. The "
+                    "partial version of spec-draft-cpu-moe."),
+    Setting("spec-draft-override-tensor", "--spec-draft-override-tensor", "string",
+            "", "Speculative Decoding", ("-otd",),
+            tooltip="Tensor-name pattern to buffer-type map for the DRAFT model, the same "
+                    "form as override-tensor (e.g. 'exps=CPU'). Empty = no override."),
+    Setting("spec-ngram-mod-n-min", "--spec-ngram-mod-n-min", "int", 0,
+            "Speculative Decoding", (), 0, 64, 1,
+            tooltip="ngram-mod: smallest ngram length used to draft. 0 = upstream default. "
+                    "Only applies when spec-type is an ngram variant."),
+    Setting("spec-ngram-mod-n-max", "--spec-ngram-mod-n-max", "int", 0,
+            "Speculative Decoding", (), 0, 64, 1,
+            tooltip="ngram-mod: largest ngram length used to draft. 0 = upstream default."),
+    Setting("spec-ngram-mod-n-match", "--spec-ngram-mod-n-match", "int", 0,
+            "Speculative Decoding", (), 0, 256, 1,
+            tooltip="ngram-mod: lookup length (upstream default 24). 0 = leave alone."),
+    Setting("spec-ngram-simple-size-n", "--spec-ngram-simple-size-n", "int", 0,
+            "Speculative Decoding", (), 0, 64, 1,
+            tooltip="ngram-simple: lookup ngram size N. 0 = upstream default."),
+    Setting("spec-ngram-simple-size-m", "--spec-ngram-simple-size-m", "int", 0,
+            "Speculative Decoding", (), 0, 64, 1,
+            tooltip="ngram-simple: drafted length M. 0 = upstream default."),
+    Setting("spec-ngram-simple-min-hits", "--spec-ngram-simple-min-hits", "int", 0,
+            "Speculative Decoding", (), 0, 64, 1,
+            tooltip="ngram-simple: minimum hits before a draft is accepted (upstream "
+                    "default 1). 0 = leave alone."),
+    Setting("spec-ngram-map-k-size-n", "--spec-ngram-map-k-size-n", "int", 0,
+            "Speculative Decoding", (), 0, 64, 1,
+            tooltip="ngram-map-k: lookup ngram size N. 0 = upstream default."),
+    Setting("spec-ngram-map-k-size-m", "--spec-ngram-map-k-size-m", "int", 0,
+            "Speculative Decoding", (), 0, 64, 1,
+            tooltip="ngram-map-k: drafted length M. 0 = upstream default."),
+    Setting("spec-ngram-map-k-min-hits", "--spec-ngram-map-k-min-hits", "int", 0,
+            "Speculative Decoding", (), 0, 64, 1,
+            tooltip="ngram-map-k: minimum hits before a draft is accepted (upstream "
+                    "default 1). 0 = leave alone."),
+    Setting("spec-ngram-map-k4v-size-n", "--spec-ngram-map-k4v-size-n", "int", 0,
+            "Speculative Decoding", (), 0, 64, 1,
+            tooltip="ngram-map-k4v: lookup ngram size N. 0 = upstream default."),
+    Setting("spec-ngram-map-k4v-size-m", "--spec-ngram-map-k4v-size-m", "int", 0,
+            "Speculative Decoding", (), 0, 64, 1,
+            tooltip="ngram-map-k4v: drafted length M. 0 = upstream default."),
+    Setting("spec-ngram-map-k4v-min-hits", "--spec-ngram-map-k4v-min-hits", "int", 0,
+            "Speculative Decoding", (), 0, 64, 1,
+            tooltip="ngram-map-k4v: minimum hits before a draft is accepted (upstream "
+                    "default 1). 0 = leave alone."),
+
     # ik_llama.cpp-only flags (engine-gated). Shown only when engine == ik and
     # dropped from argv on a mainline launch (current_profile + command_builder).
     Setting("run-time-repack", "--run-time-repack", "bool", False, "ik_llama.cpp", ("-rtr",),
@@ -510,6 +851,50 @@ _ALL = [
                     "f16 is the default."),
 ]
 
+# Flags mainline llama.cpp accepts but ik_llama.cpp does NOT.
+#
+# ik is a fork that diverged, and it rejects a large slice of the shared surface.
+# Without this gate those settings reached an ik launch and died on "unknown
+# argument" the moment a user set one (they are only emitted when actually
+# present in a profile's settings, so it broke the setting, not every launch).
+#
+# PROBE-DERIVED, not parsed from --help: ik's help under-reports what its parser
+# accepts (--n-gpu-layers, --n-predict, --embeddings and --alias are all accepted
+# while undocumented), so every entry here was confirmed by running the flag
+# against ghcr.io/ikawrakow/ik-llama-cpp:cu12-server and checking for "unknown
+# argument". Regenerate with tests/fixtures/regen_ik_flags.sh.
+MAINLINE_ONLY_FLAGS: frozenset = frozenset({
+    "--agent", "--api-prefix", "--cache-reuse", "--checkpoint-min-step",
+    "--cors-headers", "--cors-methods", "--cors-origins", "--cpu-mask",
+    "--cpu-mask-batch", "--cpu-range", "--cpu-range-batch", "--cpu-strict",
+    "--cpu-strict-batch", "--fit-ctx", "--fit-target", "--kv-unified", "--lazy-mode",
+    "--load-mode", "--log-colors", "--log-prompts-dir", "--mcp-servers-config",
+    "--mcp-servers-json", "--media-path", "--mmproj-device", "--models-max",
+    "--mtmd-batch-max-tokens", "--n-cpu-ffn", "--no-cache-idle-slots",
+    "--no-cache-prompt", "--no-cors-credentials", "--no-log-prefix",
+    "--no-log-timestamps", "--no-models-autoload", "--no-op-offload", "--no-repack",
+    "--no-spec-draft-backend-sampling", "--no-webui", "--poll", "--poll-batch",
+    "--prio", "--prio-batch", "--props", "--reasoning-preserve", "--reranking",
+    "--reuse-port", "--sampler-seq", "--sleep-idle-seconds", "--spec-default",
+    "--spec-draft-cpu-moe", "--spec-draft-device", "--spec-draft-n-cpu-moe",
+    "--spec-draft-n-max", "--spec-draft-n-min", "--spec-draft-ngl",
+    "--spec-draft-override-tensor", "--spec-draft-p-min", "--spec-draft-p-split",
+    "--spec-draft-threads", "--spec-ngram-map-k-min-hits", "--spec-ngram-map-k-size-m",
+    "--spec-ngram-map-k-size-n", "--spec-ngram-map-k4v-min-hits",
+    "--spec-ngram-map-k4v-size-m", "--spec-ngram-map-k4v-size-n",
+    "--spec-ngram-mod-n-match", "--spec-ngram-mod-n-max", "--spec-ngram-mod-n-min",
+    "--spec-ngram-simple-min-hits", "--spec-ngram-simple-size-m",
+    "--spec-ngram-simple-size-n", "--sse-ping-interval", "--swa-full", "--tags",
+    "--tools", "--typical-p",
+})
+
+# Applied here rather than as engine="llama.cpp" on 75 separate Setting() calls:
+# one list is auditable against the probe output, and a regenerated list is a
+# one-hunk diff instead of 75 scattered ones.
+_ALL = [replace(s, engine="llama.cpp")
+        if s.engine == "any" and s.flag in MAINLINE_ONLY_FLAGS else s
+        for s in _ALL]
+
 CATALOG: dict = {s.key: s for s in _ALL}
 
 # Settings that exist ONLY on a router process.
@@ -530,6 +915,13 @@ HOST_KEYS: frozenset = frozenset({
     "tools",
     "cors-origins", "cors-methods", "cors-headers", "cors-credentials",
     "sse-ping-interval", "mcp-servers-config", "mcp-servers-json",
+    # The router process is the one serving HTTP, so the HTTP surface, TLS and
+    # logging belong to it rather than to a member. Anything model-level (alias,
+    # slot paths, sampling) stays off this list and is set per member.
+    "api-prefix", "path", "timeout", "reuse-port", "agent",
+    "ssl-key-file", "ssl-cert-file",
+    "log-file", "log-colors", "verbosity", "log-disable",
+    "no-log-prefix", "no-log-timestamps", "log-prompts-dir",
 }) & frozenset(CATALOG)
 
 

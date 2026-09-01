@@ -291,13 +291,19 @@ def test_tools_options_match_upstream():
 
 
 def test_flag_additions_2026_08():
+    # Both are mainline-only: ik_llama.cpp rejects them (confirmed by executing
+    # each against the ik image), so they carry engine="llama.cpp" and never
+    # reach an ik launch. They were engine="any" until that was probed.
     s = CATALOG["n-cpu-ffn"]
     assert s.flag == "--n-cpu-ffn" and s.type == "int" and s.default == 0
-    assert "-ncffn" in s.aliases and s.engine == "any"
+    assert "-ncffn" in s.aliases and s.engine == "llama.cpp"
 
     s = CATALOG["tensor-read-lazy"]
+    # Upstream renamed the flag to --lazy-mode; the KEY stays put so saved
+    # profiles keep their value.
+    assert s.flag == "--lazy-mode" and "-lzm" in s.aliases
     assert s.type == "enum" and s.default == "auto"
-    assert s.enum == ("on", "auto", "off") and s.engine == "any"
+    assert s.enum == ("on", "auto", "off") and s.engine == "llama.cpp"
 
     s = CATALOG["ctx-size-draft"]
     assert s.flag == "--ctx-size-draft" and s.type == "int" and s.default == 0

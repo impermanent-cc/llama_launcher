@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QMessageBox, QInputDialog
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core import vram
 from llama_launcher.core.nodes import connection_for
+from llama_launcher.core.spec import profile_port
 from llama_launcher.services import runtime, terminal, registry, model_info, gpu, native, rpc
 from llama_launcher.services import pool_preflight
 from llama_launcher.services import benchmark_store
@@ -169,7 +170,7 @@ class LaunchController:
             self.window.monitor_panel.reset()
             self.window.benchmark_panel.reset()
             self.window.monitor_panel.set_endpoints(
-                p.settings.get("port", 8080),
+                profile_port(p),
                 bool(p.settings.get("embeddings")),
                 bool(p.settings.get("reranking")))
             from datetime import datetime
@@ -251,7 +252,7 @@ class LaunchController:
         self.window.benchmark_panel.set_benchmark_history(
             benchmark_store.load(default_base_dir(), p.name))
         self.window.monitor_panel.set_endpoints(
-            p.settings.get("port", 8080),
+            profile_port(p),
             bool(p.settings.get("embeddings")),
             bool(p.settings.get("reranking")),
         )

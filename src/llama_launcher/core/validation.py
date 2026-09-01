@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from .command_builder import (raw_arg_warnings, dangerous_run_args,
                               run_args_expose, is_sensitive_host_path)
 from .router_preset import convert_raw_args
-from .spec import Profile, member_model_id
+from .spec import DEFAULT_PORT, Profile, member_model_id, profile_port
 from .settings_catalog import CATALOG
 
 # A model id becomes an INI section header ([id]) in a router preset and is sent
@@ -185,7 +185,7 @@ def validate(profile: Profile, running_ports: tuple = (),
                                     "your weights are writable by the model."))
                 break
 
-    port = profile.settings.get("port", 8080)
+    port = profile_port(profile)
     if port in running_ports:
         issues.append(Issue("warning",
                             f"Port {port} is already used by a running launcher container."))
@@ -344,13 +344,13 @@ def _validate_router(profile: Profile, members: tuple,
         # profile therefore does nothing here -- warn, or a user watching the
         # logs concludes the router itself is randomizing its port. Clients
         # always connect through the router's port.
-        if member_profile.settings.get("port") not in (None, 8080):
+        if member_profile.settings.get("port") not in (None, DEFAULT_PORT):
             issues.append(Issue(
                 "warning",
                 f"Member '{member_profile.name}' sets port "
                 f"{member_profile.settings['port']}, but the router assigns member "
                 f"instances their own internal ports; clients connect through the "
-                f"router's port ({profile.settings.get('port', 8080)})."))
+                f"router's port ({profile_port(profile)})."))
 
     # NB: the non-loopback-without-a-key error is raised in validate() for both
     # modes, so it is deliberately not repeated here.

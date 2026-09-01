@@ -6,6 +6,13 @@ from dataclasses import dataclass, field
 # stop-grace default so they can't drift apart.
 DEFAULT_STOP_TIMEOUT = 10
 
+# TCP port a profile serves on when it carries no explicit "port" setting.
+# Matches llama-server's own default. Upstream has announced a future move to
+# 9931 (ggml-org/llama.cpp#26508) but has NOT made it yet; llama_launcher always
+# passes --port explicitly, so the flip cannot change how a launch behaves. When
+# it lands, changing it here is the whole edit.
+DEFAULT_PORT = 8080
+
 
 @dataclass
 class Mount:
@@ -79,6 +86,16 @@ class Profile:
     raw_args: str = ""
     mode: str = "server"                                # "server" | "router"
     members: list[RouterMember] = field(default_factory=list)
+
+
+def profile_port(profile: "Profile") -> int:
+    """The port `profile` serves on: its explicit setting, else DEFAULT_PORT.
+
+    The same lookup was repeated at every layer (launch, monitor, benchmark,
+    report, headless), so the default lived in ~30 places and could drift. Read
+    it through here instead.
+    """
+    return profile.settings.get("port", DEFAULT_PORT)
 
 
 def slugify(name: str, fallback: str = "unnamed") -> str:

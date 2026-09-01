@@ -3,7 +3,7 @@ import datetime
 
 from PySide6.QtCore import QObject, QThread, Signal
 
-from llama_launcher.core.spec import Profile, member_model_id
+from llama_launcher.core.spec import Profile, member_model_id, profile_port
 from llama_launcher.core.validation import dial_host
 from llama_launcher.services import benchmark, benchmark_store
 from llama_launcher.store.profiles import default_base_dir
@@ -98,7 +98,7 @@ class BenchmarkController:
         currently loaded, the same "not ready" condition collect_monitor_data
         treats as poll=False.
         """
-        port = p.settings.get("port", 8080)
+        port = profile_port(p)
         host, key, model_scope, poll = (dial_host(p.runtime.bind_host),
                                         self.window._monitor._poll_api_key(p), None, True)
         if p.mode == "router":

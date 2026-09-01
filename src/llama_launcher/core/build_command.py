@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from .build_catalog import BUILD_CATALOG, DEFAULT_BRANCH, ENGINE_SHORT, REPO_URL
 from .build_spec import BuildConfig
 from .settings_catalog import for_engine
-from .spec import slugify
+from .spec import DEFAULT_PORT, slugify
 
 
 def config_slug(name: str) -> str:
@@ -138,7 +138,7 @@ FROM {runtime}
 RUN apt-get update && apt-get install -y --no-install-recommends \\
     libgomp1 curl ca-certificates && rm -rf /var/lib/apt/lists/*
 COPY --from=build /opt/src/build/bin/ /usr/local/bin/
-EXPOSE 8080
+EXPOSE {expose_port}
 ENTRYPOINT ["/usr/local/bin/llama-server"]
 """
 
@@ -179,6 +179,7 @@ def render_container(cfg: BuildConfig, tag: str,
         ref=cfg.git_ref or DEFAULT_BRANCH[cfg.engine],
         defines=shlex.join(defines),
         targets=targets,
+        expose_port=DEFAULT_PORT,
     )
     # Build context is the Containerfile's own parent dir, not the caller's
     # CWD: the Containerfile clones its own source from REPO_URL, so tarring

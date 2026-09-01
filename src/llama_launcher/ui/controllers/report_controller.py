@@ -6,7 +6,7 @@ from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from llama_launcher.core.spec import Profile
+from llama_launcher.core.spec import Profile, profile_port
 from llama_launcher.core.validation import validate, dial_host
 from llama_launcher.store.profiles import profile_to_dict, load_config, save_config
 from llama_launcher.services import runtime, gpu, metrics, native
@@ -51,7 +51,7 @@ class ReportController:
 
     def open_web_ui(self):
         p = self.window._configure_panel.current_profile()
-        port = p.settings.get("port", 8080)
+        port = profile_port(p)
         try:
             subprocess.Popen(["xdg-open", f"http://{dial_host(p.runtime.bind_host)}:{port}"],
                              start_new_session=True)
@@ -111,7 +111,7 @@ class ReportController:
         report explains why throughput is missing instead of silently omitting it.
         """
         from llama_launcher.services.metrics import kv_ratio
-        port = p.settings.get("port", 8080)
+        port = profile_port(p)
         if not p.settings.get("metrics"):
             return ("(--metrics not enabled in this profile; turn it on and relaunch "
                     "to capture tok/s and KV-cache usage here)")

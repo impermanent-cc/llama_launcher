@@ -12,9 +12,42 @@ not on the release page, so the two never drift.
 
 ### Added
 
+- 80 further `llama-server` settings, from an audit of the Configure catalog
+  against `llama-server --help` on build b10711. New groups for Context
+  Extension (RoPE and YaRN), CPU & Threading, Logging and Multimodal; new
+  entries elsewhere for `--alias`, TLS (`--ssl-key-file` / `--ssl-cert-file`),
+  `--api-prefix`, `--timeout`, device memory auto-fit (`--fit`), the ngram
+  speculative-decoding tuning knobs, and more.
+- Live LoRA scale control. The LoRA section can now read the scales a running
+  server is using and push new ones to it through `/lora-adapters`, so an
+  adapter can be A/B'd against the base model without a restart. Pairs with the
+  new `--lora-init-without-apply` setting, which loads adapters inactive.
+- A flag-acceptance guard for both engines: `tests/fixtures/regen_flags.sh`,
+  `regen_ik_flags.sh` and a test that every catalog flag is one the engine it
+  reaches actually accepts, so a rename or a fork divergence cannot pass
+  unnoticed again. The ik fixture is built by executing each candidate, not by
+  reading `--help`, because ik's help under-reports its own parser.
+
 ### Changed
 
+- The default port lives in one place (`core.spec.DEFAULT_PORT`) instead of
+  being repeated as a literal at 33 call sites. Upstream has announced a future
+  move from 8080 to 9931 (ggml-org/llama.cpp#26508) but has not made it; when it
+  lands, this is a one-line change. Nothing about a launch changes today, since
+  the launcher has always passed `--port` explicitly.
+
 ### Fixed
+
+- The "on-demand tensor reading" setting emitted `--tensor-read-lazy`, which
+  upstream renamed to `--lazy-mode`. Any value other than the default `auto`
+  therefore failed the launch on current builds. The saved-profile key is
+  unchanged, so existing profiles keep their value.
+- 75 settings that only mainline llama.cpp accepts were reaching ik_llama.cpp
+  launches, where setting any one of them failed with "unknown argument". They
+  are now tagged mainline-only and are dropped from ik launches and hidden on
+  an ik profile's form. 27 of these predate this release; the rest arrived with
+  the catalog additions above. Existing ik profiles keep the stored values, they
+  simply stop being passed to the server.
 
 ## [0.1.0] - 2026-09-01
 

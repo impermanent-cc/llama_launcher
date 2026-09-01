@@ -11,7 +11,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from llama_launcher.core.command_builder import build_command
-from llama_launcher.core.spec import slugify
+from llama_launcher.core.spec import profile_port, slugify
 
 
 def registry_dir(base_dir: Path) -> Path:
@@ -138,7 +138,7 @@ def native_log_path(base_dir, profile_name: str) -> Path:
 def launch_native(profile, base_dir, now_iso: str) -> NativeResult:
     name = native_name(profile.name)
     host = profile.runtime.bind_host
-    port = profile.settings.get("port", 8080)
+    port = profile_port(profile)
     argv = build_command(profile)
     d = registry_dir(base_dir)
     d.mkdir(parents=True, exist_ok=True)

@@ -3,7 +3,8 @@ import time
 
 from PySide6.QtCore import QRunnable, QThread, QThreadPool, QTimer, Signal
 
-from llama_launcher.core.spec import DEFAULT_STOP_TIMEOUT, Profile, Runtime
+from llama_launcher.core.spec import (DEFAULT_PORT, DEFAULT_STOP_TIMEOUT, Profile,
+                                       Runtime, profile_port)
 from llama_launcher.core.instances import build_instances, worker_card_title
 from llama_launcher.core.mtp_stats import spec_counters, spec_delta
 from llama_launcher.core.nodes import connection_for, host_of
@@ -472,7 +473,7 @@ class MonitorController:
         if p.mode == "router" and model_scope is None:
             return
         text = metrics.fetch_metrics_text(
-            p.settings.get("port", 8080), model=model_scope,
+            profile_port(p), model=model_scope,
             api_key=self._poll_api_key(p),
             host=dial_host(p.runtime.bind_host))
         cur = spec_counters(text) if text else None
@@ -506,7 +507,7 @@ class MonitorController:
         that value -- e.g. the benchmark-availability gate -- can reuse it
         instead of polling `_router_pollable_model()` again.
         """
-        port = p.settings.get("port", 8080)
+        port = profile_port(p)
         key = self._poll_api_key(p)
         if p.mode == "router":
             host = self._router_host(p)
@@ -533,7 +534,7 @@ class MonitorController:
         if p.mode != "router":
             return
         host = self._router_host(p)
-        port = p.settings.get("port", 8080)
+        port = profile_port(p)
         key = api_key_store.read_api_key(self.window.router_base_dir(), p.name)
         models = router_api.list_models(host, port, key)
         if models is None:            # unreachable, as opposed to serving nothing
@@ -558,7 +559,7 @@ class MonitorController:
     def _on_router_load(self, model_id: str) -> None:
         p = self.window._configure_panel.current_profile()
         key = api_key_store.read_api_key(self.window.router_base_dir(), p.name)
-        ok = router_api.load_model(self._router_host(p), p.settings.get("port", 8080),
+        ok = router_api.load_model(self._router_host(p), profile_port(p),
                                    key, model_id)
         self.refresh_router_models()
         if not ok:
@@ -569,7 +570,7 @@ class MonitorController:
     def _on_router_unload(self, model_id: str) -> None:
         p = self.window._configure_panel.current_profile()
         key = api_key_store.read_api_key(self.window.router_base_dir(), p.name)
-        ok = router_api.unload_model(self._router_host(p), p.settings.get("port", 8080),
+        ok = router_api.unload_model(self._router_host(p), profile_port(p),
                                      key, model_id)
         self.refresh_router_models()
         if not ok:
@@ -601,7 +602,7 @@ class MonitorController:
         # left intact here so the running branch can render the last gather;
         # it's cleared below only when nothing is running.)
         self._monitor_target = {"running": False}
-        hstatus = health.probe_health(p.settings.get("port", 8080),
+        hstatus = health.probe_health(profile_port(p),
                                      host=dial_host(p.runtime.bind_host)) \
             if state == "running" else "down"
         self.window.status_label.setText("● " + health.derive_status(state, hstatus))
@@ -799,7 +800,7 @@ class MonitorController:
         return Profile(
             name=inst.profile, mode=inst.mode,
             runtime=Runtime(bind_host=inst.host, node=inst.node),
-            settings={"port": inst.port or 8080,
+            settings={"port": inst.port or DEFAULT_PORT,
                       "embeddings": inst.embeddings, "reranking": inst.reranking,
                       "metrics": bool(stored.settings.get("metrics")) if stored else False},
         )
@@ -861,7 +862,7 @@ class MonitorController:
             key = None
         return {
             "running": True,
-            "port": p.settings.get("port", 8080),
+            "port": profile_port(p),
             "metrics_on": bool(p.settings.get("metrics")),
             "host": host, "key": key, "model_scope": ms, "poll": poll,
             "name": self._monitored_container_name(),

@@ -10,7 +10,7 @@ from .settings_catalog import (
 )
 from collections.abc import Callable
 
-from .spec import Profile, RpcWorker, slugify
+from .spec import Profile, RpcWorker, profile_port, slugify
 
 
 # Container-runtime flags in `extra_run_args` that escalate a launch to host
@@ -330,7 +330,7 @@ def _run_level_args(profile: Profile, router_host_dir: str = "",
     if network_host:
         argv += ["--network", "host"]           # head shares host loopback for --rpc
     else:
-        port = profile.settings.get("port", 8080)
+        port = profile_port(profile)
         argv += ["-p", f"{rt.bind_host}:{port}:{port}"]
 
     workdir = None
@@ -410,7 +410,7 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
     if profile.draft_model:
         pairs.append(("--spec-draft-model", profile.draft_model))
 
-    port = profile.settings.get("port", 8080)
+    port = profile_port(profile)
     # --load-mode supersedes the legacy --no-mmap/--mlock flags upstream; mixing
     # them makes llama.cpp warn and only honour the last. When load-mode will
     # actually emit (a value at its default is skipped as an enum sentinel),
@@ -489,7 +489,7 @@ def _server_args(profile: Profile, catalog: dict, host: str = "0.0.0.0") -> list
 
 def _owned_router_pairs(profile: Profile) -> list:
     pairs: list = []
-    port = profile.settings.get("port", 8080)
+    port = profile_port(profile)
     for key, setting in router_catalog().items():
         if key == "port" or key == "api-key":
             continue
