@@ -42,7 +42,7 @@ def test_fixture_looks_like_a_real_help_dump():
 
 
 @pytest.mark.parametrize(
-    "key", [k for k, s in CATALOG.items() if s.engine == "any"])
+    "key", [k for k, s in CATALOG.items() if s.engine in ("any", "llama.cpp")])
 def test_mainline_setting_uses_a_flag_upstream_accepts(key):
     # Asserts on setting.flag alone, NOT on the aliases: _render_setting always
     # emits the primary flag, so a setting whose flag was renamed still breaks
@@ -59,7 +59,7 @@ def test_mainline_setting_uses_a_flag_upstream_accepts(key):
 def test_engine_gated_settings_are_not_checked_against_mainline():
     # ik_llama.cpp flags are absent from mainline help by design; the parametrised
     # test above must not be quietly checking (and passing) them.
-    ik = [k for k, s in CATALOG.items() if s.engine != "any"]
+    ik = [k for k, s in CATALOG.items() if s.engine == "ik_llama.cpp"]
     assert ik, "expected some ik_llama.cpp-gated settings"
     upstream = _upstream_flags()
     assert any(CATALOG[k].flag not in upstream for k in ik)
@@ -68,7 +68,8 @@ def test_engine_gated_settings_are_not_checked_against_mainline():
 # -- ik_llama.cpp -------------------------------------------------------------
 # ik is a fork and rejects a large slice of the shared flag surface. A setting
 # left at engine="any" that ik does not accept breaks an ik launch the moment a
-# user sets it, so the "any" bucket is the thing under test here.
+# user sets it, and so does a typo or a future ik rename in an ik-only flag, so
+# both the "any" and the "ik_llama.cpp" buckets are under test here.
 
 IK_FIXTURE = (pathlib.Path(__file__).resolve().parents[1]
               / "fixtures" / "ik_llama_server_flags_cu12.txt")
@@ -92,13 +93,27 @@ def test_ik_fixture_looks_like_a_real_capture():
 
 
 @pytest.mark.parametrize(
-    "key", [k for k, s in CATALOG.items() if s.engine == "any"])
-def test_shared_setting_is_accepted_by_ik_too(key):
+    "key", [k for k, s in CATALOG.items() if s.engine in ("any", "ik_llama.cpp")])
+def test_setting_reaching_ik_is_accepted_by_ik(key):
     setting = CATALOG[key]
+    if setting.engine == "any":
+        hint = ("Add it to MAINLINE_ONLY_FLAGS so it is retagged engine='llama.cpp' "
+                "and dropped from ik launches and forms.")
+    else:
+        hint = "It is ik-only, so fix the spelling or drop the setting."
     assert setting.flag in _ik_flags(), (
-        f"{key}: engine='any' means this reaches an ik_llama.cpp launch, but ik "
-        f"does not accept {setting.flag}. Add it to MAINLINE_ONLY_FLAGS so it is "
-        "retagged engine='llama.cpp' and dropped from ik launches and forms.")
+        f"{key}: engine={setting.engine!r} means this reaches an ik_llama.cpp "
+        f"launch, but ik does not accept {setting.flag}. {hint}")
+
+
+def test_ik_only_settings_are_actually_checked_against_ik():
+    # The parametrised test above used to select engine == "any" only, which
+    # left every ik-only flag unpinned: a typo there kept the suite green while
+    # the ik launch died. Keep the ik bucket in the selection.
+    ik_only = [k for k, s in CATALOG.items() if s.engine == "ik_llama.cpp"]
+    assert ik_only
+    ik = _ik_flags()
+    assert all(CATALOG[k].flag in ik for k in ik_only)
 
 
 def test_mainline_only_flags_are_actually_absent_from_ik():

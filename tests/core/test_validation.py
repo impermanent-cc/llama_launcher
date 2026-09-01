@@ -409,6 +409,38 @@ def test_ik_engine_router_is_refused():
     assert any("router" in m.lower() and "ik_llama.cpp" in m for m in _errors(issues))
 
 
+def test_router_on_an_ik_image_is_refused_even_with_the_mainline_engine():
+    """The Runtime engine defaults to llama.cpp and nothing sets it from the
+    image, so a router whose image is an ik build used to pass validate() with
+    only the looks-ik warning, launch, and die on unknown argument
+    --models-preset. Following that warning's advice then hit the engine
+    refusal instead."""
+    issues = validate(_router(image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"),
+                      members=[(RouterMember(profile="Qwen"), _member_profile())],
+                      api_key_present=True)
+    assert any("router" in m.lower() and "ik_llama.cpp" in m for m in _errors(issues))
+
+
+def test_router_member_with_a_different_engine_is_refused():
+    """The preset renders a member's settings for the member's engine, but the
+    router's own (mainline) llama-server spawns every member, so an ik-tagged
+    member writes ik-only keys into the preset and the child dies on unknown
+    argument."""
+    member = _member_profile(runtime=Runtime(engine="ik_llama.cpp"),
+                             settings={"defer-experts": True})
+    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), member)],
+                      api_key_present=True)
+    errors = _errors(issues)
+    assert any("Qwen" in m and "ik_llama.cpp" in m and "engine" in m.lower()
+               for m in errors), errors
+
+
+def test_router_member_with_the_same_engine_is_not_flagged():
+    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), _member_profile())],
+                      api_key_present=True)
+    assert not any("engine" in m.lower() for m in _errors(issues))
+
+
 def test_mainline_engine_router_is_allowed():
     issues = validate(_router(), members=[(RouterMember(profile="Qwen"), _member_profile())],
                       api_key_present=True)

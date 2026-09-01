@@ -4,7 +4,8 @@ import shlex
 
 from .settings_catalog import (
     CATALOG,
-    IK_EXTRA_KV_CACHE_TYPES, IK_EXTRA_SPEC_TYPES, IK_SPEC_TYPE_RENAMES,
+    IK_EXTRA_KV_CACHE_TYPES, IK_EXTRA_SPEC_TYPES, IK_LAYER_TOKENS,
+    IK_SPEC_TYPE_RENAMES,
     ROUTER_ONLY_KEYS,
     router_catalog,
 )
@@ -474,6 +475,14 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
                     continue
                 if profile.runtime.engine == "ik_llama.cpp":
                     value = IK_SPEC_TYPE_RENAMES.get(value, value)
+            # ik's -ngl/-ngld reject mainline's auto/all tokens (stoi abort);
+            # translate per IK_LAYER_TOKENS, dropping the flag for "auto".
+            if (setting.type == "int_or_token"
+                    and profile.runtime.engine == "ik_llama.cpp"
+                    and value in IK_LAYER_TOKENS):
+                value = IK_LAYER_TOKENS[value]
+                if value is None:
+                    continue
             # An enum value equal to its own default is a "leave it at the
             # engine's default" sentinel (auto/off/model default). Re-emitting
             # it is redundant at best and, for ik's --mla-use "auto", invalid
@@ -493,7 +502,9 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
 
 
 _SERVER_PROTECTED = {"--host", "--port"}
-_REPEATABLE = {"--lora", "--lora-scaled"}
+# --logit-bias is repeatable upstream (one token per occurrence), and its
+# catalog tooltip tells the user to add extra entries as raw args.
+_REPEATABLE = {"--lora", "--lora-scaled", "--logit-bias"}
 
 
 def _server_args(profile: Profile, catalog: dict, host: str = "0.0.0.0") -> list[str]:

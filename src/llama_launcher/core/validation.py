@@ -106,10 +106,21 @@ def validate(profile: Profile, running_ports: tuple = (),
                 "(no 'ik-llama'/'ik_llama' in the ref); ik-only flags may be rejected. "
                 "Use an ik-llama-cpp image."))
         elif profile.runtime.engine == "llama.cpp" and looks_ik:
-            issues.append(Issue(
-                "warning",
-                "Engine is llama.cpp but the image looks like an ik_llama.cpp build; "
-                "switch the Engine to ik_llama.cpp to reach its flags."))
+            if profile.mode == "router":
+                # Same ik-has-no-router failure as the engine check above, but
+                # keyed on the image: the engine field defaults to llama.cpp
+                # and nothing sets it from the image, so a router pointed at an
+                # ik image would pass here and die on --models-preset.
+                issues.append(Issue(
+                    "error",
+                    "The image looks like an ik_llama.cpp build, and ik_llama.cpp has "
+                    "no router mode (no --models-preset). Use a llama.cpp image for "
+                    "router profiles."))
+            else:
+                issues.append(Issue(
+                    "warning",
+                    "Engine is llama.cpp but the image looks like an ik_llama.cpp build; "
+                    "switch the Engine to ik_llama.cpp to reach its flags."))
 
         for m in profile.mounts:
             if bool(m.host) != bool(m.container):
@@ -323,6 +334,20 @@ def _validate_router(profile: Profile, members: tuple,
                 f"because harnesses use them to route requests."))
         else:
             seen_ids[model_id] = member_profile.name
+
+        # The preset renders each member's settings for the MEMBER's engine,
+        # but every member instance is spawned by the router's own llama-server
+        # (mainline, the only engine with a router). An ik-tagged member would
+        # write ik-only keys into the preset and the child would die on
+        # "unknown argument".
+        if member_profile.runtime.engine != profile.runtime.engine:
+            issues.append(Issue(
+                "error",
+                f"Member '{member_profile.name}' uses the "
+                f"{member_profile.runtime.engine} engine but the router runs "
+                f"{profile.runtime.engine}; the router spawns members with its own "
+                f"engine, which would reject the member's engine-specific flags. "
+                f"Set the member's Engine to {profile.runtime.engine}."))
 
         if not member_profile.model:
             issues.append(Issue("error",

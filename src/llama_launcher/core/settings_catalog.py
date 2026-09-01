@@ -35,6 +35,14 @@ KV_CACHE_TYPES = ("f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0"
 # case-sensitive. The wider ik iq-quants need GGML_IQK_FA_ALL_QUANTS=ON images.
 IK_EXTRA_KV_CACHE_TYPES = ("q6_0", "q8_KV")
 
+# ik parses -ngl and -ngld with a bare stoi, so mainline's "auto"/"all" tokens
+# for the int_or_token layer settings abort an ik launch ("stoi" plus the usage
+# text; probed against ik-llama-cpp:cpu-server). On an ik launch "auto" (let the
+# engine decide) drops the flag, since ik's own default is the only "auto" it
+# has, and "all" becomes 999, the conventional everything value both engines
+# take as an integer. None means "emit nothing".
+IK_LAYER_TOKENS = {"auto": None, "all": "999"}
+
 # The shared spec-type enum uses mainline's spellings (common/speculative.cpp
 # name map). ik's map (also common/speculative.cpp there) has no "draft-"
 # prefix on the draft-model types, so these are renamed at emit time on an ik
@@ -231,7 +239,8 @@ _ALL = [
     Setting("min-p", "--min-p", "float", 0.05, "Sampling", (), 0.0, 1.0, 0.01,
             tooltip="Drop tokens less likely than this fraction of the top token's "
                     "probability. Higher = stricter. 0.0 = disabled."),
-    Setting("typical-p", "--typical", "float", 1.0, "Sampling", (), 0.0, 1.0, 0.01,
+    Setting("typical-p", "--typical", "float", 1.0, "Sampling", ("--typical-p",),
+            0.0, 1.0, 0.01,
             tooltip="Locally-typical sampling: keep tokens whose information content is near "
                     "the expected value, summing to P. Lower = narrower. 1.0 = disabled."),
     Setting("top-n-sigma", "--top-n-sigma", "float", -1.0, "Sampling", (), -1.0, 5.0, 0.1,
@@ -373,7 +382,7 @@ _ALL = [
                     "multi-token-prediction head (e.g. Gemma 4) with no separate draft "
                     "model needed. 'none' disables speculation."),
     Setting("spec-draft-ngl", "--gpu-layers-draft", "int_or_token", "auto", "Speculative Decoding",
-            ("-ngld",), 0, 999, 1, tokens=("auto", "all"),
+            ("-ngld", "--spec-draft-ngl"), 0, 999, 1, tokens=("auto", "all"),
             tooltip="Draft-model layers to offload to GPU for speculative decoding. "
                     "'auto' lets llama.cpp decide."),
     Setting("spec-draft-n-max", "--spec-draft-n-max", "int", 3, "Speculative Decoding", (),
@@ -717,7 +726,7 @@ _ALL = [
             tooltip="Sampler chain in application order, separated by ';' (upstream "
                     "default 'penalties;dry;top_n_sigma;top_k;typ_p;top_p;min_p;xtc;"
                     "temperature'). Empty = leave at the default."),
-    Setting("sampler-seq", "--sampling-seq", "string", "", "Sampling", (),
+    Setting("sampler-seq", "--sampling-seq", "string", "", "Sampling", ("--sampler-seq",),
             tooltip="The same chain in short letter form (upstream default 'edskypmxt'). "
                     "Set this or samplers, not both."),
     Setting("ignore-eos", "--ignore-eos", "bool", False, "Sampling", (),
@@ -744,12 +753,12 @@ _ALL = [
             tooltip="Probability threshold at which the draft splits into a new branch. "
                     "0 = upstream default."),
     Setting("spec-draft-device", "--device-draft", "string", "", "Speculative Decoding",
-            ("-devd",),
+            ("-devd", "--spec-draft-device"),
             tooltip="Devices the DRAFT model runs on, comma-separated (e.g. 'CUDA1'). "
                     "Empty = same placement as the target model. Use it to park the draft "
                     "on a second, smaller GPU."),
     Setting("spec-draft-threads", "--threads-draft", "int", 0, "Speculative Decoding",
-            ("-td",), 0, 512, 1,
+            ("-td", "--spec-draft-threads"), 0, 512, 1,
             tooltip="CPU threads for the draft model. 0 = same as the main threads value."),
     Setting("spec-draft-cpu-moe", "--spec-draft-cpu-moe", "bool", False, "Speculative Decoding",
             ("-cmoed",),
@@ -997,12 +1006,10 @@ _ALL = [
                     "straight through to ik. Advanced; see the ik_llama.cpp docs for the "
                     "accepted keys."),
 
-    # Performance & Batching: fused-op and attention switches.
-    Setting("no-flash-attn", "--no-flash-attn", "bool", False, "Performance & Batching",
-            ("-no-fa",), engine="ik_llama.cpp",
-            tooltip="ik_llama.cpp only. Disable Flash Attention, which ik enables by "
-                    "default. Slower and uses more memory; the fallback when a model or "
-                    "KV-cache type is not supported by the fused kernel."),
+    # Performance & Batching: fused-op switches. ik's --no-flash-attn is NOT
+    # exposed: the shared flash-attn enum already reaches ik, which accepts
+    # -fa on|off|auto (probed), and a second control would let the two contradict
+    # each other on argv with only the last one winning.
     Setting("no-fused-up-gate", "--no-fused-up-gate", "bool", False,
             "Performance & Batching", ("-no-fug",), engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only. Disable the fused up-gate FFN kernel that ik "
@@ -1212,7 +1219,8 @@ _ALL = [
                     "use grammar instead."),
     Setting("logit-bias", "--logit-bias", "string", "", "Sampling", (),
             tooltip="Nudge specific tokens, written TOKEN_ID+BIAS or TOKEN_ID-BIAS "
-                    "(for example 15043+1). One entry here; use raw-args for several."),
+                    "(for example 15043+1). For several, add the rest as raw args: a "
+                    "raw --logit-bias is appended to this one, not swapped for it."),
     Setting("special", "--special", "bool", False, "Server & Tools", ("-sp",),
             tooltip="Include special/control tokens in the output instead of hiding them. "
                     "Useful for debugging a chat template, noisy otherwise."),

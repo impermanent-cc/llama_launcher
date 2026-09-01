@@ -468,3 +468,51 @@ def test_container_launch_host_unchanged():
     argv = build_command(p)
     assert argv[argv.index("--host") + 1] == "0.0.0.0"
     assert argv[0] == "podman" and "run" in argv
+
+
+# -- ik_llama.cpp layer tokens ------------------------------------------------
+# ik parses -ngl/-ngld with a bare stoi: "--n-gpu-layers all" and "auto" print
+# "stoi" plus the usage text and exit before the model loads (probed against
+# ik-llama-cpp:cpu-server), while an integer proceeds.
+
+def _ik_layers_profile():
+    p = _golden_profile()
+    p.runtime = replace(p.runtime, engine="ik_llama.cpp")
+    p.image = "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
+    return p
+
+
+def test_ik_launch_translates_all_layers_to_an_integer():
+    p = _ik_layers_profile()
+    p.settings["n-gpu-layers"] = "all"
+    p.settings["spec-draft-ngl"] = "all"
+    p.draft_model = "/models/draft.gguf"
+    argv = build_command(p)
+    assert argv[argv.index("--n-gpu-layers") + 1] == "999"
+    assert argv[argv.index("--gpu-layers-draft") + 1] == "999"
+    assert "all" not in argv
+
+
+def test_ik_launch_drops_auto_layers_instead_of_emitting_a_token():
+    p = _ik_layers_profile()
+    p.settings["n-gpu-layers"] = "auto"
+    p.settings["spec-draft-ngl"] = "auto"
+    argv = build_command(p)
+    assert "--n-gpu-layers" not in argv
+    assert "--gpu-layers-draft" not in argv
+    assert "auto" not in argv
+
+
+def test_ik_launch_passes_integer_layers_through():
+    p = _ik_layers_profile()
+    p.settings["n-gpu-layers"] = 40
+    argv = build_command(p)
+    assert argv[argv.index("--n-gpu-layers") + 1] == "40"
+
+
+def test_mainline_launch_keeps_layer_tokens():
+    # Mainline accepts the tokens; the translation is ik-only.
+    p = _golden_profile()
+    p.settings["n-gpu-layers"] = "auto"
+    argv = build_command(p)
+    assert argv[argv.index("--n-gpu-layers") + 1] == "auto"

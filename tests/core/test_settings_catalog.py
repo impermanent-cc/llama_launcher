@@ -370,7 +370,7 @@ _NEW_IK_KEYS = {
     "validate-quants", "split-mode-f16", "split-mode-f32",
     "split-mode-graph-scheduling", "graph-reduce-type", "graph-attn-precision",
     "no-graph-reuse", "scheduler-async", "worst-graph-tokens", "cuda-params",
-    "no-flash-attn", "no-fused-up-gate", "no-fused-mul-multiadd", "dsa",
+    "no-fused-up-gate", "no-fused-mul-multiadd", "dsa",
     "dsa-top-k", "cache-type-k-first", "cache-type-k-last", "cache-type-v-first",
     "cache-type-v-last", "k-cache-hadamard", "v-cache-hadamard",
     "mtp-requantize-output-tensor", "ctx-checkpoints-interval",
@@ -427,6 +427,31 @@ def test_respelled_flags_reach_both_engines():
         assert CATALOG[key].flag == flag, key
         assert CATALOG[key].engine == "any", key
         assert key in ik, key
+
+
+def test_respelled_flags_keep_their_old_spelling_as_an_alias():
+    """The launcher itself emitted the mainline spellings before the respelling,
+    so saved raw_args and copied commands carry them. Without the alias a raw
+    '--typical-p 0.5' no longer folds onto the setting: both spellings reach
+    argv, llama-server takes the last one, and the form shows a value that is
+    not the one running, with no collision warning."""
+    from llama_launcher.core import command_builder as cb
+    old = {
+        "typical-p": "--typical-p",
+        "sampler-seq": "--sampler-seq",
+        "spec-draft-ngl": "--spec-draft-ngl",
+        "spec-draft-threads": "--spec-draft-threads",
+        "spec-draft-device": "--spec-draft-device",
+    }
+    for key, spelling in old.items():
+        assert spelling in CATALOG[key].aliases, key
+        assert cb._canonical_flag(spelling) == CATALOG[key].flag, key
+
+
+def test_no_flash_attn_is_not_a_separate_setting():
+    """ik accepts -fa on|off|auto (probed), so the shared flash-attn enum
+    already covers it; a second bool could contradict the enum on argv."""
+    assert "no-flash-attn" not in CATALOG
 
 
 def test_catalog_flags_and_aliases_are_unique():

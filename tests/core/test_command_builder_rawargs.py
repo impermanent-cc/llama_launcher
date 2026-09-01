@@ -103,3 +103,38 @@ def test_merge_no_raw_is_owned_unchanged():
     argv, warns = cb._merge_raw_args(owned, [], PORTCANON, LORACANON)
     assert argv == ["-m", "/m.gguf", "--host", "0.0.0.0", "--port", "8080"]
     assert warns == []
+
+
+# -- old mainline spellings still fold ---------------------------------------
+
+def test_raw_old_spelling_folds_onto_the_respelled_setting():
+    """Before the respelling the launcher emitted --typical-p / --spec-draft-ngl
+    itself, so saved raw_args carry them. They must still fold onto the setting
+    (override, with a warning) rather than reaching argv as a second flag that
+    llama-server's last-wins parsing silently prefers."""
+    from llama_launcher.core.command_builder import build_command, raw_arg_warnings
+    from llama_launcher.core.spec import Profile
+    p = Profile(name="p", model="/m.gguf",
+                settings={"typical-p": 0.9, "spec-draft-ngl": 10},
+                raw_args="--typical-p 0.5 --spec-draft-ngl 20")
+    argv = build_command(p)
+    assert argv[argv.index("--typical") + 1] == "0.5"
+    assert argv[argv.index("--gpu-layers-draft") + 1] == "20"
+    assert "--typical-p" not in argv and "--spec-draft-ngl" not in argv
+    warnings = raw_arg_warnings(p)
+    assert any("--typical-p 0.5" in w and "overrides" in w for w in warnings)
+    assert any("--spec-draft-ngl 20" in w and "overrides" in w for w in warnings)
+
+
+def test_raw_logit_bias_is_appended_not_swapped():
+    """--logit-bias is repeatable upstream and the catalog tooltip tells the
+    user to add further entries as raw args; a raw one must not replace the
+    form's entry."""
+    from llama_launcher.core.command_builder import build_command, raw_arg_warnings
+    from llama_launcher.core.spec import Profile
+    p = Profile(name="p", model="/m.gguf",
+                settings={"logit-bias": "15043+1"}, raw_args="--logit-bias 200-1")
+    argv = build_command(p)
+    values = [argv[i + 1] for i, a in enumerate(argv) if a == "--logit-bias"]
+    assert values == ["15043+1", "200-1"]
+    assert raw_arg_warnings(p) == []
