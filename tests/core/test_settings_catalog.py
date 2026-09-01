@@ -20,8 +20,19 @@ def test_known_settings_present_with_correct_defaults():
     assert "all" in CATALOG["n-gpu-layers"].tokens
 
 
-def test_no_deprecated_defrag_thold():
-    assert "defrag-thold" not in CATALOG
+def test_defrag_thold_is_never_offered_on_mainline():
+    """--defrag-thold is DEPRECATED in mainline's help, and this catalog does not
+    offer flags upstream has deprecated (same rule that keeps out --direct-io).
+
+    ik_llama.cpp carries the flag undeprecated and still honours it, so the
+    2026-09-01 completeness pass exposes it there and only there. The original
+    guard asserted it was absent outright; this keeps the protection that
+    actually mattered, that a mainline user is never shown it.
+    """
+    from llama_launcher.core.settings_catalog import for_engine, member_catalog
+    assert "defrag-thold" not in for_engine(member_catalog(), "llama.cpp")
+    assert CATALOG["defrag-thold"].engine == "ik_llama.cpp"
+    assert CATALOG["defrag-thold"].deprecated is False
 
 
 def test_enum_defaults_are_within_enum():
@@ -247,7 +258,19 @@ def test_ik_flags_exist_and_are_engine_tagged():
     for k in _IK_KEYS:
         assert k in CATALOG, k
         assert CATALOG[k].engine == "ik_llama.cpp", k
-        assert CATALOG[k].group == "ik_llama.cpp", k
+
+
+def test_ik_settings_live_in_functional_groups():
+    """The flat "ik_llama.cpp" form group is gone as of the 2026-09-01
+    completeness pass: at 68 ik-only settings one section was unnavigable, and
+    for_engine() already hides them on mainline, so each sits with the mainline
+    settings it belongs beside."""
+    assert not any(s.group == "ik_llama.cpp" for s in CATALOG.values())
+    assert CATALOG["mla-use"].group == "Performance & Batching"
+    assert CATALOG["run-time-repack"].group == "GPU & Memory"
+    assert CATALOG["ctx-size-draft"].group == "Speculative Decoding"
+    assert CATALOG["indexer-cache-type-k"].group == "Caching"
+    assert CATALOG["swa-compress"].group == "Model & Context"
 
 
 def test_existing_settings_default_to_engine_any():
@@ -335,3 +358,83 @@ def test_ik_spec_type_translation_table():
     # ngram-* need no rename: ik normalizes '-' to '_' before its map lookup.
     assert IK_EXTRA_SPEC_TYPES == ("suffix",)
     assert set(IK_EXTRA_SPEC_TYPES).isdisjoint(spec_enum)
+
+
+# --- 2026-09-01 ik_llama.cpp completeness pass ------------------------------
+
+_NEW_IK_KEYS = {
+    "defer-experts", "prefetch-experts", "prefetch-experts-threads",
+    "no-offload-only-active-experts", "offload-policy", "fit-margin",
+    "gpu-fit-margin", "max-gpu", "max-extra-alloc", "transparent-huge-pages",
+    "merge-qkv", "merge-up-gate-experts", "grouped-expert-routing",
+    "validate-quants", "split-mode-f16", "split-mode-f32",
+    "split-mode-graph-scheduling", "graph-reduce-type", "graph-attn-precision",
+    "no-graph-reuse", "scheduler-async", "worst-graph-tokens", "cuda-params",
+    "no-flash-attn", "no-fused-up-gate", "no-fused-mul-multiadd", "dsa",
+    "dsa-top-k", "cache-type-k-first", "cache-type-k-last", "cache-type-v-first",
+    "cache-type-v-last", "k-cache-hadamard", "v-cache-hadamard",
+    "mtp-requantize-output-tensor", "ctx-checkpoints-interval",
+    "ctx-checkpoints-tolerance", "ctx-checkpoints-eviction",
+    "cache-ram-similarity", "cache-ram-n-min", "attention", "embd-output-format",
+    "embd-separator", "webui", "send-done", "sql-save-file",
+    "sqlite-zstd-ext-file", "system-prompt-file", "parallel-tool-calls",
+    "reasoning-tokens", "spec-autotune", "spec-ckpt-mode", "p-split",
+    "draft-params", "mtmd-kq-type", "threads-mtmd", "grp-attn-n", "grp-attn-w",
+    "tfs", "penalize-nl", "defrag-thold",
+}
+
+# Both engines accept these; the catalog exposed them for neither until now.
+_NEW_SHARED_KEYS = {
+    "grammar", "grammar-file", "json-schema", "logit-bias", "special",
+    "spm-infill", "ui-mcp-proxy", "lookup-cache-static", "lookup-cache-dynamic",
+}
+
+
+def test_new_ik_settings_are_ik_tagged_and_hidden_from_mainline():
+    from llama_launcher.core.settings_catalog import for_engine, member_catalog
+    mainline = for_engine(member_catalog(), "llama.cpp")
+    ik = for_engine(member_catalog(), "ik_llama.cpp")
+    for k in _NEW_IK_KEYS:
+        assert k in CATALOG, k
+        assert CATALOG[k].engine == "ik_llama.cpp", k
+        assert k not in mainline, k
+        assert k in ik, k
+
+
+def test_new_shared_settings_reach_both_engines():
+    from llama_launcher.core.settings_catalog import for_engine, member_catalog
+    mainline = for_engine(member_catalog(), "llama.cpp")
+    ik = for_engine(member_catalog(), "ik_llama.cpp")
+    for k in _NEW_SHARED_KEYS:
+        assert CATALOG[k].engine == "any", k
+        assert k in mainline and k in ik, k
+
+
+def test_respelled_flags_reach_both_engines():
+    """Mainline renamed these and kept the older ik spelling as an alias, so one
+    setting can serve both engines instead of being gated to mainline. Keys are
+    unchanged, so saved profiles keep working."""
+    from llama_launcher.core.settings_catalog import for_engine, member_catalog
+    expected = {
+        "typical-p": "--typical",
+        "sampler-seq": "--sampling-seq",
+        "spec-draft-ngl": "--gpu-layers-draft",
+        "spec-draft-threads": "--threads-draft",
+        "spec-draft-device": "--device-draft",
+    }
+    ik = for_engine(member_catalog(), "ik_llama.cpp")
+    for key, flag in expected.items():
+        assert CATALOG[key].flag == flag, key
+        assert CATALOG[key].engine == "any", key
+        assert key in ik, key
+
+
+def test_catalog_flags_and_aliases_are_unique():
+    """A duplicated alias would silently mis-fold raw_args onto the wrong
+    setting. Caught a real -devd collision when --device-draft was briefly added
+    as its own setting alongside spec-draft-device, which already aliased it."""
+    seen = {}
+    for s in CATALOG.values():
+        for spelling in (s.flag,) + tuple(s.aliases):
+            assert spelling not in seen, f"{spelling}: {seen.get(spelling)} vs {s.key}"
+            seen[spelling] = s.key

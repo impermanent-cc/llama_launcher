@@ -231,7 +231,7 @@ _ALL = [
     Setting("min-p", "--min-p", "float", 0.05, "Sampling", (), 0.0, 1.0, 0.01,
             tooltip="Drop tokens less likely than this fraction of the top token's "
                     "probability. Higher = stricter. 0.0 = disabled."),
-    Setting("typical-p", "--typical-p", "float", 1.0, "Sampling", (), 0.0, 1.0, 0.01,
+    Setting("typical-p", "--typical", "float", 1.0, "Sampling", (), 0.0, 1.0, 0.01,
             tooltip="Locally-typical sampling: keep tokens whose information content is near "
                     "the expected value, summing to P. Lower = narrower. 1.0 = disabled."),
     Setting("top-n-sigma", "--top-n-sigma", "float", -1.0, "Sampling", (), -1.0, 5.0, 0.1,
@@ -372,7 +372,7 @@ _ALL = [
             tooltip="Speculative-decoding strategy. 'draft-mtp' enables a model's built-in "
                     "multi-token-prediction head (e.g. Gemma 4) with no separate draft "
                     "model needed. 'none' disables speculation."),
-    Setting("spec-draft-ngl", "--spec-draft-ngl", "int_or_token", "auto", "Speculative Decoding",
+    Setting("spec-draft-ngl", "--gpu-layers-draft", "int_or_token", "auto", "Speculative Decoding",
             ("-ngld",), 0, 999, 1, tokens=("auto", "all"),
             tooltip="Draft-model layers to offload to GPU for speculative decoding. "
                     "'auto' lets llama.cpp decide."),
@@ -717,7 +717,7 @@ _ALL = [
             tooltip="Sampler chain in application order, separated by ';' (upstream "
                     "default 'penalties;dry;top_n_sigma;top_k;typ_p;top_p;min_p;xtc;"
                     "temperature'). Empty = leave at the default."),
-    Setting("sampler-seq", "--sampler-seq", "string", "", "Sampling", (),
+    Setting("sampler-seq", "--sampling-seq", "string", "", "Sampling", (),
             tooltip="The same chain in short letter form (upstream default 'edskypmxt'). "
                     "Set this or samplers, not both."),
     Setting("ignore-eos", "--ignore-eos", "bool", False, "Sampling", (),
@@ -743,12 +743,12 @@ _ALL = [
             0.0, 1.0, 0.05,
             tooltip="Probability threshold at which the draft splits into a new branch. "
                     "0 = upstream default."),
-    Setting("spec-draft-device", "--spec-draft-device", "string", "", "Speculative Decoding",
+    Setting("spec-draft-device", "--device-draft", "string", "", "Speculative Decoding",
             ("-devd",),
             tooltip="Devices the DRAFT model runs on, comma-separated (e.g. 'CUDA1'). "
                     "Empty = same placement as the target model. Use it to park the draft "
                     "on a second, smaller GPU."),
-    Setting("spec-draft-threads", "--spec-draft-threads", "int", 0, "Speculative Decoding",
+    Setting("spec-draft-threads", "--threads-draft", "int", 0, "Speculative Decoding",
             ("-td",), 0, 512, 1,
             tooltip="CPU threads for the draft model. 0 = same as the main threads value."),
     Setting("spec-draft-cpu-moe", "--spec-draft-cpu-moe", "bool", False, "Speculative Decoding",
@@ -806,16 +806,24 @@ _ALL = [
 
     # ik_llama.cpp-only flags (engine-gated). Shown only when engine == ik and
     # dropped from argv on a mainline launch (current_profile + command_builder).
-    Setting("run-time-repack", "--run-time-repack", "bool", False, "ik_llama.cpp", ("-rtr",),
+    #
+    # These eight used to sit in their own "ik_llama.cpp" form group. The
+    # 2026-09-01 completeness pass took that group out: with 68 ik-only settings
+    # a single flat section was unnavigable, and for_engine() already hides them
+    # on mainline, so each now lives with the mainline settings it belongs
+    # beside. Only the `group` strings changed; keys, flags and behaviour did
+    # not, so saved profiles are untouched.
+    Setting("run-time-repack", "--run-time-repack", "bool", False, "GPU & Memory", ("-rtr",),
             engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only. Repack tensors kept in RAM to a row-interleaved "
                     "layout at load time; can speed up CPU/hybrid inference but DISABLES "
                     "mmap and raises load time and RAM. Off by default."),
-    Setting("no-fused-moe", "--no-fused-moe", "bool", False, "ik_llama.cpp", ("-no-fmoe",),
+    Setting("no-fused-moe", "--no-fused-moe", "bool", False, "Performance & Batching",
+            ("-no-fmoe",),
             engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only. Disable fused MoE ops, which ik enables by default "
                     "for a MoE speedup. Leave unchecked to keep fused MoE on."),
-    Setting("mla-use", "--mla-use", "enum", "auto", "ik_llama.cpp", ("-mla",),
+    Setting("mla-use", "--mla-use", "enum", "auto", "Performance & Batching", ("-mla",),
             enum=("auto", "0", "1", "2", "3"), engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only. Multi-head Latent Attention for DeepSeek-style "
                     "models. 'auto' leaves ik's default; 0 disables; 1/2/3 select MLA "
@@ -823,32 +831,407 @@ _ALL = [
     # Default MUST mirror current ik upstream (256 since ik PR #2312), not our
     # advice: widgets emit only when value != default, so with the old default
     # of 0 "no cap" emitted nothing and current ik silently ran 256.
-    Setting("attention-max-batch", "--attention-max-batch", "int", 256, "ik_llama.cpp", ("-amb",),
+    Setting("attention-max-batch", "--attention-max-batch", "int", 256, "Performance & Batching",
+            ("-amb",),
             0, 65536, 64, engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only. Cap the K*Q attention buffer (MiB) to bound memory "
                     "on long contexts; only applies when flash-attn is off. 0 = no cap. "
                     "256 is the ik default (older ik builds defaulted to 0 = no cap). "
                     "ik raises values 1-127 to 128."),
-    Setting("smart-expert-reduction", "--smart-expert-reduction", "string", "", "ik_llama.cpp",
+    Setting("smart-expert-reduction", "--smart-expert-reduction", "string", "", "GPU & Memory",
             ("-ser",), engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only. Custom active-expert count for MoE models, form "
                     "'Kmin,t' (e.g. '4,0.5'). Empty = leave at the model default."),
-    Setting("ctx-size-draft", "--ctx-size-draft", "int", 0, "ik_llama.cpp", ("-cd",),
+    Setting("ctx-size-draft", "--ctx-size-draft", "int", 0, "Speculative Decoding", ("-cd",),
             0, 1048576, 1024, engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only (mainline removed this flag). Prompt-context size "
                     "for the speculative-decoding draft model. 0 = inherit the target "
                     "context for DFlash/DSpark (their capacity knob), otherwise load from "
                     "the model."),
-    Setting("swa-compress", "--swa-compress", "bool", False, "ik_llama.cpp", (),
+    Setting("swa-compress", "--swa-compress", "bool", False, "Model & Context", (),
             engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only. Allocate sliding-window-attention layers at the "
                     "window size instead of the full context, saving KV-cache memory on "
                     "SWA models (e.g. Gemma). Off by default."),
-    Setting("indexer-cache-type-k", "--indexer-cache-type-k", "enum", "f16", "ik_llama.cpp",
+    Setting("indexer-cache-type-k", "--indexer-cache-type-k", "enum", "f16", "Caching",
             ("-ictk",), enum=("f16", "q8_0"), engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only. Data type of the indexer K-cache used by "
                     "DeepSeek-style sparse attention (DSA) models. q8_0 saves memory; "
                     "f16 is the default."),
+
+    # ------------------------------------------------------------------
+    # ik_llama.cpp completeness pass (2026-09-01).
+    #
+    # The earlier ik work went one direction only: catalog flags that ik
+    # REJECTS (see MAINLINE_ONLY_FLAGS). These are the other direction, flags
+    # ik accepts that the catalog never exposed, so an ik user could not reach
+    # them at all. ik's fork value is mostly here: MoE offload, expert
+    # prefetch, multi-GPU graph split and extra KV-cache layouts.
+    #
+    # METHOD (do not shortcut it): ik's --help both under-reports its parser
+    # AND mis-states arity, so every entry below was confirmed by EXECUTING the
+    # flag against ghcr.io/ikawrakow/ik-llama-cpp:cu12-server. Two traps found
+    # doing it:
+    #   * several flags documented "(default: 0)" or "(default: 1)" are bare
+    #     switches that take no value at all (--merge-qkv, --split-mode-f16,
+    #     --k-cache-hadamard, --validate-quants, --scheduler-async).
+    #   * ik does NOT validate enum values at parse time. It accepted "lru" for
+    #     --ctx-checkpoints-eviction and "off" for --webui, both nonsense. So a
+    #     probe proves a flag takes a value, never which values are legal;
+    #     every enum below is taken from the documented help text only.
+    #
+    # Grouped by function rather than into one "ik_llama.cpp" bucket: at this
+    # size a single flat section is unnavigable, and for_engine() already hides
+    # every one of these unless the profile's engine is ik.
+    # ------------------------------------------------------------------
+
+    # GPU & Memory: MoE expert placement and auto-fit, ik's headline area.
+    Setting("defer-experts", "--defer-experts", "bool", False, "GPU & Memory", (),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Defer expert mmap residency on Linux so the model "
+                    "starts serving sooner; experts page in as they are first used. Trades "
+                    "a slower first few tokens for a much shorter load."),
+    Setting("prefetch-experts", "--prefetch-experts", "bool", False, "GPU & Memory", (),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Stream mmap'd MoE expert weights into the page "
+                    "cache on Linux in the background, so later tokens do not stall on "
+                    "disk. Pairs with defer-experts."),
+    Setting("prefetch-experts-threads", "--prefetch-experts-threads", "int", 0,
+            "GPU & Memory", (), 0, 256, 1, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Worker threads used by prefetch-experts. "
+                    "0 leaves ik's own automatic choice in place."),
+    Setting("no-offload-only-active-experts", "--no-offload-only-active-experts", "bool",
+            False, "GPU & Memory", ("-no-ooae",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Offload ALL experts rather than only the ones a "
+                    "token actually activates. Uses more VRAM; occasionally faster when "
+                    "routing is spread wide."),
+    Setting("offload-policy", "--offload-policy", "string", "", "GPU & Memory", ("-op",),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Per-layer offload override as comma-separated "
+                    "layer_id,0|1 pairs (1 = offload that layer). Example: 0,1,1,0 keeps "
+                    "layer 1 on GPU and layer 0 on CPU."),
+    Setting("fit-margin", "--fit-margin", "int", 0, "GPU & Memory", (), 0, 65536, 64,
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Safety margin in MiB held back when ik auto-fits "
+                    "the model across GPUs. Raise it if a load that just fits then runs out "
+                    "of VRAM under load. 0 keeps ik's own default."),
+    Setting("gpu-fit-margin", "--gpu-fit-margin", "string", "", "GPU & Memory", ("-gfm",),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Per-GPU version of fit-margin, as comma-separated "
+                    "layer_id,margin pairs. Use when one card needs more headroom than "
+                    "the others (a display is attached to it, say)."),
+    Setting("max-gpu", "--max-gpu", "int", 0, "GPU & Memory", (), 0, 16, 1,
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Cap how many GPUs are used at once under the "
+                    "'graph' split mode. 0 = no cap."),
+    Setting("max-extra-alloc", "--max-extra-alloc", "int", 256, "GPU & Memory", ("-mea",),
+            0, 65536, 64, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Ceiling in MiB on extra per-GPU VRAM ik may "
+                    "allocate beyond the model itself. Lower it to leave room for other "
+                    "processes; raise it if large batches fail to allocate."),
+    Setting("transparent-huge-pages", "--transparent-huge-pages", "bool", False,
+            "GPU & Memory", ("-thp",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Back host allocations with transparent huge pages "
+                    "on Linux, which can cut TLB misses on large CPU-resident models. "
+                    "Needs THP enabled in the kernel."),
+    Setting("merge-qkv", "--merge-qkv", "bool", False, "GPU & Memory", ("-mqkv",),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Merge the separate Q, K and V projections into one "
+                    "matmul at load time. Usually a small speedup at the cost of a little "
+                    "extra memory during load."),
+    Setting("merge-up-gate-experts", "--merge-up-gate-experts", "bool", False,
+            "GPU & Memory", ("-muge",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Merge each expert's ffn_up and ffn_gate tensors "
+                    "into one, trading load-time work for fewer kernel launches per token "
+                    "on MoE models."),
+    Setting("grouped-expert-routing", "--grouped-expert-routing", "bool", False,
+            "GPU & Memory", ("-ger",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Route MoE tokens in groups instead of one at a "
+                    "time. Helps throughput on models with many experts."),
+    Setting("validate-quants", "--validate-quants", "bool", False, "GPU & Memory", ("-vq",),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Check quantized tensor data while loading and "
+                    "report anything malformed. Slows the load; use it to confirm a "
+                    "suspect GGUF, not routinely."),
+
+    # Multi-GPU & Graph: how ik splits and exchanges work between devices.
+    Setting("split-mode-f16", "--split-mode-f16", "bool", False, "Multi-GPU & Graph",
+            ("-smf16",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Force f16 for tensor exchange between GPUs. This "
+                    "is already ik's default, so set it only to pin the behaviour "
+                    "explicitly. Mutually exclusive with split-mode-f32."),
+    Setting("split-mode-f32", "--split-mode-f32", "bool", False, "Multi-GPU & Graph",
+            ("-smf32",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Use f32 instead of f16 for tensor exchange between "
+                    "GPUs. Costs bandwidth; fixes rare quality loss on multi-GPU splits."),
+    Setting("split-mode-graph-scheduling", "--split-mode-graph-scheduling", "bool", False,
+            "Multi-GPU & Graph", ("-smgs",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Force graph scheduling for the split mode instead "
+                    "of letting ik pick. Relevant when using the 'graph' split mode with "
+                    "several GPUs."),
+    Setting("graph-reduce-type", "--graph-reduce-type", "enum", "f16", "Multi-GPU & Graph",
+            ("-grt",), enum=("f16", "f32", "bf16"), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Data type used for reductions exchanged between "
+                    "GPUs. f16 is the default; f32 is more precise and slower."),
+    Setting("graph-attn-precision", "--graph-attn-precision", "enum", "f16",
+            "Multi-GPU & Graph", ("-gap",), enum=("f16", "f32", "bf16"),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Flash-attention precision under the 'graph' split "
+                    "mode. Raise to f32 if long contexts drift on a multi-GPU split."),
+    Setting("no-graph-reuse", "--no-graph-reuse", "bool", False, "Multi-GPU & Graph",
+            ("-no-gr",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Disable compute-graph reuse between tokens, which "
+                    "ik enables by default. Slower; useful to isolate a graph-reuse bug."),
+    Setting("scheduler-async", "--scheduler-async", "bool", False, "Multi-GPU & Graph",
+            ("-sas",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Evaluate compute graphs asynchronously, overlapping "
+                    "scheduling with execution. Can help multi-GPU throughput."),
+    Setting("worst-graph-tokens", "--worst-graph-tokens", "int", 0, "Multi-GPU & Graph",
+            ("-wgt",), 0, 1048576, 64, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Token count ik sizes its worst-case graph buffers "
+                    "for. Raise it if large batches fail to allocate mid-run. "
+                    "0 keeps ik's own default."),
+    Setting("cuda-params", "--cuda-params", "string", "", "Multi-GPU & Graph", ("-cuda",),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Comma-separated CUDA backend parameters passed "
+                    "straight through to ik. Advanced; see the ik_llama.cpp docs for the "
+                    "accepted keys."),
+
+    # Performance & Batching: fused-op and attention switches.
+    Setting("no-flash-attn", "--no-flash-attn", "bool", False, "Performance & Batching",
+            ("-no-fa",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Disable Flash Attention, which ik enables by "
+                    "default. Slower and uses more memory; the fallback when a model or "
+                    "KV-cache type is not supported by the fused kernel."),
+    Setting("no-fused-up-gate", "--no-fused-up-gate", "bool", False,
+            "Performance & Batching", ("-no-fug",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Disable the fused up-gate FFN kernel that ik "
+                    "enables by default. Slower; a workaround for numerical trouble on "
+                    "specific quant types."),
+    Setting("no-fused-mul-multiadd", "--no-fused-mul-multiadd", "bool", False,
+            "Performance & Batching", ("-no-mmad",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Disable the fused multiply/multi-add kernel that "
+                    "ik enables by default. Slower; use only to isolate a kernel bug."),
+    Setting("dsa", "--dsa", "bool", False, "Performance & Batching", ("-dsa",),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Enable GLM DSA sparse attention. Applies to "
+                    "GLM-DSA architecture models only and does nothing elsewhere."),
+    Setting("dsa-top-k", "--dsa-top-k", "int", -1, "Performance & Batching", ("-dsatk",),
+            -1, 4096, 1, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Override the DSA indexer's top-k. -1 uses the "
+                    "value configured in the model. Only meaningful with dsa on."),
+
+    # Caching: ik's extra KV-cache layouts and its prompt/context checkpoints.
+    Setting("cache-type-k-first", "--cache-type-k-first", "string", "", "Caching",
+            ("-ctk-first",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. K-cache type for the FIRST N layers, written "
+                    "TYPE,N (for example q8_0,8). Lets early layers keep a higher "
+                    "precision than the rest. Empty leaves every layer on cache-type-k."),
+    Setting("cache-type-k-last", "--cache-type-k-last", "string", "", "Caching",
+            ("-ctk-last",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. K-cache type for the LAST N layers, written "
+                    "TYPE,N. Empty leaves every layer on cache-type-k."),
+    Setting("cache-type-v-first", "--cache-type-v-first", "string", "", "Caching",
+            ("-ctv-first",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. V-cache type for the FIRST N layers, written "
+                    "TYPE,N. Empty leaves every layer on cache-type-v."),
+    Setting("cache-type-v-last", "--cache-type-v-last", "string", "", "Caching",
+            ("-ctv-last",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. V-cache type for the LAST N layers, written "
+                    "TYPE,N. Empty leaves every layer on cache-type-v."),
+    Setting("k-cache-hadamard", "--k-cache-hadamard", "bool", False, "Caching", ("-khad",),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Apply a Hadamard transform to the K-cache before "
+                    "quantising it, which spreads outliers and recovers quality at low "
+                    "cache precision. Costs a little compute per token."),
+    Setting("v-cache-hadamard", "--v-cache-hadamard", "bool", False, "Caching", ("-vhad",),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. The V-cache counterpart of k-cache-hadamard."),
+    Setting("mtp-requantize-output-tensor", "--mtp-requantize-output-tensor", "string", "",
+            "Caching", ("-mtprot",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Requantise the output tensor to this type for "
+                    "multi-token prediction (for example q8_0). Empty leaves it as stored "
+                    "in the GGUF."),
+    Setting("ctx-checkpoints-interval", "--ctx-checkpoints-interval", "int", 512, "Caching",
+            ("-ctx-ckpt-i",), 0, 1048576, 128, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Minimum tokens between context checkpoints. "
+                    "Smaller = more checkpoints, faster recovery on a cache miss, more "
+                    "memory. 0 or less disables checkpointing."),
+    Setting("ctx-checkpoints-tolerance", "--ctx-checkpoints-tolerance", "int", 5, "Caching",
+            ("-ctx-ckpt-t",), 0, 65536, 1, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. How many tokens before the end of the full prompt "
+                    "a checkpoint is taken. 0 or less disables it."),
+    Setting("ctx-checkpoints-eviction", "--ctx-checkpoints-eviction", "enum", "variance",
+            "Caching", ("-ctx-ckpt-e",), enum=("variance", "fifo", "auto"),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Which context checkpoint to drop when the budget "
+                    "is full. 'variance' (the default) preserves coverage at a uniform "
+                    "interval; 'fifo' drops the oldest; 'auto' picks variance."),
+    Setting("cache-ram-similarity", "--cache-ram-similarity", "float", 0.5, "Caching",
+            ("-crs",), 0.0, 1.0, 0.05, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. How similar an incoming prompt must be to a cached "
+                    "one before the RAM prompt cache is reused. Lower = more reuse and "
+                    "more risk of reusing a poor match."),
+    Setting("cache-ram-n-min", "--cache-ram-n-min", "int", 0, "Caching", ("-cram-n-min",),
+            0, 1048576, 64, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Minimum number of cached tokens before the RAM "
+                    "prompt cache kicks in at all, so tiny prompts skip it. 0 = no floor."),
+
+    # Embedding & Reranking.
+    Setting("attention", "--attention", "enum", "auto", "Embedding & Reranking", (),
+            enum=("auto", "causal", "non-causal"), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Attention type used for embeddings. 'auto' uses "
+                    "the model's own default. Embedding models generally want non-causal; "
+                    "getting this wrong quietly degrades embedding quality."),
+    Setting("embd-output-format", "--embd-output-format", "enum", "default",
+            "Embedding & Reranking", (), enum=("default", "array", "json", "json+"),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Shape of the embedding response. 'array' is a bare "
+                    "list of lists, 'json' is the OpenAI-style object, 'json+' adds a "
+                    "cosine-similarity matrix. 'default' leaves ik's own format."),
+    Setting("embd-separator", "--embd-separator", "string", "", "Embedding & Reranking", (),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Separator placed between embedding inputs, for "
+                    "example <#sep#>. Empty keeps ik's default newline."),
+
+    # Server & Tools.
+    Setting("webui", "--webui", "enum", "auto", "Server & Tools", (),
+            enum=("auto", "none", "llamacpp"), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Which built-in web UI to serve. 'none' disables it "
+                    "and leaves only the API, which is what you want for a headless "
+                    "server. ik takes a name here where mainline takes no-webui."),
+    Setting("send-done", "--send-done", "bool", False, "Server & Tools", (),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Send an explicit 'done' signal to the client when "
+                    "generation completes. Some harnesses rely on it to close a stream."),
+    Setting("sql-save-file", "--sql-save-file", "string", "", "Server & Tools", (),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Save chat history into this SQLite database file. "
+                    "The path must be reachable INSIDE the container, so mount a writable "
+                    "directory for it. Everything users send is written there."),
+    Setting("sqlite-zstd-ext-file", "--sqlite-zstd-ext-file", "string", "",
+            "Server & Tools", (), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Path to a SQLite ZSTD extension used to compress "
+                    "the sql-save-file database. Container-side path."),
+    Setting("system-prompt-file", "--system-prompt-file", "string", "", "Server & Tools",
+            ("-spf",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. File holding a system prompt applied to every "
+                    "slot. Container-side path, so mount it."),
+    Setting("parallel-tool-calls", "--parallel-tool-calls", "bool", False, "Server & Tools",
+            ("-ptcall",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Let the model emit several tool calls in one turn "
+                    "instead of one at a time. The client has to support it."),
+    Setting("reasoning-tokens", "--reasoning-tokens", "string", "auto", "Server & Tools", (),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Which reasoning tokens to exclude when matching a "
+                    "request to a slot. 'auto' drops everything between <think> and "
+                    "</think>, 'none' keeps all tokens, or give a start,end pair such as "
+                    "[THINK],[/THINK]."),
+
+    # Speculative Decoding.
+    Setting("spec-autotune", "--spec-autotune", "bool", False, "Speculative Decoding", (),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Let ik tune the speculative-decoding parameters at "
+                    "run time to maximise tokens/sec, instead of holding the values you "
+                    "set."),
+    Setting("spec-ckpt-mode", "--spec-ckpt-mode", "enum", "auto", "Speculative Decoding", (),
+            enum=("auto", "per-step", "gpu-fallback", "cpu"), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. How architecture state is checkpointed during "
+                    "speculative decoding. 'per-step' avoids re-decoding on a rejected "
+                    "draft but costs memory; 'gpu-fallback' and 'cpu' re-decode instead. "
+                    "'auto' picks per-step on a full-GPU CUDA setup."),
+    Setting("p-split", "--p-split", "float", 0.1, "Speculative Decoding", ("-ps",),
+            0.0, 1.0, 0.05, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Probability threshold at which the draft tree "
+                    "splits during speculative decoding."),
+    Setting("draft-params", "--draft-params", "string", "", "Speculative Decoding",
+            ("-draft",), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Comma-separated draft-model parameters passed "
+                    "straight through to ik. Advanced; see the ik_llama.cpp docs."),
+
+    # Multimodal.
+    Setting("mtmd-kq-type", "--mtmd-kq-type", "enum", "f32", "Multimodal", (),
+            enum=("f32", "f16", "bf16"), engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Data type for the K*Q product in the multimodal "
+                    "projector. f16 saves memory on image-heavy workloads; f32 is the "
+                    "default and the safer choice."),
+    Setting("threads-mtmd", "--threads-mtmd", "int", 0, "Multimodal", ("-tm",), 0, 512, 1,
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. CPU threads used for multimodal image processing. "
+                    "0 = same as the batch threads value."),
+
+    # Context Extension: ik keeps group attention, which mainline dropped.
+    Setting("grp-attn-n", "--grp-attn-n", "int", 1, "Context Extension", ("-gan",),
+            1, 64, 1, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Group-attention factor for self-extend, a way to "
+                    "run past the trained context without RoPE scaling. Must divide the "
+                    "context evenly and pairs with grp-attn-w. 1 = disabled."),
+    Setting("grp-attn-w", "--grp-attn-w", "int", 512, "Context Extension", ("-gaw",),
+            0, 1048576, 128, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Group-attention width for self-extend. Only "
+                    "meaningful when grp-attn-n is above 1."),
+
+    # Sampling: samplers mainline removed but ik still carries.
+    Setting("tfs", "--tfs", "float", 1.0, "Sampling", (), 0.0, 1.0, 0.05,
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Tail-free sampling parameter z: trims the low "
+                    "-probability tail by its second derivative. 1.0 = disabled. Mainline "
+                    "removed this sampler."),
+    Setting("penalize-nl", "--penalize-nl", "bool", False, "Sampling", (),
+            engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Apply the repetition penalty to newline tokens as "
+                    "well. Off by default; turning it on can stop runaway blank lines."),
+
+    # ------------------------------------------------------------------
+    # Shared flags both engines accept that the catalog never exposed. These
+    # are a gap in the mainline audit rather than the ik one, found by the same
+    # 2026-09-01 diff and confirmed against llama.cpp:server-b10711 AND
+    # ik-llama-cpp:cu12-server, hence engine="any".
+    # ------------------------------------------------------------------
+    # ik ONLY, on purpose. Mainline marks --defrag-thold DEPRECATED in its help,
+    # and this catalog does not offer flags upstream has deprecated (the same
+    # rule that keeps out --direct-io). ik carries it undeprecated and still
+    # honours it, so ik users get it and mainline users do not.
+    Setting("defrag-thold", "--defrag-thold", "float", -1.0, "Performance & Batching",
+            ("-dt",), -1.0, 1.0, 0.05, engine="ik_llama.cpp",
+            tooltip="ik_llama.cpp only. Defragment the KV cache once this fraction of it "
+                    "is holes left by finished sequences. Long-running servers with many "
+                    "short requests fragment over time. Negative = never defragment. "
+                    "Mainline llama.cpp has deprecated this flag, so it is not offered "
+                    "there."),
+    Setting("grammar", "--grammar", "string", "", "Sampling", (),
+            tooltip="GBNF grammar constraining every generation on this server. Usually "
+                    "better sent per request; set here only when the whole server should "
+                    "answer in one shape."),
+    Setting("grammar-file", "--grammar-file", "string", "", "Sampling", (),
+            tooltip="Read the GBNF grammar from this file instead of inline. "
+                    "Container-side path, so mount it."),
+    Setting("json-schema", "--json-schema", "string", "", "Sampling", (),
+            tooltip="Constrain generations to this JSON schema ({} for any JSON object). "
+                    "Converted to a grammar internally. For schemas with external $refs "
+                    "use grammar instead."),
+    Setting("logit-bias", "--logit-bias", "string", "", "Sampling", (),
+            tooltip="Nudge specific tokens, written TOKEN_ID+BIAS or TOKEN_ID-BIAS "
+                    "(for example 15043+1). One entry here; use raw-args for several."),
+    Setting("special", "--special", "bool", False, "Server & Tools", ("-sp",),
+            tooltip="Include special/control tokens in the output instead of hiding them. "
+                    "Useful for debugging a chat template, noisy otherwise."),
+    Setting("spm-infill", "--spm-infill", "bool", False, "Server & Tools", (),
+            tooltip="Use suffix/prefix/middle ordering for the infill endpoint instead of "
+                    "prefix/suffix/middle. Some code models expect this order."),
+    Setting("ui-mcp-proxy", "--ui-mcp-proxy", "bool", False, "Server & Tools", (),
+            danger=True,
+            tooltip="EXPERIMENTAL. Enable the web UI's MCP CORS proxy, which lets the "
+                    "browser UI reach other MCP servers through this one. Upstream says "
+                    "do not enable it in untrusted environments."),
+    Setting("lookup-cache-static", "--lookup-cache-static", "string", "",
+            "Speculative Decoding", ("-lcs",),
+            tooltip="Static n-gram lookup cache used for lookup decoding. Read but never "
+                    "updated while running. Container-side path."),
+    Setting("lookup-cache-dynamic", "--lookup-cache-dynamic", "string", "",
+            "Speculative Decoding", ("-lcd",),
+            tooltip="Dynamic n-gram lookup cache for lookup decoding, updated as "
+                    "generation proceeds. Container-side path, and it must be writable."),
 ]
 
 # Flags mainline llama.cpp accepts but ik_llama.cpp does NOT.
@@ -863,6 +1246,19 @@ _ALL = [
 # while undocumented), so every entry here was confirmed by running the flag
 # against ghcr.io/ikawrakow/ik-llama-cpp:cu12-server and checking for "unknown
 # argument". Regenerate with tests/fixtures/regen_ik_flags.sh.
+#
+# SHORTER THAN IT WAS: five settings left this list in the 2026-09-01 completeness
+# pass without losing anything on mainline. Mainline renamed each of these and
+# kept the ik spelling as an alias, so switching `flag` to the older spelling
+# makes ONE setting serve both engines instead of gating it to mainline:
+#     --typical-p        -> --typical
+#     --sampler-seq      -> --sampling-seq
+#     --spec-draft-ngl   -> --gpu-layers-draft
+#     --spec-draft-threads -> --threads-draft
+#     --spec-draft-device  -> --device-draft
+# The Setting keys are unchanged, so saved profiles keep working. This leans on
+# mainline keeping those aliases; test_catalog_upstream_flags pins every flag
+# against both engines, so a future removal shows up as a fixture diff.
 MAINLINE_ONLY_FLAGS: frozenset = frozenset({
     "--agent", "--api-prefix", "--cache-reuse", "--checkpoint-min-step",
     "--cors-headers", "--cors-methods", "--cors-origins", "--cpu-mask",
@@ -875,17 +1271,17 @@ MAINLINE_ONLY_FLAGS: frozenset = frozenset({
     "--no-log-timestamps", "--no-models-autoload", "--no-op-offload", "--no-repack",
     "--no-spec-draft-backend-sampling", "--no-webui", "--poll", "--poll-batch",
     "--prio", "--prio-batch", "--props", "--reasoning-preserve", "--reranking",
-    "--reuse-port", "--sampler-seq", "--sleep-idle-seconds", "--spec-default",
-    "--spec-draft-cpu-moe", "--spec-draft-device", "--spec-draft-n-cpu-moe",
-    "--spec-draft-n-max", "--spec-draft-n-min", "--spec-draft-ngl",
+    "--reuse-port", "--sleep-idle-seconds", "--spec-default",
+    "--spec-draft-cpu-moe", "--spec-draft-n-cpu-moe",
+    "--spec-draft-n-max", "--spec-draft-n-min",
     "--spec-draft-override-tensor", "--spec-draft-p-min", "--spec-draft-p-split",
-    "--spec-draft-threads", "--spec-ngram-map-k-min-hits", "--spec-ngram-map-k-size-m",
+    "--spec-ngram-map-k-min-hits", "--spec-ngram-map-k-size-m",
     "--spec-ngram-map-k-size-n", "--spec-ngram-map-k4v-min-hits",
     "--spec-ngram-map-k4v-size-m", "--spec-ngram-map-k4v-size-n",
     "--spec-ngram-mod-n-match", "--spec-ngram-mod-n-max", "--spec-ngram-mod-n-min",
     "--spec-ngram-simple-min-hits", "--spec-ngram-simple-size-m",
     "--spec-ngram-simple-size-n", "--sse-ping-interval", "--swa-full", "--tags",
-    "--tools", "--typical-p",
+    "--tools",
 })
 
 # Applied here rather than as engine="llama.cpp" on 75 separate Setting() calls:
@@ -911,7 +1307,7 @@ ROUTER_ONLY_KEYS: frozenset = frozenset({"models-max", "models-autoload"})
 # unreachable -- the form really is filtered, so keep it that way.
 HOST_KEYS: frozenset = frozenset({
     "models-max", "models-autoload", "sleep-idle-seconds",
-    "port", "api-key", "threads-http", "metrics", "no-webui",
+    "port", "api-key", "threads-http", "metrics", "no-webui", "ui-mcp-proxy",
     "tools",
     "cors-origins", "cors-methods", "cors-headers", "cors-credentials",
     "sse-ping-interval", "mcp-servers-config", "mcp-servers-json",
