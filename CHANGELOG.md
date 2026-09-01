@@ -26,11 +26,24 @@ catalog plus raw args, typed mounts, mmproj/LoRA/embedding/rerank support, a
 router mode, multi-node control and RPC VRAM+RAM pooling (experimental), live
 Monitor (tok/s, KV, per-instance cards), benchmarks, and a headless/dry-run CLI.
 
-The settings catalog covers 184 flags, audited against llama.cpp b10711 and
-against ik_llama.cpp, with each engine's accepted-flag list pinned by a test so
-an upstream rename fails a test rather than a launch. Flags only mainline
-accepts are tagged as such and never reach an ik launch. LoRA adapters can be
-rescaled on a running server through /lora-adapters without a restart.
+The settings catalog covers 254 flags, audited in both directions against
+llama.cpp b10711 and against ik_llama.cpp, with each engine's accepted-flag
+list pinned by a test so an upstream rename fails a test rather than a launch.
+Flags only mainline accepts are tagged as such and never reach an ik launch,
+and ik_llama.cpp's own surface is now covered too: an ik profile reaches 184
+settings where it previously reached 109. That includes ik's MoE expert
+placement and prefetch, multi-GPU graph split and exchange precision, extra
+per-layer KV-cache types, context checkpoints, and its embedding output
+formats. Five settings that mainline had renamed now use the spelling both
+engines accept, so they work on ik instead of being mainline-only.
+
+Two divergence bugs fell out of that audit and are fixed: a draft model on an
+ik profile emitted mainline's --spec-draft-model, which ik rejects outright, so
+the launch died; and router mode was selectable with the ik engine even though
+ik has no router at all, which is now refused with an explanatory error.
+
+LoRA adapters can be rescaled on a running server through /lora-adapters
+without a restart.
 
 A Build helper tab generates copyable build commands for compiling either
 engine from source (a native cmake configure/build pair, or a Containerfile
