@@ -22,6 +22,12 @@
 # entirely, which would misreport them as unsupported.
 set -euo pipefail
 
+# Byte-stable sorting: the default locale collates punctuation differently, so
+# a regeneration on another machine produced a 136-line reordering diff with an
+# identical flag set. Pin the collation so a real fixture diff always means the
+# engine changed.
+export LC_ALL=C
+
 IMAGE="${IK_IMAGE:-ghcr.io/ikawrakow/ik-llama-cpp:cu12-server}"
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$HERE/ik_llama_server_flags_cu12.txt"
@@ -56,7 +62,7 @@ done
   echo "# TWO sources, because ik's --help under-reports what its parser accepts:"
   echo "#   1. every flag printed by 'llama-server --help'"
   echo "#   2. flags confirmed accepted by EXECUTING them (undocumented but valid):"
-  echo "#      $(echo "$extras" | tr '\n' ' ' | sed 's/ *$//')"
+  echo "#      $(echo "$extras" | grep -E '^-' | sort -u | paste -sd, - | sed 's/,/, /g')"
   echo "#"
   echo "# Regenerate with tests/fixtures/regen_ik_flags.sh."
   printf '%s\n%s' "$help_flags" "$extras" | grep -E '^-' | sort -u
