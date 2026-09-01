@@ -399,6 +399,22 @@ def test_native_binary_present_and_executable_passes():
     assert errors == []
 
 
+def test_ik_engine_router_is_refused():
+    """ik_llama.cpp has no router: its llama-server carries no --models-preset,
+    so the container would die on "unknown argument" the moment it started.
+    Verified by execution against ik-llama-cpp:cu12-server."""
+    issues = validate(_router(runtime=Runtime(engine="ik_llama.cpp"), image="ik-llama-cpp"),
+                      members=[(RouterMember(profile="Qwen"), _member_profile())],
+                      api_key_present=True)
+    assert any("router" in m.lower() and "ik_llama.cpp" in m for m in _errors(issues))
+
+
+def test_mainline_engine_router_is_allowed():
+    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), _member_profile())],
+                      api_key_present=True)
+    assert not any("does not support router mode" in m for m in _errors(issues))
+
+
 def test_native_router_is_refused():
     p = Profile(name="n", mode="router",
                 runtime=Runtime(launch_mode="native", native_binary="/bin/sh"))

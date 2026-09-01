@@ -88,6 +88,14 @@ def validate(profile: Profile, running_ports: tuple = (),
         issues.append(Issue("error",
                             f"Runtime '{profile.runtime.binary}' not found on PATH."))
 
+    # ik_llama.cpp has no router: its llama-server carries no --models-preset (or
+    # any preset/router option at all), so a router launch dies immediately on
+    # "unknown argument". Verified against ik-llama-cpp:cu12-server.
+    if profile.mode == "router" and profile.runtime.engine == "ik_llama.cpp":
+        issues.append(Issue("error",
+            "ik_llama.cpp does not support router mode; it has no --models-preset. "
+            "Switch the Engine to llama.cpp for router profiles."))
+
     if not is_native:
         img = profile.image.lower()
         looks_ik = "ik-llama" in img or "ik_llama" in img
