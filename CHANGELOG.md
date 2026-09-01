@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format is based on
 [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Each released section below is the verbatim source for that release's GitHub
-notes — `scripts/release-notes.sh <version>` extracts it. Edit the entry here,
+notes; `scripts/release-notes.sh <version>` extracts it. Edit the entry here,
 not on the release page, so the two never drift.
 
 ## [Unreleased]

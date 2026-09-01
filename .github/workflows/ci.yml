@@ -16,9 +16,9 @@ jobs:
     name: test (py${{ matrix.python-version }})
     steps:
       - uses: actions/checkout@v5
-      # Qt runtime libs PySide6 needs headless (offscreen). No audio libs —
+      # Qt runtime libs PySide6 needs headless (offscreen). No audio libs:
       # Llama Launcher uses only QtCore/QtGui/QtWidgets. Mirrored by the
-      # localci Containerfile — keep the two lists in sync.
+      # localci Containerfile, so keep the two lists in sync.
       - name: Install Qt runtime libraries
         run: |
           sudo apt-get update

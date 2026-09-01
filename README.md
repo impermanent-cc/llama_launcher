@@ -254,10 +254,6 @@ profile you're editing.
 
 ## Benchmark
 
-![Benchmark tab: repeatable tok/s measurement across prompt sizes](assets/screenshots/bench.png)
-
-*The Benchmark tab: pick prompt sizes, warmup, and repeats; results report prompt-eval and generation tok/s per size.*
-
 The **Benchmark** tab runs a controlled, repeatable speed
 measurement so a config change (flags or model) can be compared apples-to-apples.
 It POSTs standardized filler prompts to the running server and reads llama.cpp's
