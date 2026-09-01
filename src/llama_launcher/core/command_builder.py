@@ -172,7 +172,11 @@ _STRUCTURAL_ALIASES = {
     "-m": "--model",
     "--model": "--model",
     "--mmproj": "--mmproj",
+    # Every draft-model spelling folds to one canonical slot so raw_args dedup
+    # works whichever engine is selected (see _draft_model_flag).
     "--spec-draft-model": "--spec-draft-model",
+    "--model-draft": "--spec-draft-model",
+    "-md": "--spec-draft-model",
     "--host": "--host",
     "--port": "--port",
     "--models-preset": "--models-preset",
@@ -195,6 +199,18 @@ _ALIAS_FOLD = _build_alias_fold(CATALOG)
 
 def _canonical_flag(flag: str) -> str:
     return _ALIAS_FOLD.get(flag, flag)
+
+
+def _draft_model_flag(engine: str) -> str:
+    """The draft-model flag spelling this engine's parser accepts.
+
+    Mainline renamed it to --spec-draft-model and keeps -md/--model-draft as
+    aliases; ik_llama.cpp only ever had -md/--model-draft and rejects the new
+    spelling outright ("unknown argument"), which killed the launch for any ik
+    profile with a draft model set. Probed by execution against
+    ik-llama-cpp:cu12-server and llama.cpp:server-b10711.
+    """
+    return "--model-draft" if engine == "ik_llama.cpp" else "--spec-draft-model"
 
 
 # Same flag rule as router_preset._FLAG_RE: one/two dashes then a letter, so
@@ -408,7 +424,7 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
             pairs.append(("--lora-scaled", f"{lora.path}:{lora.scale}"))
 
     if profile.draft_model:
-        pairs.append(("--spec-draft-model", profile.draft_model))
+        pairs.append((_draft_model_flag(profile.runtime.engine), profile.draft_model))
 
     port = profile_port(profile)
     # --load-mode supersedes the legacy --no-mmap/--mlock flags upstream; mixing
