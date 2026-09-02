@@ -9,8 +9,8 @@ class StatCard(QFrame):
 
     Shows the profile/port, a health dot, a headline stat (gen tok/s, or "ready"
     for an embedding/rerank server, or "router" for a router) and KV%. Clickable
-    to focus (emits `selected`). Its action button is dual-mode, carried over
-    from the old instances table: running -> ■ emits `stop_requested`;
+    to focus (emits `selected`). Its action button is dual-mode:
+    running -> ■ emits `stop_requested`;
     stopped -> ✕ emits `remove_requested` (podman rm a dead container). Reused
     across ticks -- the owning panel calls update_row() to refresh labels in place.
     """
@@ -94,7 +94,7 @@ class StatCard(QFrame):
             return                    # calls this every poll even when unchanged)
         self._selected = on
         # Target the class name, not QFrame -- QLabel is a QFrame subclass, so a
-        # bare "QFrame { border: ... }" selector cascaded onto every child label.
+        # bare "QFrame { border: ... }" selector cascades onto every child label.
         self.setStyleSheet(
             "StatCard { border: 2px solid palette(highlight); border-radius: 4px; }" if on
             else "StatCard { border: 1px solid palette(mid); border-radius: 4px; }")

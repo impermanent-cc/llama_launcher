@@ -50,10 +50,9 @@ def _worker_device(name: str, mode: str, prof: Profile | None) -> str:
 def worker_card_title(inst: Instance) -> str:
     """Display title for an rpc-worker StatCard: "rpc-worker · <node>[ · <device>]".
 
-    A worker container shares its pool head's `llama-launcher.profile` label
-    (Task 4), so without this it would render with the SAME profile name/port
-    as the head -- indistinguishable cards. This renders the worker's own
-    identity instead.
+    A worker container shares its pool head's `llama-launcher.profile` label,
+    so the profile name/port cannot tell its card from the head's; the title
+    carries the worker's own identity instead.
     """
     title = f"rpc-worker · {inst.node}"
     if inst.device:

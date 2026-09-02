@@ -18,7 +18,7 @@ def _opt_in(monkeypatch):
 
 
 def test_close_quits_by_default_even_with_tray(qtbot):
-    # Regression: tray available but minimize-to-tray NOT opted in -> close quits.
+    # tray available but minimize-to-tray NOT opted in -> close quits.
     w = mw.MainWindow(); qtbot.addWidget(w)
     assert w._minimize_to_tray is False
     assert w.tray is None

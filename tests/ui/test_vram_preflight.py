@@ -36,9 +36,9 @@ def test_vram_check_none_when_unknown(qtbot, monkeypatch):
 
 
 def test_vram_check_sums_free_across_two_gpus(qtbot, monkeypatch):
-    # Regression (user report): 16+12 GB rig, 14.7 + 7.3 GiB free, model ~20.2
-    # GiB. Split across both GPUs it fits (~22 GiB), so NO warning -- the old
-    # max()-of-one-GPU check wrongly warned.
+    # 16+12 GB rig, 14.7 + 7.3 GiB free, model ~20.2 GiB. Split across both
+    # GPUs it fits (~22 GiB), so NO warning: the budget is the sum across
+    # GPUs, not one card's max.
     gib = 1024 ** 3
     monkeypatch.setattr(mw.model_info, "read_gguf_meta",
         lambda path: GgufMeta(arch="llama", n_layers=1, n_head=8, n_head_kv=8,
@@ -53,7 +53,7 @@ def test_vram_check_sums_free_across_two_gpus(qtbot, monkeypatch):
 
 def test_vram_check_split_none_uses_single_gpu(qtbot, monkeypatch):
     # split-mode none puts everything on main-gpu, so the same model that fits
-    # across both GPUs no longer fits on one 16 GB card -> warns, and the message
+    # across both GPUs does not fit on one 16 GB card -> warns, and the message
     # reports the single-card free, not the sum.
     gib = 1024 ** 3
     monkeypatch.setattr(mw.model_info, "read_gguf_meta",

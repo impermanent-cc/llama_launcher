@@ -57,8 +57,8 @@ def test_valid_ssh_target_still_rejects_option_smuggle():
 
 
 def test_host_of_bracketed_ipv6_without_port():
-    # rsplit(':',1) mangled a bracketed IPv6 with no explicit port into a broken
-    # host; the bare address must come back so url_host can re-bracket it.
+    # A bracketed IPv6 with no explicit port comes back as the bare address
+    # (not an rsplit(':',1) fragment) so url_host can re-bracket it.
     n = Node(name="v6", kind="remote", connection="v6", ssh_target="[2001:db8::1]")
     assert host_of(n) == "2001:db8::1"
 

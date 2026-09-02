@@ -29,12 +29,12 @@ def test_update_badge_is_flat_button(qtbot):
 
 def test_update_badge_shown_and_clickable_after_newer_build(qtbot, monkeypatch):
     """When run_update_check finds a newer build, the badge shows the tag and clicking
-    it triggers on_fetch_latest (verified by capturing registry.fetch_latest).
+    it triggers on_fetch_latest (captured via registry.fetch_latest).
 
-    on_fetch_latest now runs the lookup on a worker thread (see
-    tests/ui/test_fetch_latest_ui.py), so _UpdateWorker.start is stubbed to emit
-    `found` synchronously here rather than spinning a real QThread, and the
-    resulting info dialog is stubbed to avoid a modal exec() in headless tests.
+    on_fetch_latest runs the lookup on a worker thread, so _UpdateWorker.start
+    is stubbed to emit `found` synchronously rather than spinning a real
+    QThread, and the resulting info dialog is stubbed to avoid a modal exec()
+    in headless tests.
     """
     monkeypatch.setattr(mw.registry, "fetch_latest",
                         lambda repo, prefix, timeout=10.0: "server-cuda12-b9999")

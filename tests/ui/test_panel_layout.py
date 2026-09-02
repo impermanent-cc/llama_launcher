@@ -3,8 +3,8 @@ from llama_launcher.ui.panels.lora_panel import LoraPanel
 
 
 def test_mounts_host_container_columns_start_wide(qtbot):
-    # Interactive (user-resizable, see test_resizable_columns) with the path
-    # columns given the lion's share of the initial width.
+    # Interactive (user-resizable) with the path columns given the lion's
+    # share of the initial width.
     p = MountsPanel()
     qtbot.addWidget(p)
     assert p.table.columnWidth(0) >= 150     # Host
@@ -13,7 +13,7 @@ def test_mounts_host_container_columns_start_wide(qtbot):
 
 def test_mounts_table_has_a_multi_row_floor(qtbot):
     # Folders must keep 2-4 rows visible, not collapse to ~1 when the Environment
-    # form is crowded (regression: native-launch rows squeezed it to one row).
+    # form is crowded with the native-launch rows.
     p = MountsPanel()
     qtbot.addWidget(p)
     assert p.table.minimumHeight() >= 140

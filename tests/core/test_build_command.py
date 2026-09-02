@@ -149,8 +149,7 @@ def test_default_images_cuda_and_cpu():
 
 
 def test_render_defines_skips_blank_non_bool_values():
-    # A cleared string field must emit nothing, never -DGGML_BLAS_VENDOR=''
-    # (mirrors command_builder._render_setting's blank guard).
+    # A cleared string field must emit nothing, never -DGGML_BLAS_VENDOR=''.
     c = BuildConfig(options={"blas-vendor": ""})
     assert render_defines(c) == []
 

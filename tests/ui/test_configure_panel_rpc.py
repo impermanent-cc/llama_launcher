@@ -53,8 +53,7 @@ def test_load_profile_round_trips_rpc_workers(main_window):
 
 
 def test_check_fit_button_only_shown_in_rpc_mode(main_window):
-    # Mirrors test_container_mode_keeps_node_enabled_and_hides_workers above:
-    # select rpc first so switching to container fires the mode-changed
+    # Select rpc first so switching to container fires the mode-changed
     # handler under test even when the combo's default index is already
     # container.
     p = main_window._configure_panel
@@ -67,9 +66,9 @@ def test_check_fit_button_only_shown_in_rpc_mode(main_window):
 
 
 def test_gather_check_fit_wires_probes_into_validate(monkeypatch, tmp_path):
-    """R2: the Check-fit gather must pass the probed worker_image_present /
-    worker_free_mb dicts into validate(...) so Task 7's RPC warnings surface,
-    and must return validate's issues alongside the headline string."""
+    """The Check-fit gather passes the probed worker_image_present /
+    worker_free_mb dicts into validate(...) so the RPC warnings surface, and
+    returns validate's issues alongside the headline string."""
     profile = Profile(name="pool", image="img", runtime=Runtime(
         launch_mode="rpc",
         rpc_workers=[RpcWorker(node="local", device="CUDA0", mem_mb=0)]))
@@ -115,3 +114,16 @@ def test_check_fit_click_renders_headline_and_issues(main_window, monkeypatch, q
     qtbot.waitUntil(lambda: not p._check_fit_inflight, timeout=3000)
     qtbot.waitUntil(lambda: "HEADLINE TEXT" in p.check_fit_label.text(), timeout=3000)
     assert "watch out" in p.check_fit_label.text()
+
+
+def test_fresh_window_hides_launch_mode_rows_in_default_container_mode(main_window):
+    # Startup loads no profile and the launch-mode combo defaults to
+    # "container", so currentIndexChanged never fires; the native-only and
+    # RPC-only rows must still start hidden.
+    p = main_window._configure_panel
+    assert p.launch_mode_combo.currentData() == "container"
+    assert not p._rpc_workers_row_visible()
+    assert not p._check_fit_row_visible()
+    index = p._left_form.getWidgetPosition(p._native_binary_row)[0]
+    assert index >= 0 and not p._left_form.isRowVisible(index)
+    assert p.node_combo.isEnabled()

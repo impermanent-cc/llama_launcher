@@ -70,7 +70,7 @@ def test_on_launch_rpc_refuses_when_pool_already_running(main_window, monkeypatc
     """A second Launch click over a LIVE pool must not call rpc.launch_pool --
     that would tear down the current pool's live ssh tunnels and then fail on
     the worker container name collision, degrading a healthy pool. It must
-    refuse instead, the way the native branch already does."""
+    refuse instead, the way the native branch does."""
     ctl = main_window._launch
     main_window._configure_panel.load_profile(_rpc_profile())
     monkeypatch.setattr(ctl, "_validate_or_warn", lambda: True)

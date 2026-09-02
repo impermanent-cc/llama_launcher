@@ -47,8 +47,8 @@ def test_dangerous_run_args_allows_benign():
 
 
 def test_dangerous_run_args_flags_sensitive_subpaths_and_socket():
-    # The screen was exact-match on top-level dirs, so a sensitive *subpath* or
-    # the runtime socket slipped through with no warning -> container escape.
+    # A sensitive *subpath* and the runtime socket are screened, not only
+    # exact top-level dirs; either one is a container escape.
     assert dangerous_run_args("-v /var/run/docker.sock:/var/run/docker.sock")
     assert dangerous_run_args("-v /run/user/1000/podman/podman.sock:/s")
     assert dangerous_run_args("-v /home/me/.ssh:/keys:ro")

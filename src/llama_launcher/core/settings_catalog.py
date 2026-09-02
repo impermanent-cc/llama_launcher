@@ -30,8 +30,8 @@ class Setting:
 KV_CACHE_TYPES = ("f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0", "q5_1")
 
 # ik_llama.cpp-only KV-cache quant types layered onto -ctk/-ctv when the engine is
-# ik. Source-verified (common/common.cpp): only q6_0 and q8_KV are added beyond
-# mainline in the default build. NOTE the capital "KV" in q8_KV; ik's parser is
+# ik: in ik's default build (common/common.cpp) q6_0 and q8_KV are the only types
+# beyond mainline. NOTE the capital "KV" in q8_KV; ik's parser is
 # case-sensitive. The wider ik iq-quants need GGML_IQK_FA_ALL_QUANTS=ON images.
 IK_EXTRA_KV_CACHE_TYPES = ("q6_0", "q8_KV")
 
@@ -156,13 +156,8 @@ _ALL = [
                     "anything other than auto and the legacy no-mmap/mlock flags below are "
                     "ignored. Needs an image new enough to know --load-mode; the auto "
                     "value itself needs images from 2026-08-11 or later."),
-    # Upstream renamed this flag to --lazy-mode; --tensor-read-lazy is not
-    # accepted by current builds (verified against b10711), so setting anything
-    # other than the "auto" sentinel used to fail the launch outright. The KEY
-    # stays "tensor-read-lazy" on purpose: it is internal, saved profiles are
-    # written with it, and the form labels rows by flag, so renaming the key
-    # would silently drop the value from every existing profile for no visible
-    # gain.
+    # Upstream's flag is --lazy-mode. The key stays "tensor-read-lazy" because
+    # saved profiles are written with it and the form labels rows by flag.
     Setting("tensor-read-lazy", "--lazy-mode", "enum", "auto", "GPU & Memory", ("-lzm",),
             enum=("on", "auto", "off"),
             tooltip="On-demand reading of certain tensors, e.g. per-layer embeddings. "
@@ -459,9 +454,9 @@ _ALL = [
 
     # Router (llama-server started with no model; see tools/server/README.md
     # "Using multiple models"). These are meaningful only on a router process.
-    # The default MUST mirror upstream, not our advice: widgets emit only when
-    # value != default, so a default of 1 meant "leave it alone" emitted nothing
-    # and the server silently ran 4.
+    # The default mirrors upstream, not our advice: widgets emit only when
+    # value != default, so a launcher-chosen default would emit nothing and
+    # the server would silently run upstream's.
     Setting("models-max", "--models-max", "int", 4, "Router", (), 0, 64, 1,
             tooltip="Maximum number of models the router keeps loaded at once. "
                     "0 = unlimited. llama.cpp defaults to 4; SET THIS TO 1 on a "
@@ -868,9 +863,9 @@ _ALL = [
             tooltip="ik_llama.cpp only. Multi-head Latent Attention for DeepSeek-style "
                     "models. 'auto' leaves ik's default; 0 disables; 1/2/3 select MLA "
                     "variants."),
-    # Default MUST mirror current ik upstream (256 since ik PR #2312), not our
-    # advice: widgets emit only when value != default, so with the old default
-    # of 0 "no cap" emitted nothing and current ik silently ran 256.
+    # The default mirrors current ik upstream (256, ik PR #2312), not our
+    # advice: widgets emit only when value != default, so a default of 0
+    # "no cap" would emit nothing and ik would silently run 256.
     Setting("attention-max-batch", "--attention-max-batch", "int", 256, "Performance & Batching",
             ("-amb",),
             0, 65536, 64, engine="ik_llama.cpp",
@@ -900,25 +895,20 @@ _ALL = [
                     "f16 is the default."),
 
     # ------------------------------------------------------------------
-    # ik_llama.cpp completeness pass (2026-09-01).
+    # Flags ik_llama.cpp accepts that mainline does not (the reverse of
+    # MAINLINE_ONLY_FLAGS). ik's fork value is mostly here: MoE offload,
+    # expert prefetch, multi-GPU graph split and extra KV-cache layouts.
     #
-    # The earlier ik work went one direction only: catalog flags that ik
-    # REJECTS (see MAINLINE_ONLY_FLAGS). These are the other direction, flags
-    # ik accepts that the catalog never exposed, so an ik user could not reach
-    # them at all. ik's fork value is mostly here: MoE offload, expert
-    # prefetch, multi-GPU graph split and extra KV-cache layouts.
-    #
-    # METHOD (do not shortcut it): ik's --help both under-reports its parser
-    # AND mis-states arity, so every entry below was confirmed by EXECUTING the
-    # flag against ghcr.io/ikawrakow/ik-llama-cpp:cu12-server. Two traps found
-    # doing it:
+    # Every entry is probe-derived by EXECUTING the flag against
+    # ghcr.io/ikawrakow/ik-llama-cpp:cu12-server, because ik's --help both
+    # under-reports its parser and mis-states arity:
     #   * several flags documented "(default: 0)" or "(default: 1)" are bare
     #     switches that take no value at all (--merge-qkv, --split-mode-f16,
     #     --k-cache-hadamard, --validate-quants, --scheduler-async).
-    #   * ik does NOT validate enum values at parse time. It accepted "lru" for
-    #     --ctx-checkpoints-eviction and "off" for --webui, both nonsense. So a
-    #     probe proves a flag takes a value, never which values are legal;
-    #     every enum below is taken from the documented help text only.
+    #   * ik does NOT validate enum values at parse time (it accepts "lru" for
+    #     --ctx-checkpoints-eviction and "off" for --webui), so a probe proves
+    #     a flag takes a value, never which values are legal; every enum below
+    #     is taken from the documented help text only.
     #
     # Grouped by function rather than into one "ik_llama.cpp" bucket: at this
     # size a single flat section is unnavigable, and for_engine() already hides
@@ -1221,10 +1211,8 @@ _ALL = [
                     "well. Off by default; turning it on can stop runaway blank lines."),
 
     # ------------------------------------------------------------------
-    # Shared flags both engines accept that the catalog never exposed. These
-    # are a gap in the mainline audit rather than the ik one, found by the same
-    # 2026-09-01 diff and confirmed against llama.cpp:server-b10711 AND
-    # ik-llama-cpp:cu12-server, hence engine="any".
+    # Flags both engines accept (probed against llama.cpp:server-b10711 AND
+    # ik-llama-cpp:cu12-server), hence engine="any".
     # ------------------------------------------------------------------
     # ik ONLY, on purpose. Mainline marks --defrag-thold DEPRECATED in its help,
     # and this catalog does not offer flags upstream has deprecated (the same
@@ -1276,14 +1264,13 @@ _ALL = [
 # Flags mainline llama.cpp accepts but ik_llama.cpp does NOT.
 #
 # ik is a fork that diverged, and it rejects a large slice of the shared surface.
-# Without this gate those settings reached an ik launch and died on "unknown
-# argument" the moment a user set one (they are only emitted when actually
-# present in a profile's settings, so it broke the setting, not every launch).
+# Without this gate a set value from this list reaches an ik launch and dies on
+# "unknown argument".
 #
 # PROBE-DERIVED, not parsed from --help: ik's help under-reports what its parser
 # accepts (--n-gpu-layers, --n-predict, --embeddings and --alias are all accepted
-# while undocumented), so every entry here was confirmed by running the flag
-# against ghcr.io/ikawrakow/ik-llama-cpp:cu12-server and checking for "unknown
+# while undocumented), so every entry here comes from running the flag against
+# ghcr.io/ikawrakow/ik-llama-cpp:cu12-server and checking for "unknown
 # argument". Regenerate with tests/fixtures/regen_ik_flags.sh.
 #
 # When mainline keeps the ik spelling as an alias (--typical for --typical-p,

@@ -52,8 +52,8 @@ _ENGINE_DEFAULT_IMAGE = {
 def _gather_check_fit(profile: Profile, base_dir, estimate_bytes: int):
     """Off-UI-thread body of the RPC "Check fit" preflight: probe every
     worker's node for free VRAM/RAM + image presence, build the headline, and
-    run `validate()` with those probes wired in so Task 7's per-node RPC
-    warnings (image missing, a --mem pledge exceeding what's free) surface.
+    run `validate()` with those probes wired in so the per-node RPC warnings
+    (image missing, a --mem pledge exceeding what's free) surface.
     Returns (headline_text, [Issue, ...]).
     """
     gpus_reader = pool_preflight.default_gpus_reader(base_dir)
@@ -163,8 +163,7 @@ class ConfigurePanel(QWidget):
 
         body = QHBoxLayout(self)
         # Trim the body's own margins so the Environment/Settings columns get a
-        # little extra vertical room (the bottom command-preview strip is kept
-        # compact rather than made draggable).
+        # little extra vertical room.
         body.setContentsMargins(4, 4, 4, 2)
 
         # LEFT: environment (image, model, runtime/GPU, mounts editor)
@@ -301,10 +300,9 @@ class ConfigurePanel(QWidget):
             "router mode that's the router container; each router member's kill "
             "delay is the per-row 'Stop timeout (s)' in the Router members table.")
 
-        # A table, not a list: model id / load-on-startup / stop-timeout are all
-        # per-member settings the spec requires to be editable, and inline
-        # editing keeps them reachable without a modal dialog (which would hang
-        # the headless test run).
+        # A table, not a list: model id / load-on-startup / stop-timeout are
+        # per-member settings edited inline, which keeps them reachable without
+        # a modal dialog (a modal would hang the headless test run).
         self.members_list = QTableWidget(0, 4)
         self.members_list.setHorizontalHeaderLabels(
             ["Profile", "Model id (harness)", "Load at start", "Stop timeout (s)"])
@@ -530,7 +528,7 @@ class ConfigurePanel(QWidget):
         self.stop_btn.clicked.connect(self.window._launch.on_stop)
         self.restart_btn.clicked.connect(self.window._launch.on_restart)
 
-    # -- Configure marshalling / handlers (moved from MainWindow) -----------
+    # -- Configure marshalling / handlers -----------------------------------
 
     def _profile_name(self) -> str:
         """Current profile name from the Name field, falling back to a default
@@ -685,10 +683,9 @@ class ConfigurePanel(QWidget):
         self.rpc_workers_table.set_node_names(self._node_names())
 
     def _on_bind_host_changed(self, *_) -> None:
-        """The exposure banner is derived from the bind address, so it must
-        track edits live in router mode -- it used to update only on a mode
-        round-trip, leaving a stale "you are exposed" (or worse, a stale
-        all-clear) on a security-critical surface."""
+        """The exposure banner is derived from the bind address, so it tracks
+        edits live in router mode; a stale "you are exposed" (or worse, a stale
+        all-clear) on a security-critical surface is not acceptable."""
         self.refresh_preview()
         if self.mode_combo.currentData() == "router":
             # ensure_key=False: this fires per keystroke; it must never mint
@@ -787,14 +784,13 @@ class ConfigurePanel(QWidget):
     def _member_candidates(self) -> list[str]:
         """Non-router profiles eligible to be added as router members.
 
-        Read fresh from disk so a profile saved this session shows up without a
+        Read fresh from disk so a newly saved profile shows up without a
         restart. A router can't be a member, so router-mode profiles are
-        filtered out -- that filter also excludes the router being edited once
-        it's saved. We deliberately do NOT exclude by the Name field's current
-        text: the natural add-a-member flow (switch to server mode, save the new
-        model, switch back to router mode) leaves the new model's name in the
-        Name field, and excluding it hid the very member the user just made until
-        an app restart.
+        filtered out; that filter also excludes the router being edited once
+        it's saved. The Name field's current text is NOT excluded: the
+        add-a-member flow (switch to server mode, save the new model, switch
+        back to router mode) leaves the new model's name in the Name field, and
+        that model must still be offered.
         """
         return [p.name for p in list_profiles(self.window.router_base_dir()) if p.mode != "router"]
 
@@ -817,7 +813,7 @@ class ConfigurePanel(QWidget):
 
     def _has_unsaved_changes(self) -> bool:
         # Stateless dirty check: the form is clean iff current_profile() round-trips
-        # equal to the stored profile of the same name (verified: dataclass equality,
+        # equal to the stored profile of the same name (dataclass equality is
         # dict-order-independent). A never-saved profile counts as changed.
         cur = self.current_profile()
         saved = {p.name: p for p in list_profiles(self.window.router_base_dir())}.get(cur.name)
@@ -891,11 +887,11 @@ class ConfigurePanel(QWidget):
         return pairs
 
     def missing_member_profiles(self) -> list:
-        """Member profile names that no longer exist on disk.
+        """Member profile names with no matching profile on disk.
 
-        Dropping these silently launched a router serving fewer models than the
-        list showed, and any harness pinned to the missing id got a 404 with
-        nothing in the GUI explaining why."""
+        Reported as errors rather than dropped silently: a router serving fewer
+        models than the list shows gives any harness pinned to the missing id a
+        404 with nothing in the GUI explaining why."""
         by_name = {p.name: p for p in list_profiles(self.window.router_base_dir())}
         return [m.profile for m in self.members() if m.profile not in by_name]
 
@@ -1032,11 +1028,10 @@ class ConfigurePanel(QWidget):
     def current_profile(self) -> Profile:
         # Collect EVERY set widget, not just the active mode/engine catalog's:
         # a Save while the form is flipped to router mode must not strip the
-        # profile's single-server settings (ctx-size came back 0 after a
-        # reopen). Mode/engine purity is enforced where argv is rendered --
-        # command_builder gates by mode catalog, ROUTER_ONLY_KEYS, and engine
-        # for the headless path too -- so a carried value can never reach a
-        # mismatched command line.
+        # profile's single-server settings. Mode/engine purity is enforced where
+        # argv is rendered: command_builder gates by mode catalog,
+        # ROUTER_ONLY_KEYS, and engine for the headless path too, so a carried
+        # value can never reach a mismatched command line.
         settings = {}
         for key, w in self._widgets.items():
             if w.is_set():
@@ -1174,10 +1169,9 @@ class ConfigurePanel(QWidget):
     def _cached_meta_weights(self, container_path: str, mounts) -> tuple:
         """(meta, weights_bytes) cached by the file's (mtime, size) stamp: a
         GGUF header read is a 64MB file read, and the debounced fit refresh
-        re-runs on every form edit. A stat per render replaces the old
-        wall-clock TTL, so an unchanged header is NEVER re-read (the TTL
-        forced a fresh 64MB read every 15s on the UI thread) while a swapped
-        model file invalidates instantly."""
+        re-runs on every form edit. A stat per render means an unchanged
+        header is never re-read while a swapped model file invalidates
+        instantly."""
         host = container_to_host(container_path, mounts)
         if host is None:
             return None, None

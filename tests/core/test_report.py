@@ -96,8 +96,8 @@ def test_bare_sk_token_is_redacted():
 
 
 def test_sk_redaction_does_not_chew_through_ordinary_log_words():
-    # No left boundary meant disk-/task-/risk- prefixed tokens were mangled,
-    # and the logs section is exactly where those appear.
+    # The sk- pattern needs a left boundary: disk-/task-/risk- prefixed tokens
+    # appear in the logs section and must survive intact.
     from llama_launcher.core.report import redact_secrets
     for text in ("disk-cache_enabled_true", "task-0000000000000001",
                  "risk-assessment_score_9"):

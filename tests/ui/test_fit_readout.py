@@ -1,4 +1,4 @@
-"""Configure-tab live fit readout: the model-meta label grows a live
+"""Configure-tab live fit readout: the model-meta label carries a live
 "est vs free VRAM" line (node-aware, debounced, GPU probe off-thread) so the
 user can tune ctx/KV-quant until the model fits BEFORE ever clicking Launch.
 """

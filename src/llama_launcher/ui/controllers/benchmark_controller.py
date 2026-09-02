@@ -92,11 +92,10 @@ class BenchmarkController:
     def _prepare_benchmark(self, p: Profile):
         """Endpoint + snapshot + client for a benchmark run.
 
-        Mirrors collect_monitor_data's host/port/key/model_scope derivation
-        (main_window.py, same class) exactly. Returns (client, snapshot), or
-        None when there's nothing to benchmark -- a router with no model
-        currently loaded, the same "not ready" condition collect_monitor_data
-        treats as poll=False.
+        Derives host/port/key/model_scope the same way collect_monitor_data
+        does. Returns (client, snapshot), or None when there's nothing to
+        benchmark: a router with no model currently loaded, the same "not
+        ready" condition collect_monitor_data treats as poll=False.
         """
         port = profile_port(p)
         host, key, model_scope, poll = (dial_host(p.runtime.bind_host),

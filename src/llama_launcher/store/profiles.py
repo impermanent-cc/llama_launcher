@@ -20,8 +20,8 @@ def profile_to_dict(p: Profile) -> dict:
 
 
 # The container runtime is used as argv[0] of every launch; a loaded profile
-# must not be able to name an arbitrary executable there. The GUI combo already
-# constrains it, but the headless/loaded-JSON path did not.
+# must not be able to name an arbitrary executable there. The GUI combo
+# constrains it; this guards the headless/loaded-JSON path.
 _ALLOWED_BINARIES = ("podman", "docker")
 
 

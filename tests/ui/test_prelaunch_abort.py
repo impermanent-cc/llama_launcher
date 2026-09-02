@@ -1,7 +1,7 @@
-"""Pre-launch warnings offer a way OUT: every warning dialog that used to be
-OK-only (VRAM check, validation warnings, router preset warnings) now asks
-Abort/Ignore, with Abort as the default, so a launch that is predicted to OOM
-can be cancelled instead of watched fail.
+"""Pre-launch warnings offer a way OUT: every warning dialog (VRAM check,
+validation warnings, router preset warnings) asks Abort/Ignore, with Abort as
+the default, so a launch that is predicted to OOM can be cancelled instead of
+watched fail.
 """
 from PySide6.QtWidgets import QMessageBox
 

@@ -45,7 +45,7 @@ def test_build_command_container_mode_unchanged():
 
 
 def test_build_command_rpc_head_binds_to_configured_host_not_all_interfaces():
-    # R1: --host must be the profile's configured bind_host (loopback by default
+    # --host must be the profile's configured bind_host (loopback by default
     # convention here), NOT the 0.0.0.0 default from _server_args. Since --network
     # host drops the -p bind_host:port:port translation, --host 0.0.0.0 would
     # expose the head API on every interface on the LAN.

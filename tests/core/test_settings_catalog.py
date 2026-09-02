@@ -25,9 +25,7 @@ def test_defrag_thold_is_never_offered_on_mainline():
     offer flags upstream has deprecated (same rule that keeps out --direct-io).
 
     ik_llama.cpp carries the flag undeprecated and still honours it, so the
-    2026-09-01 completeness pass exposes it there and only there. The original
-    guard asserted it was absent outright; this keeps the protection that
-    actually mattered, that a mainline user is never shown it.
+    catalog exposes it there and only there; a mainline user is never shown it.
     """
     from llama_launcher.core.settings_catalog import for_engine, member_catalog
     assert "defrag-thold" not in for_engine(member_catalog(), "llama.cpp")
@@ -46,8 +44,8 @@ def test_speculative_decoding_group():
     assert CATALOG["spec-type"].type == "enum"
     assert CATALOG["spec-type"].default == "none"
     assert "draft-mtp" in CATALOG["spec-type"].enum
-    # Full llama.cpp strategy set (build b9755): the two draft-d* variants were
-    # missing from the enum, so the UI couldn't select them.
+    # Full llama.cpp strategy set (build b9755), including the two draft-d*
+    # variants.
     assert "draft-dflash" in CATALOG["spec-type"].enum
     assert "draft-dspark" in CATALOG["spec-type"].enum
     assert CATALOG["spec-draft-n-min"].default == 0
@@ -95,8 +93,8 @@ def test_gpu_additions_and_split_mode_tensor():
 
 
 def test_legacy_load_flags_are_marked_deprecated():
-    # Upstream (v0.2.0 era) now emits DEPRECATED warnings for these and steers
-    # users to --load-mode; we keep them for older images but flag them.
+    # Upstream emits DEPRECATED warnings for these and steers users to
+    # --load-mode; the catalog keeps them for older images but flags them.
     assert CATALOG["no-mmap"].deprecated is True
     assert CATALOG["mlock"].deprecated is True
     # --load-mode is the replacement and must NOT be marked deprecated.
@@ -109,8 +107,7 @@ def test_most_settings_are_not_deprecated():
 
 
 def test_mmproj_device_present():
-    # New llama-server flag in the v0.1.x -> v0.2.0 window: pick the device the
-    # multimodal projector runs on.
+    # llama-server flag: pick the device the multimodal projector runs on.
     s = CATALOG["mmproj-device"]
     assert s.flag == "--mmproj-device"
     assert s.type == "string"
@@ -145,20 +142,21 @@ def test_sampling_perf_server_additions():
 
 
 def test_checkpoint_min_step_matches_upstream_default():
-    # llama.cpp b10290 changed this default from 256 to 8192. A stale default
-    # means the widget shows 256, emits nothing, and the server silently uses 8192.
+    # llama.cpp's default (b10290) is 8192. A stale catalog default means the
+    # widget shows the wrong value, emits nothing, and the server silently
+    # uses its own.
     assert CATALOG["checkpoint-min-step"].default == 8192
 
 
 def test_dry_penalty_last_n_matches_upstream_default():
-    # b10290: default -1 -> 64, and -1 no longer means "context size".
+    # b10290: default 64, and -1 does not mean "context size".
     s = CATALOG["dry-penalty-last-n"]
     assert s.default == 64
     assert s.minimum == 0
 
 
 def test_repeat_last_n_no_longer_offers_dead_sentinel():
-    # b10290 dropped "-1 = ctx_size" for repeat-last-n.
+    # b10290: -1 is not a ctx_size sentinel for repeat-last-n.
     s = CATALOG["repeat-last-n"]
     assert s.default == 64
     assert s.minimum == 0
@@ -171,7 +169,7 @@ from llama_launcher.core.settings_catalog import (
 
 def test_router_settings_present():
     assert CATALOG["models-max"].flag == "--models-max"
-    assert CATALOG["models-max"].default == 4          # mirrors upstream; see the test below
+    assert CATALOG["models-max"].default == 4          # upstream's default
     assert CATALOG["models-autoload"].type == "bool"
     assert CATALOG["sleep-idle-seconds"].flag == "--sleep-idle-seconds"
     assert CATALOG["sleep-idle-seconds"].default == -1  # -1 = disabled
@@ -216,8 +214,9 @@ def test_member_catalog_excludes_router_only_settings():
 
 
 def test_models_max_default_matches_upstream_not_advice():
-    # Widgets emit only when value != default, so a default of 1 (the *advice*)
-    # meant leaving the field alone emitted nothing and the server ran 4.
+    # Widgets emit only when value != default, so the default must be
+    # upstream's 4, not the advised 1; otherwise leaving the field alone
+    # emits nothing and the server runs 4.
     assert CATALOG["models-max"].default == 4
 
 
@@ -235,8 +234,8 @@ def test_load_mode_setting():
     s = CATALOG["load-mode"]
     assert s.flag == "--load-mode"
     assert s.type == "enum"
-    # upstream default flipped mmap -> auto (llama.cpp #26081); ours must mirror
-    # it so "auto" is the leave-alone sentinel and "mmap" becomes expressible.
+    # upstream's default is auto (llama.cpp #26081); ours mirrors it so "auto"
+    # is the leave-alone sentinel and "mmap" is expressible.
     assert s.default == "auto"
     assert s.enum == ("auto", "mmap", "none", "mlock", "mmap+mlock", "dio")
     assert "-lm" in s.aliases
@@ -261,10 +260,9 @@ def test_ik_flags_exist_and_are_engine_tagged():
 
 
 def test_ik_settings_live_in_functional_groups():
-    """The flat "ik_llama.cpp" form group is gone as of the 2026-09-01
-    completeness pass: at 68 ik-only settings one section was unnavigable, and
-    for_engine() already hides them on mainline, so each sits with the mainline
-    settings it belongs beside."""
+    """There is no flat "ik_llama.cpp" form group: for_engine() hides ik-only
+    settings on mainline, so each sits with the mainline settings it belongs
+    beside."""
     assert not any(s.group == "ik_llama.cpp" for s in CATALOG.values())
     assert CATALOG["mla-use"].group == "Performance & Batching"
     assert CATALOG["run-time-repack"].group == "GPU & Memory"
@@ -296,16 +294,16 @@ def test_ik_extra_kv_cache_types_are_additive():
 
 
 def test_attention_max_batch_default_tracks_current_ik():
-    # ik changed the -amb default 0 -> 256 (ik PR #2312). The catalog default
-    # must mirror upstream so 0 ("no cap") is non-default and actually emits.
+    # ik's -amb default is 256 (ik PR #2312). The catalog default mirrors it
+    # so 0 ("no cap") is non-default and emits.
     s = CATALOG["attention-max-batch"]
     assert s.default == 256
     assert s.minimum == 0
 
 
 def test_tools_options_match_upstream():
-    # llama.cpp #27255 dropped get_datetime (moved to the webui); apply_diff is
-    # not in upstream's set; get_info (OS/cwd runtime info) is.
+    # get_datetime is a webui tool, not a server one (llama.cpp #27255);
+    # apply_diff is not in upstream's set; get_info (OS/cwd runtime info) is.
     s = CATALOG["tools"]
     assert set(s.enum) == {"read_file", "write_file", "edit_file",
                            "file_glob_search", "grep_search",
@@ -314,15 +312,14 @@ def test_tools_options_match_upstream():
 
 
 def test_flag_additions_2026_08():
-    # Both are mainline-only: ik_llama.cpp rejects them (confirmed by executing
-    # each against the ik image), so they carry engine="llama.cpp" and never
-    # reach an ik launch. They were engine="any" until that was probed.
+    # Both are mainline-only: ik_llama.cpp rejects them, so they carry
+    # engine="llama.cpp" and never reach an ik launch.
     s = CATALOG["n-cpu-ffn"]
     assert s.flag == "--n-cpu-ffn" and s.type == "int" and s.default == 0
     assert "-ncffn" in s.aliases and s.engine == "llama.cpp"
 
     s = CATALOG["tensor-read-lazy"]
-    # Upstream renamed the flag to --lazy-mode; the KEY stays put so saved
+    # Upstream's flag is --lazy-mode; the KEY stays "tensor-read-lazy" so saved
     # profiles keep their value.
     assert s.flag == "--lazy-mode" and "-lzm" in s.aliases
     assert s.type == "enum" and s.default == "auto"
@@ -360,7 +357,7 @@ def test_ik_spec_type_translation_table():
     assert set(IK_EXTRA_SPEC_TYPES).isdisjoint(spec_enum)
 
 
-# --- 2026-09-01 ik_llama.cpp completeness pass ------------------------------
+# --- ik_llama.cpp-only and shared settings coverage --------------------------
 
 _NEW_IK_KEYS = {
     "defer-experts", "prefetch-experts", "prefetch-experts-threads",
@@ -383,7 +380,7 @@ _NEW_IK_KEYS = {
     "tfs", "penalize-nl", "defrag-thold",
 }
 
-# Both engines accept these; the catalog exposed them for neither until now.
+# Both engines accept these and the catalog exposes them for both.
 _NEW_SHARED_KEYS = {
     "grammar", "grammar-file", "json-schema", "logit-bias", "special",
     "spm-infill", "ui-mcp-proxy", "lookup-cache-static", "lookup-cache-dynamic",
@@ -411,9 +408,9 @@ def test_new_shared_settings_reach_both_engines():
 
 
 def test_respelled_flags_reach_both_engines():
-    """Mainline renamed these and kept the older ik spelling as an alias, so one
-    setting can serve both engines instead of being gated to mainline. Keys are
-    unchanged, so saved profiles keep working."""
+    """Mainline accepts the ik spelling of these as an alias, so one setting
+    serves both engines instead of being gated to mainline. The keys are the
+    ones saved profiles are written with."""
     from llama_launcher.core.settings_catalog import for_engine, member_catalog
     expected = {
         "typical-p": "--typical",
@@ -430,11 +427,10 @@ def test_respelled_flags_reach_both_engines():
 
 
 def test_respelled_flags_keep_their_old_spelling_as_an_alias():
-    """The launcher itself emitted the mainline spellings before the respelling,
-    so saved raw_args and copied commands carry them. Without the alias a raw
-    '--typical-p 0.5' no longer folds onto the setting: both spellings reach
-    argv, llama-server takes the last one, and the form shows a value that is
-    not the one running, with no collision warning."""
+    """Saved raw_args and copied commands can carry the mainline spellings.
+    The alias makes a raw '--typical-p 0.5' fold onto the setting; without it
+    both spellings reach argv, llama-server takes the last one, and the form
+    shows a value that is not the one running, with no collision warning."""
     from llama_launcher.core import command_builder as cb
     old = {
         "typical-p": "--typical-p",
@@ -449,15 +445,14 @@ def test_respelled_flags_keep_their_old_spelling_as_an_alias():
 
 
 def test_no_flash_attn_is_not_a_separate_setting():
-    """ik accepts -fa on|off|auto (probed), so the shared flash-attn enum
+    """ik accepts -fa on|off|auto, so the shared flash-attn enum
     already covers it; a second bool could contradict the enum on argv."""
     assert "no-flash-attn" not in CATALOG
 
 
 def test_catalog_flags_and_aliases_are_unique():
     """A duplicated alias would silently mis-fold raw_args onto the wrong
-    setting. Caught a real -devd collision when --device-draft was briefly added
-    as its own setting alongside spec-draft-device, which already aliased it."""
+    setting."""
     seen = {}
     for s in CATALOG.values():
         for spelling in (s.flag,) + tuple(s.aliases):

@@ -44,9 +44,9 @@ def test_fits_boundary_zero_margin():
 
 def test_available_free_bytes_sums_across_gpus_when_split():
     from llama_launcher.core.vram import available_free_bytes
-    # Regression: a model split across GPUs (default split-mode) should see the
-    # COMBINED free VRAM, not just the largest single card. 16+12 GB rig with
-    # 14.7 + 7.3 GiB free must offer ~22 GiB, so a 20.2 GiB model fits.
+    # A model split across GPUs (default split-mode) sees the COMBINED free
+    # VRAM, not just the largest single card: a 16+12 GB rig with 14.7 + 7.3
+    # GiB free offers ~22 GiB, so a 20.2 GiB model fits.
     gib = 1024 ** 3
     free = [int(14.7 * gib), int(7.3 * gib)]
     assert available_free_bytes(free, "layer", 0) == sum(free)

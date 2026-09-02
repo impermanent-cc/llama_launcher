@@ -101,7 +101,7 @@ def build_monitor_data(target: dict) -> dict | None:
     prompt_tok_s_live = counter_rate(target.get("prompt_prev"), prompt_now)
     if target.get("kind") == "native" and target.get("pid"):
         st = native.proc_stats(target["pid"]) or {}
-        uptime = ""     # native uptime is not tracked in v1
+        uptime = ""     # native uptime is not tracked
     else:
         mon_conn = target.get("mon_conn", "")
         st = runtime.stats(name, binary, connection=mon_conn) or {}
@@ -166,26 +166,23 @@ def _instance_summary_data(inst, by_name: dict, router_base_dir: str,
 def build_instances_data(target: dict) -> dict:
     """Gather the instances table from a primitives-only `target`, off the UI thread.
 
-    Does every blocking call the table needs -- the `list_launcher_containers`
-    subprocess (once per enabled node) and the per-instance health/metrics
-    probes -- plus a SINGLE `list_profiles` scan shared across all rows (the
-    old synchronous refresh did one scan to build the list and one more per
-    instance to resolve its key, so N servers cost N+1 scans on the UI thread
-    every tick). Returns the built Instance list (for selection lookup) and
-    the plain row dicts to render.
+    Does every blocking call the table needs (the `list_launcher_containers`
+    subprocess once per enabled node, and the per-instance health/metrics
+    probes) plus a SINGLE `list_profiles` scan shared across all rows (a
+    per-instance scan would cost N+1 scans per tick). Returns the built
+    Instance list (for selection lookup) and the plain row dicts to render.
 
     `target["nodes"]` (when present) is a list of plain-dict node snapshots
     ({name, connection, host, binary, enabled}) -- see _instances_target. A
     disabled node is skipped; a node whose `list_launcher_containers` call
     raises OSError (unreachable) contributes zero rows instead of aborting
     the whole gather, so one dead remote can't blank the table for the rest.
-    Callers that don't pass "nodes" (older targets, existing tests) get the
-    prior local-only behaviour unchanged.
+    A target without "nodes" is treated as local-only.
     """
     profiles = list_profiles(target["base_dir"])
     by_name = {p.name: p for p in profiles}
     nodes = target.get("nodes")
-    legacy_target = nodes is None      # old single-node target with no "nodes" key
+    legacy_target = nodes is None      # single-node target with no "nodes" key
     if legacy_target:
         nodes = [{"name": "local", "connection": "", "host": "",
                   "binary": target["binary"], "enabled": True}]
@@ -198,8 +195,7 @@ def build_instances_data(target: dict) -> dict:
         conn = nd.get("connection", "")
         try:
             if legacy_target:
-                # Preserve the exact old call shape (no `connection` kwarg) so
-                # callers/tests built before nodes existed are unaffected.
+                # A local-only target calls without the `connection` kwarg.
                 container_rows = runtime.list_launcher_containers(binary)
             else:
                 container_rows = runtime.list_launcher_containers(binary, connection=conn)
@@ -216,7 +212,7 @@ def build_instances_data(target: dict) -> dict:
     rows = []
     for inst in instances:
         # An rpc-worker container shares its pool head's `llama-launcher.profile`
-        # label (Task 4) so the pool joins as one profile -- which would
+        # label so the pool joins as one profile, which would
         # otherwise render the worker's card with the SAME title/port as the
         # head. Override the display-only fields with the worker's own
         # identity (StatCard.update_row would append `node` again if left as
@@ -488,9 +484,9 @@ class MonitorController:
         """API key for authenticating Monitor polls -- the key the running server
         actually uses. A router reads it from --api-key-file (our key store); a
         single server uses its own --api-key setting. Returns None when there's
-        no key (so no Authorization header is sent). Without this, a single
-        server started with --api-key rejected /props, /metrics and /slots polls
-        with "Invalid API Key" (only /health, which needs no key, still worked).
+        no key (so no Authorization header is sent). A server started with
+        --api-key rejects unauthenticated /props, /metrics and /slots polls
+        with "Invalid API Key"; only /health needs no key.
         """
         if p.mode == "router":
             return api_key_store.read_api_key(self.window.router_base_dir(), p.name)
@@ -563,8 +559,8 @@ class MonitorController:
                                    key, model_id)
         self.refresh_router_models()
         if not ok:
-            # Silently discarding this left a failed load looking identical to a
-            # slow one: the row just stayed "unloaded" forever.
+            # Without the banner a failed load looks identical to a slow one:
+            # the row just stays "unloaded".
             self.window._set_router_error(f"load failed: {model_id}")
 
     def _on_router_unload(self, model_id: str) -> None:
@@ -697,8 +693,7 @@ class MonitorController:
         # Auto-clear a monitored instance whose container has dropped out of the
         # fresh list (crash / external stop) so the Monitor falls back to the form
         # profile and retargets the log follower instead of stranding on a dead
-        # target -- previously only explicit Stop/Remove cleared _active_instance.
-        # Gate on a NON-EMPTY list: `podman ps` failing (daemon hiccup, timeout)
+        # target. Gate on a NON-EMPTY list: `podman ps` failing (daemon hiccup, timeout)
         # returns [] rather than raising, so an empty list is ambiguous and must
         # not be read as "my instance vanished" -- only a populated list that
         # omits the instance is genuine evidence it was stopped externally.
@@ -816,9 +811,8 @@ class MonitorController:
     def instance_summary(self, inst) -> dict:
         """Per-row health + headline stat for one instance. Thin UI-side wrapper
         over the pure _instance_summary_data (which the off-thread gather also
-        uses); resolves the profiles snapshot + router key dir on demand. Returns
-        {"health", "stat"} -- the old dead "running" key (rows read inst.running
-        directly) was dropped."""
+        uses); resolves the profiles snapshot + router key dir on demand. The
+        result carries no "running" key: rows read inst.running directly."""
         from llama_launcher.ui.main_window import base_dir
         by_name = {p.name: p for p in list_profiles(base_dir())}
         return _instance_summary_data(inst, by_name, self.window.router_base_dir())
@@ -827,9 +821,9 @@ class MonitorController:
         """Snapshot the poll inputs into a primitives-only dict on the UI thread.
 
         The monitor worker reads this (never the widgets/profile) and calls
-        build_monitor_data() off-thread, so the blocking gather -- podman stats,
-        nvidia-smi, /metrics, /slots -- no longer runs on the UI thread. Only
-        the cheap derivation of these primitives stays here.
+        build_monitor_data() off-thread, so the blocking gather (podman stats,
+        nvidia-smi, /metrics, /slots) never runs on the UI thread. Only the
+        cheap derivation of these primitives stays here.
 
         The router model to scope polling to is passed in (already resolved by
         _refresh_props this tick) rather than re-polled here, so a router tick

@@ -3,7 +3,7 @@ from llama_launcher.store.profiles import profile_to_dict, profile_from_dict
 
 
 def test_old_profile_without_engine_loads_as_llama_cpp():
-    # Simulate profile JSON written before the engine field existed.
+    # Profile JSON with no engine field.
     d = {"name": "old", "runtime": {"binary": "podman"}}
     assert profile_from_dict(d).runtime.engine == "llama.cpp"
 

@@ -13,9 +13,9 @@ _DEVICES = ["CPU", "CUDA0", "CUDA1"]
 class RpcWorkersTable(QWidget):
     """RPC-pool launch mode: one row per worker (Node · Device · Mem MB · Port).
 
-    Mirrors MountsPanel/LoraPanel's table-of-cell-widgets pattern (see
-    ui/panels/mounts_panel.py) rather than editable QTableWidgetItems, since
-    every column here is an enum/number best picked from a combo/spin box.
+    Cell widgets rather than editable QTableWidgetItems, since every column
+    here is an enum/number best picked from a combo/spin box (the same
+    table-of-cell-widgets pattern as MountsPanel and LoraPanel).
     """
 
     changed = Signal()

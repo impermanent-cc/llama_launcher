@@ -75,9 +75,7 @@ class LaunchController:
     `_spawn_async`, `_validate_or_warn`, `on_launch`) are called directly as
     `self.<method>(...)`; widgets and methods owned by other panels/controllers
     go through `self.window._<owner>.<x>` (e.g. `self.window._configure_panel.
-    image_edit`, `self.window._monitor.update_status`). Test-suite patches
-    that target this controller's own methods (e.g. `_spawn_async`) now patch
-    `LaunchController` directly, not `MainWindow`.
+    image_edit`, `self.window._monitor.update_status`).
     """
 
     def __init__(self, window):
@@ -260,10 +258,10 @@ class LaunchController:
             argv = build_command(p, detach=True, connection=connection)
             # Detached drops --rm, so a stale stopped container of this name
             # would block the run with "name already in use". Remove it first,
-            # then chain the run (mirrors the router branch above). on_error
-            # surfaces bad image / CDI / flag failures the terminal used to
-            # show -- show_dialog is fixed here, at launch time, so a later
-            # profile/mode switch before the error fires can't change it.
+            # then chain the run. on_error surfaces the bad image / CDI / flag
+            # failures a terminal launch would show; show_dialog is fixed here,
+            # at launch time, so a later profile/mode switch before the error
+            # fires can't change it.
             self._spawn_async(
                 runtime.rm_argv(self.window._container_name(), p.runtime.binary,
                                 connection=connection),
@@ -409,7 +407,7 @@ class LaunchController:
 
         # Stop the log follower immediately; run `podman stop` asynchronously so a
         # slow stop (podman waits up to its grace period for SIGTERM) never freezes
-        # the GUI, which previously made Stop look like it did nothing.
+        # the GUI.
         self.window._monitor._stop_log_follower()
         connection = self._connection_for_profile(p)
         self.window.status_label.setText("● stopping…")

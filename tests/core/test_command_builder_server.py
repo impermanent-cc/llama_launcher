@@ -319,7 +319,7 @@ def test_legacy_mmap_mlock_still_emit_without_load_mode():
 
 
 def test_load_mode_mmap_emits_and_suppresses_legacy():
-    # With the default now "auto", an explicit mmap choice is non-default:
+    # The default is "auto", so an explicit mmap choice is non-default:
     # it must emit and still win over the legacy pair.
     argv = build_command(_srv(**{"load-mode": "mmap", "no-mmap": True}))
     assert argv[argv.index("--load-mode") + 1] == "mmap"
@@ -388,7 +388,7 @@ def test_ik_suffix_spec_type_dropped_on_mainline():
 
 
 def test_amb_zero_emits_explicit_no_cap():
-    # ik's -amb default is now 256; 0 (= no cap) is non-default and must emit.
+    # ik's -amb default is 256; 0 (= no cap) is non-default and must emit.
     argv = build_command(_ik_srv(**{"attention-max-batch": 0}))
     assert argv[argv.index("--attention-max-batch") + 1] == "0"
 
@@ -472,8 +472,8 @@ def test_container_launch_host_unchanged():
 
 # -- ik_llama.cpp layer tokens ------------------------------------------------
 # ik parses -ngl/-ngld with a bare stoi: "--n-gpu-layers all" and "auto" print
-# "stoi" plus the usage text and exit before the model loads (probed against
-# ik-llama-cpp:cpu-server), while an integer proceeds.
+# "stoi" plus the usage text and exit before the model loads, while an
+# integer proceeds.
 
 def test_ik_launch_translates_all_layers_to_an_integer():
     p = _ik_srv(**{"n-gpu-layers": "all", "spec-draft-ngl": "all"})

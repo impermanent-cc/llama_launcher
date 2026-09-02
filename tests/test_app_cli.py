@@ -79,11 +79,10 @@ def test_gate_validation_error_exits_2(monkeypatch, capsys):
 
 
 def test_gate_router_with_valid_member_passes_real_validate(monkeypatch, capsys):
-    """Regression for the members= bug: a real router with a resolvable member
-    and no exposure problem (loopback bind_host) must pass the REAL validate(),
-    not just a monkeypatched stub. Isolates the members rule specifically: the
-    only way this profile could fail validate() is if members isn't threaded
-    through to _validate_router."""
+    """A real router with a resolvable member and no exposure problem (loopback
+    bind_host) passes the REAL validate(), not just a monkeypatched stub. This
+    isolates the members rule: the only way this profile can fail validate()
+    is if members isn't threaded through to _validate_router."""
     router = Profile(
         name="r", image="img", runtime=Runtime(), mode="router",
         mounts=[Mount(host="/host/models", container="/models", role="model")],
@@ -93,9 +92,8 @@ def test_gate_router_with_valid_member_passes_real_validate(monkeypatch, capsys)
     _profiles(monkeypatch, [router, member], last="r")
     # Use the REAL resolve_member_pairs (not the "/base"-safe stub _profiles()
     # installs by default) so this test exercises the actual member-resolution
-    # path the members= bug fix depends on. It resolves via
-    # store.profiles.list_profiles internally, not app.list_profiles, so that
-    # is what needs mocking here.
+    # path. It resolves via store.profiles.list_profiles internally, not
+    # app.list_profiles, so that is what needs mocking here.
     monkeypatch.setattr(store_profiles, "list_profiles", lambda base: [router, member])
     monkeypatch.setattr(app, "resolve_member_pairs", store_profiles.resolve_member_pairs)
     monkeypatch.setattr(app, "binary_available", lambda b: True)
@@ -106,11 +104,10 @@ def test_gate_router_with_valid_member_passes_real_validate(monkeypatch, capsys)
 
 def test_gate_router_without_members_exits_2_real_validate(monkeypatch, capsys):
     """Legitimate case of the "needs at least one model" error: a router with
-    NO members must still be refused by the real validate(), so the members
-    fix doesn't over-correct into accepting empty routers."""
+    NO members is refused by the real validate()."""
     router = Profile(name="r", image="img", runtime=Runtime(), mode="router")
-    # _profiles() installs a stub resolve_member_pairs returning [] by default
-    # (see its docstring), which is exactly the "no members" case this test
+    # _profiles() installs a stub resolve_member_pairs returning [] by default,
+    # which is exactly the "no members" case this test
     # wants: it exercises real validate()/_validate_router() with an empty
     # members list, same as the real resolve_member_pairs would produce for a
     # router with no RouterMember entries.
@@ -406,9 +403,8 @@ def test_gate_treats_global_key_as_present_for_health(tmp_path, monkeypatch):
     # global-mode router, only a global key exists, never launched (no per-profile file)
     api_key.write_global_key(tmp_path, "sk-shared")
     # A resolvable member is included so the real validate()'s "needs at least
-    # one model" rule (unrelated to this test) doesn't also fire -- this test
-    # isolates the api-key exposure check, per test_gate_router_with_valid_
-    # member_passes_real_validate's pattern above.
+    # one model" rule (unrelated to this test) doesn't also fire; this test
+    # isolates the api-key exposure check.
     store.save_profile(
         Profile(name="R", image="img", mode="router",
                 runtime=Runtime(bind_host="0.0.0.0", router_key_mode="global"),

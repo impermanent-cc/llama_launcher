@@ -40,9 +40,9 @@ def test_core_entries_present_with_expected_flags():
 
 
 def test_sched_max_copies_split_by_engine():
-    # An "any"-gated single entry defaulting to mainline's 4 misled ik users
-    # who left it alone into building with 4 instead of ik's own default of
-    # 1. Each engine gets its own gated Setting for the same CMake flag.
+    # Each engine gets its own gated Setting for the same CMake flag: one
+    # "any"-gated entry can carry only one default, and ik's (1) differs
+    # from mainline's (4).
     ml = for_engine(BUILD_CATALOG, "llama.cpp")
     ik = for_engine(BUILD_CATALOG, "ik_llama.cpp")
 

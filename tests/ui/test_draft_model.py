@@ -1,4 +1,4 @@
-"""Regression tests for FIX 1: draft_model picker wiring in the GUI."""
+"""draft_model picker wiring in the GUI."""
 
 import pytest
 from llama_launcher.core.spec import Profile, Mount, Runtime

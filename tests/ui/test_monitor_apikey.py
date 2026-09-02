@@ -27,8 +27,8 @@ def test_poll_api_key_router_uses_store(qtbot, monkeypatch):
 
 
 def test_refresh_props_sends_server_api_key(qtbot, monkeypatch):
-    # Regression: a single server started with --api-key was polled with NO key,
-    # so /props came back 401 "Invalid API Key". The poll must send the key.
+    # A single server started with --api-key must be polled with that key;
+    # /props answers 401 "Invalid API Key" otherwise.
     seen = {}
     # capture the key, then return None so _refresh_props exits before set_props
     monkeypatch.setattr(mw.metrics, "fetch_props",
@@ -78,8 +78,8 @@ def test_monitored_router_instance_resolves_router_key(qtbot, tmp_path, monkeypa
 
 
 def test_instance_summary_sends_router_api_key(qtbot, tmp_path, monkeypatch):
-    # Regression: the per-row instance summary polled /metrics with NO key, so
-    # the auth middleware answered 401 every tick (the recurring router error).
+    # The per-row instance summary must send the key on /metrics; the auth
+    # middleware answers 401 every tick otherwise.
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     from llama_launcher.core.instances import Instance
     from llama_launcher.services import api_key as ak
@@ -98,8 +98,8 @@ def test_instance_summary_sends_router_api_key(qtbot, tmp_path, monkeypatch):
 
 
 def test_metrics_report_sends_key_and_model_scope_for_router(qtbot, tmp_path, monkeypatch):
-    # Regression: the diagnostic report fetched /metrics with no key/host/scope,
-    # so a router with --metrics on always printed "no metrics returned".
+    # The diagnostic report must fetch /metrics with the key, host and scope;
+    # a router with --metrics on otherwise prints "no metrics returned".
     monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
     from llama_launcher.services import api_key as ak
     seen = {}

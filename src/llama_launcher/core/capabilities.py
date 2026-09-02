@@ -58,13 +58,12 @@ def derive_caps(meta: GgufMeta | None, sibling_filenames) -> ModelCaps:
         is_embedding=(meta.arch in EMBEDDING_ARCHS or pooling is not None),
         # Reranker auto-detection relies on the GGUF advertising pooling_type=rank.
         # Some reranker GGUFs omit it entirely (e.g. bge-reranker-v2-m3 converts to
-        # arch=bert, no pooling_type, general.name "Bge M3" -- indistinguishable
+        # arch=bert, no pooling_type, general.name "Bge M3", indistinguishable
         # from a plain embedding model), so they aren't auto-flagged and the
         # reranking suggestion chips stay silent. They still WORK: the user enables
         # --reranking + --pooling rank + --embeddings manually, and validate()'s
-        # bad-combo warnings guide that. Live-verified 2026-08-24 (docker + real
-        # reranker: /v1/rerank scored correctly). Intentionally metadata-only --
-        # no filename heuristic -- to avoid false positives.
+        # bad-combo warnings guide that. Metadata-only on purpose (no filename
+        # heuristic) to avoid false positives.
         is_reranker=(pooling == "rank"),
         pooling_type=pooling,
     )

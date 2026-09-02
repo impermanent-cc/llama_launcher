@@ -43,9 +43,9 @@ def test_update_twice_grows_sparkline_without_error(qtbot):
 
 
 def test_panel_width_constant_across_updates(qtbot):
-    # Regression: the sparkline grew 1->N chars as history filled, widening the
-    # labels and making the dock/window grow every tick. Width must be constant
-    # from the first update, whatever the values.
+    # The sparkline width must be constant from the first update, whatever
+    # the values; a sparkline that grows 1->N chars as history fills widens
+    # the labels and makes the dock/window grow every tick.
     p = StatsPanel(); qtbot.addWidget(p)
     p.update_stats(_full_snapshot())
     w0 = p.gpu_label.sizeHint().width()

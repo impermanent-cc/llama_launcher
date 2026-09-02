@@ -2,10 +2,10 @@
 
 Setting.flag holds the bare CMake variable (no -D); the renderer prepends -D.
 Engine gate: "any" = option exists in BOTH repos; "llama.cpp"/"ik_llama.cpp" =
-only that repo has it. Inventory source-verified 2026-08-28 against both repos'
-root + ggml CMakeLists.txt; re-audit with the grep sweep in the plan/spec.
+only that repo has it. The inventory follows both repos' root + ggml
+CMakeLists.txt.
 
-Deviations from a literal grep (documented in task-2-report.md):
+Deviations from a literal grep of those files:
 - CMAKE_CUDA_ARCHITECTURES is a native CMake variable (not project-defined via
   option()/set() CACHE), so it never appears in either repo's CMakeLists.txt;
   kept with engine "any" and an empty default (CMake/nvcc auto-detects).
@@ -18,14 +18,13 @@ Deviations from a literal grep (documented in task-2-report.md):
   "use the compiled-in default of 64"; catalog uses the int sentinel 0 for
   that, matching the 0 = auto/default convention used elsewhere in this app.
 - GGML_CUDA_FUSION (ik only) is a CACHE STRING with literal default "1" and
-  help text "enable/disable fusion"; modeled as type "int" (0/1) rather than
-  the brief's "int-or-string", since the source shows a plain toggle value.
+  help text "enable/disable fusion"; modeled as type "int" (0/1), since the
+  source shows a plain toggle value.
 
-EXCLUDED ON PURPOSE (do not re-add without a user ask): warnings/sanitizers/
-gprof, install-dir cache vars, WASM/Metal/macOS/Android/Hexagon/OpenVINO/
-virtGPU/zDNN/ET targets, Vulkan debug+validate+shader-debug options,
-RISC-V/LoongArch/s390x ISA options, MUSA sub-options, tests/examples toggles
-beyond the LLAMA_BUILD_* set carried below.
+EXCLUDED ON PURPOSE: warnings/sanitizers/gprof, install-dir cache vars,
+WASM/Metal/macOS/Android/Hexagon/OpenVINO/virtGPU/zDNN/ET targets, Vulkan
+debug+validate+shader-debug options, RISC-V/LoongArch/s390x ISA options, MUSA
+sub-options, tests/examples toggles beyond the LLAMA_BUILD_* set carried below.
 """
 from .settings_catalog import Setting
 

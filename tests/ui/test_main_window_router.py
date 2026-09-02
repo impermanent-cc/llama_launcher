@@ -124,8 +124,8 @@ def test_detached_server_launch_uses_spawn_chain_not_terminal(win, monkeypatch):
     term_called = {}
     monkeypatch.setattr("llama_launcher.ui.main_window.terminal.launch",
                         lambda argv: term_called.setdefault("argv", argv))
-    # A detached server's on_error pops a real QMessageBox (fix #2); stub it
-    # so invoking the callback below can't block the offscreen test run.
+    # A detached server's on_error pops a real QMessageBox; stub it so
+    # invoking the callback below can't block the offscreen test run.
     monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.critical",
                         lambda *a, **k: None)
 
@@ -152,12 +152,10 @@ def test_detached_server_launch_uses_spawn_chain_not_terminal(win, monkeypatch):
     assert "-d" in run_argv
     assert "--rm" not in run_argv
     assert ":/router:ro" not in " ".join(run_argv)   # a server, not a router
-    # A detached launch surfaces failures the terminal used to show. The
-    # run leg's on_error wraps _report_launch_error(show_dialog=True) --
-    # decided here, at launch time -- rather than passing the bare method,
-    # so it's checked by behavior (does it report a failure?) rather than
-    # identity; test_detached_server_launch_error_pops_a_dialog covers the
-    # dialog specifically.
+    # A detached launch has no terminal to surface failures, so the run
+    # leg's on_error wraps _report_launch_error(show_dialog=True), decided
+    # at launch time. Checked by behavior (does it report a failure?) rather
+    # than identity; the dialog itself is asserted separately.
     assert errbacks, "the run must register an on_error callback"
     errbacks[0]("boom")
     assert "failed" in win.status_label.text().lower()
@@ -194,11 +192,10 @@ def test_preview_reflects_detached_flag(win):
 
 
 def test_toggling_detached_checkbox_refreshes_the_preview_widget(win):
-    # Unlike test_preview_reflects_detached_flag above (which calls
-    # build_current_command() directly, so it can't catch a missing signal
-    # connection), this goes through the actual widget/signal path: it
-    # toggles the checkbox and reads the preview QPlainTextEdit's own text,
-    # the way a user would see it.
+    # Goes through the actual widget/signal path rather than
+    # build_current_command(): toggles the checkbox and reads the preview
+    # QPlainTextEdit's own text, the way a user would see it, so a missing
+    # signal connection is caught.
     win._configure_panel.load_profile(Profile(name="Solo", image="img", model="/models/a.gguf",
                              runtime=Runtime(detached=False),
                              mounts=[Mount(host="/h", container="/models")],
@@ -223,8 +220,7 @@ def test_detached_server_launch_error_pops_a_dialog(win, monkeypatch):
 
     def fake_spawn(argv, on_done=None, on_error=None):
         # Chain immediately: this test only cares which on_error callback
-        # the run leg registers, not the rm-then-run ordering (already
-        # covered by test_router_launch_uses_detached_command et al).
+        # the run leg registers, not the rm-then-run ordering.
         if on_error is not None:
             errbacks.append(on_error)
         if on_done is not None:
@@ -256,8 +252,7 @@ def test_router_launch_error_does_not_pop_a_dialog(win, monkeypatch):
 
     def fake_spawn(argv, on_done=None, on_error=None):
         # Chain immediately: this test only cares which on_error callback
-        # the run leg registers, not the rm-then-run ordering (already
-        # covered by test_router_launch_uses_detached_command et al).
+        # the run leg registers, not the rm-then-run ordering.
         if on_error is not None:
             errbacks.append(on_error)
         if on_done is not None:
@@ -318,8 +313,8 @@ def test_detached_server_error_dialog_survives_a_later_mode_switch(win, monkeypa
 
 
 def test_router_error_dialog_stays_off_after_a_later_mode_switch(win, monkeypatch):
-    # Mirror of the above: a router launch's on_error firing after the user
-    # has since switched to a server profile must still NOT pop a dialog.
+    # A router launch's on_error firing after the user has since switched
+    # to a server profile must still NOT pop a dialog.
     base = store.default_base_dir()
     _member_profile(base)
     win._configure_panel.load_profile(Profile(name="Host", mode="router", image="img",
@@ -377,7 +372,7 @@ def test_refresh_router_models_populates_the_panel(win, monkeypatch):
 
 def test_sleeping_models_are_not_polled_for_metrics(win, monkeypatch):
     """A sleeping model has nothing to measure, and skipping it is the point of
-    an idle-unloading host (plan self-review gap 2)."""
+    an idle-unloading host."""
     from llama_launcher.core.router_models import RouterModel
     win._configure_panel.load_profile(Profile(name="Host", mode="router", image="img",
                              settings={"port": 8080, "metrics": True}))
@@ -478,12 +473,11 @@ def test_exposure_banner_shows_on_load_for_a_non_loopback_router(win):
 
 
 def test_exposure_banner_clears_on_switch_to_a_loopback_server(win):
-    # Regression: refresh_router_panel_header used to early-return for a
-    # non-router profile WITHOUT clearing the relocated router state, so an
-    # exposed router's banner (plus its API key and harness endpoint) stayed
-    # on screen after switching to an unrelated, perfectly safe loopback
-    # server profile. That's a false "you are exposed" warning on the exact
-    # surface the spec calls security-critical.
+    # refresh_router_panel_header must clear the relocated router state for
+    # a non-router profile, not just early-return; otherwise an exposed
+    # router's banner (plus its API key and harness endpoint) stays on screen
+    # after switching to a loopback server profile, a false "you are exposed"
+    # warning on a security-critical surface.
     _member_profile(store.default_base_dir())
     _router_win(win, runtime=Runtime(bind_host="0.0.0.0"))
     # Each tab's own visible flag only reflects reality while it's the
@@ -510,8 +504,8 @@ def test_exposure_banner_clears_on_switch_to_a_loopback_server(win):
     assert not win._configure_panel.configure_status.banner.isVisibleTo(win)
     win.tabs.setCurrentIndex(1)     # Monitor
     assert not win.monitor_status.banner.isVisibleTo(win)
-    # With no key set, "Reveal" shows the mask (there's nothing to reveal) --
-    # the point is that it's no longer the previous router's real "sk-..." key.
+    # With no key set, "Reveal" shows the mask (there's nothing to reveal),
+    # not the previous router's real "sk-..." key.
     win._configure_panel.api_key_box.reveal_key(True)
     assert not win._configure_panel.api_key_box.key_label.text().startswith("sk-")
     assert win._configure_panel.api_key_box._api_key == ""
@@ -584,7 +578,7 @@ def test_failed_router_launch_is_reported(win):
 def test_member_fields_are_editable(win):
     win._configure_panel.load_profile(Profile(name="Host", mode="router", image="img",
                              members=[RouterMember(profile="Qwen")]))
-    # The spec's own recommended setup (load-on-startup for the primary model,
+    # The recommended setup (load-on-startup for the primary model,
     # a pinned id matching what a harness already uses) must be reachable.
     win._configure_panel.set_member_fields(0, model_id="pinned-id", load_on_startup=True, stop_timeout=30)
     [m] = win._configure_panel.current_profile().members
@@ -667,10 +661,10 @@ def test_detached_checkbox_hidden_in_router_mode(win):
 
 
 def test_member_candidates_include_profile_saved_this_session(win):
-    # Regression: a member profile saved this session must appear in the
-    # add-member list without an app restart. The natural flow leaves the new
-    # model's name in the Name field while the form is back in router mode; the
-    # old filter excluded exactly that name, hiding the just-made member.
+    # A member profile saved this session must appear in the add-member list
+    # without an app restart. The natural flow leaves the new model's name in
+    # the Name field while the form is back in router mode; the candidate
+    # filter must not exclude that name.
     base = Path(win_base(win))
     _member_profile(base, name="modelB")
     win._configure_panel.name_edit.setText("modelB")                 # name still lingers in the field
@@ -688,9 +682,8 @@ def test_member_candidates_exclude_routers(win):
 
 
 def test_fresh_window_hides_router_widgets_in_default_server_mode(win):
-    # Regression: on startup no profile is loaded and the mode combo defaults to
-    # "server"; the router-only member widgets must be hidden without the user
-    # having to flip the mode combo (which used to be the only trigger).
+    # A fresh window in the default server mode hides the router-only member
+    # widgets without the user flipping the mode combo.
     assert win._configure_panel.mode_combo.currentData() == "server"
     assert win._configure_panel.add_member_btn.isVisibleTo(win.centralWidget()) is False
     assert win._configure_panel.members_list.isVisibleTo(win.centralWidget()) is False
@@ -721,8 +714,7 @@ def test_benchmark_has_its_own_tab_and_config_strip_hidden_off_configure(win):
 
 
 def test_stopped_instance_card_offers_remove(win):
-    # A stopped instance's card action button switches to Remove (podman rm),
-    # carried over from the old table's ✕ button -- see StatCard.update_row.
+    # A stopped instance's card action button switches to Remove (podman rm).
     removed = []
     win.monitor_panel.instance_remove_requested.connect(removed.append)
     win.monitor_panel.set_instance_cards({"rows": [
@@ -747,9 +739,8 @@ def test_running_instance_offers_stop(win):
 
 
 def test_router_status_clears_when_router_not_running(win, monkeypatch):
-    # Regression: after a router stops/is removed, the models table + banners
-    # kept showing its model list + "connected". update_status must clear
-    # them when the container isn't running.
+    # After a router stops or is removed, update_status must clear the models
+    # table and banners rather than leave the stale model list + "connected".
     win._configure_panel.load_profile(Profile(name="R", mode="router", image="img",
                              members=[RouterMember(profile="g12b")]))
     # seed a stale "connected + one model" state
@@ -800,9 +791,9 @@ def test_build_profile_update_detected_after_combo_reset(qtbot):
 
 
 def test_save_in_router_mode_keeps_single_server_settings(win):
-    """Pressing Save while the form is flipped to router mode must not strip
-    the profile's member-level settings (ctx-size came back 0 after a reopen).
-    Mode purity is enforced at argv time, not by destroying the saved dict."""
+    """Pressing Save while the form is flipped to router mode keeps the
+    profile's member-level settings (ctx-size survives a reopen). Mode purity
+    is enforced at argv time, not by destroying the saved dict."""
     from llama_launcher.core.command_builder import build_command
     win._configure_panel.load_profile(Profile(
         name="M", image="img", model="/models/m.gguf",
@@ -835,8 +826,8 @@ def test_settings_survive_router_save_and_reload_round_trip(win):
 
 
 def test_exposure_banner_tracks_bind_host_edit_in_router_mode(win):
-    """Switching 0.0.0.0 -> 127.0.0.1 while IN router mode must clear the
-    exposure banner immediately (it used to need a mode round-trip)."""
+    """Switching 0.0.0.0 -> 127.0.0.1 while IN router mode clears the
+    exposure banner immediately, without a mode round-trip."""
     _member_profile(store.default_base_dir())
     _router_win(win, runtime=Runtime(bind_host="0.0.0.0"))
     assert "0.0.0.0" in win.monitor_status.banner.text()

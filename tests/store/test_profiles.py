@@ -36,8 +36,7 @@ def test_stop_timeout_round_trips():
 
 
 def test_stop_timeout_defaults_for_legacy_profile():
-    # A profile saved before stop_timeout existed has no such key; it must load
-    # with the 10s default rather than crashing.
+    # A profile JSON with no stop_timeout key loads with the 10s default.
     legacy = profile_to_dict(Profile(name="Old"))
     legacy["runtime"].pop("stop_timeout", None)
     assert profile_from_dict(legacy).runtime.stop_timeout == 10
@@ -81,7 +80,7 @@ def test_router_profile_round_trips(tmp_path):
 
 
 def test_legacy_profile_json_without_new_fields_still_loads():
-    # Profiles written by earlier versions have no mode/members/bind_host.
+    # A profile JSON with no mode/members/bind_host keys loads with defaults.
     back = profile_from_dict({"name": "Old", "model": "/models/a.gguf"})
     assert back.mode == "server"
     assert back.members == []
@@ -118,7 +117,7 @@ def test_detached_round_trips():
 
 def test_profile_without_detached_key_defaults_false():
     from llama_launcher.store.profiles import profile_from_dict
-    # A profile JSON written before this field existed has no runtime.detached.
+    # A profile JSON with no runtime.detached key.
     p = profile_from_dict({"name": "Legacy", "runtime": {"binary": "podman"}})
     assert p.runtime.detached is False
 

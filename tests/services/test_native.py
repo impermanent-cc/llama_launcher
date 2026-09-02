@@ -62,14 +62,13 @@ def test_is_alive_true_for_self():
 
 
 def test_is_alive_true_immediately_after_spawn():
-    """Regression: Popen returns before the child execs, and /proc/<pid>/cmdline
-    reads empty until it does. is_alive() must not call that dead -- every pid
-    it rejects has its registry entry UNLINKED by list_native_instances(), which
+    """Popen returns before the child execs, and /proc/<pid>/cmdline reads
+    empty until it does. is_alive() must not call that dead: every pid it
+    rejects has its registry entry UNLINKED by list_native_instances(), which
     would orphan a native server that is merely still starting.
 
-    Checked in a loop because the window is sub-millisecond: a single call hit
-    it only ~10-20% of the time, which is exactly what made the old assertion
-    flaky on every supported Python.
+    Checked in a loop because the window is sub-millisecond and a single call
+    rarely lands inside it.
     """
     import sys
     for _ in range(40):

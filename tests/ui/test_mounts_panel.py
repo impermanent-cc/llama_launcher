@@ -26,7 +26,7 @@ def test_mounts_panel_item_changed_emits_signal(qtbot):
 
 
 def test_add_row_does_not_crash_when_changed_reads_mounts(qtbot):
-    # Regression for Bug 3: itemChanged fires mid-construction; a slot that
+    # itemChanged fires mid-construction; a slot that
     # calls mounts() must not crash on a half-built row (cellWidget -> None).
     panel = MountsPanel()
     qtbot.addWidget(panel)
@@ -38,7 +38,7 @@ def test_add_row_does_not_crash_when_changed_reads_mounts(qtbot):
 
 
 def test_role_combo_change_emits_zero_arg_changed(qtbot):
-    # Regression for Bug 4: combo currentTextChanged passes an arg; the 0-arg
+    # combo currentTextChanged passes an arg; the 0-arg
     # changed signal must still fire without a TypeError.
     panel = MountsPanel()
     qtbot.addWidget(panel)

@@ -91,9 +91,8 @@ class Profile:
 def profile_port(profile: "Profile") -> int:
     """The port `profile` serves on: its explicit setting, else DEFAULT_PORT.
 
-    The same lookup was repeated at every layer (launch, monitor, benchmark,
-    report, headless), so the default lived in ~30 places and could drift. Read
-    it through here instead.
+    Every layer (launch, monitor, benchmark, report, headless) reads the port
+    through here so the default cannot drift between them.
     """
     return profile.settings.get("port", DEFAULT_PORT)
 

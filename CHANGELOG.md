@@ -14,7 +14,13 @@ not on the release page, so the two never drift.
 
 ### Changed
 
+- Code comments and docstrings now describe only what the code does; history,
+  review and plan narration was removed throughout `src/` and `tests/`.
+
 ### Fixed
+
+- The Configure form hides the native-only and RPC-only rows on first start
+  instead of only after the launch-mode combo is flipped.
 
 ## [0.1.0] - 2026-09-02
 
