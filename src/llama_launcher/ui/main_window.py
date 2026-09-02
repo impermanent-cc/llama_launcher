@@ -1,9 +1,7 @@
-# subprocess is no longer called directly in this file (open_web_ui's
-# subprocess.Popen call moved to ReportController,
-# ui/controllers/report_controller.py) but stays imported here too: the test
-# suite monkeypatches it as `mw.subprocess.Popen`, and both names resolve to
-# the same module object report_controller.py's own import uses, so the patch
-# still reaches the real call site.
+# subprocess is not called in this file (ReportController.open_web_ui owns
+# the Popen call) but stays imported: the test suite monkeypatches it as
+# `mw.subprocess.Popen`, and both names resolve to the same module object
+# report_controller.py imports, so the patch reaches the real call site.
 import subprocess
 
 from PySide6.QtCore import Qt
@@ -25,15 +23,13 @@ from llama_launcher.store.profiles import (
     default_base_dir, list_profiles, save_profile, delete_profile,
     load_config,
 )
-# health, router_api, gpu, metrics and model_info are no longer called
-# directly in this file (that behavior moved to MonitorController/
-# LaunchController/ReportController -- ui/controllers/monitor_controller.py,
-# ui/controllers/launch_controller.py, ui/controllers/report_controller.py)
-# but stay imported here too: the test suite monkeypatches them as
+# health, router_api, gpu, metrics and model_info are not called in this
+# file (MonitorController/LaunchController/ReportController own that
+# behavior) but stay imported: the test suite monkeypatches them as
 # `mw.health.probe_health` / `llama_launcher.ui.main_window.router_api.*` /
 # `mw.gpu.query_gpus` / `mw.metrics.fetch_metrics` / `mw.model_info.*`, and
-# all these names resolve to the same module objects the controllers' own
-# imports use, so the patch still reaches the real call sites.
+# the names resolve to the same module objects the controllers import, so
+# the patches reach the real call sites.
 from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
 from llama_launcher.ui.panels.configure_panel import ConfigurePanel
 from llama_launcher.ui.panels.monitor_panel import MonitorPanel
@@ -50,16 +46,13 @@ def base_dir():
     return default_base_dir()
 
 
-# build_monitor_data used to be defined in this module; it now lives in
-# monitor_controller.py (moved along with the status/instances/monitor/
-# log-follower/stats/router-poll behavior that uses it) but is re-exported
-# here too, since the test suite still reaches it as
+# build_monitor_data lives in monitor_controller.py and is re-exported here
+# because the test suite reaches it as
 # `llama_launcher.ui.main_window.build_monitor_data`.
 #
-# This import is placed after base_dir() (which monitor_controller.py imports
-# back, lazily, per-method -- see its local `from llama_launcher.ui.main_window
-# import base_dir` calls) so that name is already bound on this module by the
-# time those calls resolve.
+# This import comes after base_dir(): monitor_controller.py imports base_dir
+# back from this module lazily, per method, so the name must already be
+# bound here by the time those imports resolve.
 from llama_launcher.ui.controllers.monitor_controller import (  # noqa: E402
     MonitorController, build_monitor_data,
 )
@@ -68,17 +61,14 @@ from llama_launcher.ui.controllers.launch_controller import (  # noqa: E402
     LaunchController,
 )
 
-# BenchmarkWorker used to be defined in this module; it now lives in
-# benchmark_controller.py (moved along with the benchmark run lifecycle
-# behavior that uses it). No test reaches it via main_window's namespace, so
-# it is not re-exported here -- only BenchmarkController is needed.
+# BenchmarkWorker lives in benchmark_controller.py and is not re-exported
+# here: no test reaches it through main_window's namespace.
 from llama_launcher.ui.controllers.benchmark_controller import (  # noqa: E402
     BenchmarkController,
 )
 
-# Owns report/export/web-ui behavior (see report_controller.py). No worker
-# state moved with it, so unlike the controllers above it needs no re-exported
-# helper class -- only ReportController is needed.
+# Owns report/export/web-ui behavior (see report_controller.py). It has no
+# helper class that tests reach through this module.
 from llama_launcher.ui.controllers.report_controller import (  # noqa: E402
     ReportController,
 )
@@ -115,9 +105,9 @@ class MainWindow(QMainWindow):
         # web-ui button .connect() calls below (ConfigurePanel).
         self._report = ReportController(self)
         # ConfigurePanel's own __init__ wires its lifecycle/report/fetch
-        # buttons straight to self.window._launch.<m> / self.window._report.<m>
-        # (Task 6 repoint off the MainWindow facade), so it must be built AFTER
-        # all four controllers above exist as instance attributes.
+        # buttons straight to self.window._launch.<m> / self.window._report.<m>,
+        # so it must be built AFTER all four controllers above exist as
+        # instance attributes.
         self._configure_panel = ConfigurePanel(self)
 
         # Tabs
@@ -129,8 +119,8 @@ class MainWindow(QMainWindow):
         self.monitor_panel.instance_stop_requested.connect(self._monitor._on_instance_stop)
         self.monitor_panel.instance_remove_requested.connect(self._monitor._on_instance_remove)
         # Scroll the Monitor tab (like Configure): a short window otherwise
-        # squeezes the log to a few lines. The log now owns the tab (benchmark
-        # moved to its own tab), so it fills the height.
+        # squeezes the log to a few lines. The log owns the tab, so it fills
+        # the height.
         monitor_scroll = QScrollArea()
         monitor_scroll.setWidgetResizable(True)
         monitor_scroll.setWidget(self.monitor_panel)
@@ -227,10 +217,11 @@ class MainWindow(QMainWindow):
 
         self._reload_profile_list()
 
-        # Apply the initial mode's visibility. The combo defaults to "server"
-        # and startup loads no profile, so currentIndexChanged never fires --
-        # without this, the router-only member widgets (created visible) show on
-        # the default server-mode form until the user flips the mode combo.
+        # Apply the initial visibility for both mode combos. They default to
+        # "server" and "container" and startup loads no profile, so
+        # currentIndexChanged never fires; the router-only, native-only and
+        # RPC-only rows are created visible and must be hidden explicitly.
+        self._configure_panel._on_launch_mode_changed()
         self._configure_panel._on_mode_changed()
 
         self._configure_panel.refresh_preview()
@@ -439,7 +430,7 @@ class MainWindow(QMainWindow):
     def refresh_router_panel_header(self, ensure_key: bool = True) -> None:
         p = self._configure_panel.current_profile()
         if p.mode != "router":
-            # Clear relocated router state so a previous router's exposure
+            # Clear router state so a previous router's exposure
             # banner, API key, and harness endpoint don't linger on the
             # Configure/Monitor tabs after switching to an unrelated profile.
             self._set_router_exposure("")
@@ -473,24 +464,22 @@ class MainWindow(QMainWindow):
         timer is a no-op, and each drain() below is itself a no-op when its
         controller owns nothing currently running.
 
-        self._status_timer (update_status polling) is the only timer left on
-        MainWindow, stopped directly here. The update-check singleShot timer
-        lives on LaunchController but is also stopped directly here, early --
-        ahead of MonitorController.drain(), which pumps the event loop and
-        could otherwise let it fire mid-teardown. Everything else -- the
-        stats worker and in-flight monitor gather (MonitorController.
-        drain()), the fetch/update QThreads (LaunchController.drain()), and a
-        running benchmark QThread (BenchmarkController.drain()) -- is owned
-        by its controller, so teardown is otherwise just a sequence of
-        drain() calls in controller-construction order.
+        self._status_timer (update_status polling) is the only timer owned by
+        MainWindow and is stopped directly here. The update-check singleShot
+        timer lives on LaunchController but is also stopped directly here,
+        early: MonitorController.drain() pumps the event loop and could
+        otherwise let it fire mid-teardown. Everything else (the stats worker
+        and in-flight monitor gather, the fetch/update QThreads, a running
+        benchmark QThread) is owned by its controller, so the rest of
+        teardown is a sequence of drain() calls in controller-construction
+        order.
         """
         self._status_timer.stop()
-        # Stop the update-check singleShot timer early, before drain() below
-        # pumps the event loop (MonitorController.drain()'s stats-worker wait
-        # loop calls QCoreApplication.processEvents()) -- otherwise the timer
-        # can fire mid-teardown and spawn an _UpdateWorker. LaunchController.
-        # drain() also stops it (idempotent), but this restores the original
-        # early-stop ordering.
+        # Stop the update-check singleShot timer before drain() below pumps
+        # the event loop (MonitorController.drain()'s stats-worker wait loop
+        # calls QCoreApplication.processEvents()); otherwise the timer can
+        # fire mid-teardown and spawn an _UpdateWorker. LaunchController.
+        # drain() also stops it, idempotently.
         _update_timer = getattr(self._launch, "_update_timer", None)
         if _update_timer is not None:
             _update_timer.stop()
