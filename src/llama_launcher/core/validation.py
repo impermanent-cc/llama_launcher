@@ -88,39 +88,32 @@ def validate(profile: Profile, running_ports: tuple = (),
         issues.append(Issue("error",
                             f"Runtime '{profile.runtime.binary}' not found on PATH."))
 
+    is_ik = profile.runtime.engine == "ik_llama.cpp"
+    img = "" if is_native else profile.image.lower()
+    looks_ik = "ik-llama" in img or "ik_llama" in img
+
     # ik_llama.cpp has no router: its llama-server carries no --models-preset (or
     # any preset/router option at all), so a router launch dies immediately on
-    # "unknown argument". Verified against ik-llama-cpp:cu12-server.
-    if profile.mode == "router" and profile.runtime.engine == "ik_llama.cpp":
+    # "unknown argument". Verified against ik-llama-cpp:cu12-server. Keyed on
+    # the image as well as the engine field, because the engine defaults to
+    # llama.cpp and nothing sets it from the image.
+    if profile.mode == "router" and (is_ik or looks_ik):
         issues.append(Issue("error",
-            "ik_llama.cpp does not support router mode; it has no --models-preset. "
-            "Switch the Engine to llama.cpp for router profiles."))
+            "ik_llama.cpp has no router mode (no --models-preset). Use the llama.cpp "
+            "engine and a llama.cpp image for router profiles."))
 
     if not is_native:
-        img = profile.image.lower()
-        looks_ik = "ik-llama" in img or "ik_llama" in img
-        if profile.runtime.engine == "ik_llama.cpp" and img and not looks_ik:
+        if is_ik and img and not looks_ik:
             issues.append(Issue(
                 "warning",
                 "Engine is ik_llama.cpp but the image doesn't look like an ik build "
                 "(no 'ik-llama'/'ik_llama' in the ref); ik-only flags may be rejected. "
                 "Use an ik-llama-cpp image."))
-        elif profile.runtime.engine == "llama.cpp" and looks_ik:
-            if profile.mode == "router":
-                # Same ik-has-no-router failure as the engine check above, but
-                # keyed on the image: the engine field defaults to llama.cpp
-                # and nothing sets it from the image, so a router pointed at an
-                # ik image would pass here and die on --models-preset.
-                issues.append(Issue(
-                    "error",
-                    "The image looks like an ik_llama.cpp build, and ik_llama.cpp has "
-                    "no router mode (no --models-preset). Use a llama.cpp image for "
-                    "router profiles."))
-            else:
-                issues.append(Issue(
-                    "warning",
-                    "Engine is llama.cpp but the image looks like an ik_llama.cpp build; "
-                    "switch the Engine to ik_llama.cpp to reach its flags."))
+        elif not is_ik and looks_ik and profile.mode != "router":
+            issues.append(Issue(
+                "warning",
+                "Engine is llama.cpp but the image looks like an ik_llama.cpp build; "
+                "switch the Engine to ik_llama.cpp to reach its flags."))
 
         for m in profile.mounts:
             if bool(m.host) != bool(m.container):

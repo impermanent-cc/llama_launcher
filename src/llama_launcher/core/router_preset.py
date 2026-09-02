@@ -12,8 +12,7 @@ import shlex
 from dataclasses import dataclass, field
 
 from .settings_catalog import (
-    CATALOG, ROUTER_ONLY_KEYS,
-    IK_EXTRA_KV_CACHE_TYPES, IK_EXTRA_SPEC_TYPES, IK_SPEC_TYPE_RENAMES,
+    CATALOG, ROUTER_ONLY_KEYS, SKIP, engine_value,
 )
 from .spec import Profile, RouterMember, member_model_id
 
@@ -84,10 +83,9 @@ def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
 
     Applies the SAME gating as command_builder._owned_server_pairs so the two
     argv-generation paths agree: engine-gated flags never reach a mismatched
-    engine, ik-only KV-cache VALUES are dropped on a mainline launch, an enum
-    left at its default (a "leave engine default" sentinel) is skipped, blanks
-    emit nothing, and --load-mode supersedes the legacy --no-mmap/--mlock. A
-    router that skipped these emitted flags the child llama-server then rejects.
+    engine, per-engine value rules come from the shared engine_value() helper,
+    blanks emit nothing, and --load-mode supersedes the legacy --no-mmap/--mlock.
+    A router that skipped these emitted flags the child llama-server then rejects.
     """
     out: list[tuple[str, str]] = []
     engine = profile.runtime.engine
@@ -102,18 +100,8 @@ def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
             continue
         if setting.engine != "any" and setting.engine != engine:
             continue
-        value = profile.settings[key]
-        if (key in ("cache-type-k", "cache-type-v")
-                and value in IK_EXTRA_KV_CACHE_TYPES and engine != "ik_llama.cpp"):
-            continue
-        # Same layering for spec-type: drop ik-only values on mainline, rename
-        # the shared draft-* spellings to ik's un-prefixed ones on ik.
-        if key == "spec-type":
-            if value in IK_EXTRA_SPEC_TYPES and engine != "ik_llama.cpp":
-                continue
-            if engine == "ik_llama.cpp":
-                value = IK_SPEC_TYPE_RENAMES.get(value, value)
-        if setting.type == "enum" and value == setting.default:
+        value = engine_value(key, setting, profile.settings[key], engine)
+        if value is SKIP:
             continue
         # The INI key is the flag itself, minus dashes, including negative
         # flags such as --no-cors-credentials, whose key is "no-cors-credentials".

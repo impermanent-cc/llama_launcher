@@ -475,17 +475,8 @@ def test_container_launch_host_unchanged():
 # "stoi" plus the usage text and exit before the model loads (probed against
 # ik-llama-cpp:cpu-server), while an integer proceeds.
 
-def _ik_layers_profile():
-    p = _golden_profile()
-    p.runtime = replace(p.runtime, engine="ik_llama.cpp")
-    p.image = "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
-    return p
-
-
 def test_ik_launch_translates_all_layers_to_an_integer():
-    p = _ik_layers_profile()
-    p.settings["n-gpu-layers"] = "all"
-    p.settings["spec-draft-ngl"] = "all"
+    p = _ik_srv(**{"n-gpu-layers": "all", "spec-draft-ngl": "all"})
     p.draft_model = "/models/draft.gguf"
     argv = build_command(p)
     assert argv[argv.index("--n-gpu-layers") + 1] == "999"
@@ -494,9 +485,7 @@ def test_ik_launch_translates_all_layers_to_an_integer():
 
 
 def test_ik_launch_drops_auto_layers_instead_of_emitting_a_token():
-    p = _ik_layers_profile()
-    p.settings["n-gpu-layers"] = "auto"
-    p.settings["spec-draft-ngl"] = "auto"
+    p = _ik_srv(**{"n-gpu-layers": "auto", "spec-draft-ngl": "auto"})
     argv = build_command(p)
     assert "--n-gpu-layers" not in argv
     assert "--gpu-layers-draft" not in argv
@@ -504,8 +493,7 @@ def test_ik_launch_drops_auto_layers_instead_of_emitting_a_token():
 
 
 def test_ik_launch_passes_integer_layers_through():
-    p = _ik_layers_profile()
-    p.settings["n-gpu-layers"] = 40
+    p = _ik_srv(**{"n-gpu-layers": 40})
     argv = build_command(p)
     assert argv[argv.index("--n-gpu-layers") + 1] == "40"
 

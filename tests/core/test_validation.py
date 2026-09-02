@@ -435,16 +435,10 @@ def test_router_member_with_a_different_engine_is_refused():
                for m in errors), errors
 
 
-def test_router_member_with_the_same_engine_is_not_flagged():
+def test_mainline_router_with_mainline_members_has_no_engine_errors():
     issues = validate(_router(), members=[(RouterMember(profile="Qwen"), _member_profile())],
                       api_key_present=True)
-    assert not any("engine" in m.lower() for m in _errors(issues))
-
-
-def test_mainline_engine_router_is_allowed():
-    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), _member_profile())],
-                      api_key_present=True)
-    assert not any("does not support router mode" in m for m in _errors(issues))
+    assert not any("router mode" in m or "engine" in m.lower() for m in _errors(issues))
 
 
 def test_native_router_is_refused():

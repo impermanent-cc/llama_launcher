@@ -55,6 +55,7 @@ for f in --n-gpu-layers --n-predict --embeddings --alias; do
     extras+="$f"$'\n'
   fi
 done
+extras="$(printf '%s' "$extras" | sort -u)"
 
 {
   echo "# Flags accepted by ik_llama.cpp's llama-server, from build cu12-server."
@@ -62,7 +63,7 @@ done
   echo "# TWO sources, because ik's --help under-reports what its parser accepts:"
   echo "#   1. every flag printed by 'llama-server --help'"
   echo "#   2. flags confirmed accepted by EXECUTING them (undocumented but valid):"
-  echo "#      $(echo "$extras" | grep -E '^-' | sort -u | paste -sd, - | sed 's/,/, /g')"
+  echo "#      $(printf '%s' "$extras" | paste -sd, - | sed 's/,/, /g')"
   echo "#"
   echo "# Regenerate with tests/fixtures/regen_ik_flags.sh."
   printf '%s\n%s' "$help_flags" "$extras" | grep -E '^-' | sort -u

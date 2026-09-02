@@ -17,19 +17,27 @@ to newer images, then read the diff: a flag that disappears means the engine
 renamed or dropped it, and the catalog has to follow.
 """
 
+import functools
 import pathlib
 
 import pytest
 
-from llama_launcher.core.settings_catalog import CATALOG, MAINLINE_ONLY_FLAGS
+from llama_launcher.core.settings_catalog import CATALOG, MAINLINE_ONLY_FLAGS, for_engine
 
 FIXTURE = (pathlib.Path(__file__).resolve().parents[1]
            / "fixtures" / "llama_server_flags_b10711.txt")
 
+# The parametrised cases below select with for_engine(), the exact predicate
+# that decides what reaches each engine's launch, so the tests cannot drift
+# from what the launcher emits.
+MAINLINE_KEYS = sorted(for_engine(CATALOG, "llama.cpp"))
+IK_KEYS = sorted(for_engine(CATALOG, "ik_llama.cpp"))
 
-def _upstream_flags() -> set[str]:
-    return {ln.strip() for ln in FIXTURE.read_text().splitlines()
-            if ln.strip() and not ln.startswith("#")}
+
+@functools.cache
+def _upstream_flags() -> frozenset[str]:
+    return frozenset(ln.strip() for ln in FIXTURE.read_text().splitlines()
+                     if ln.strip() and not ln.startswith("#"))
 
 
 def test_fixture_looks_like_a_real_help_dump():
@@ -41,8 +49,7 @@ def test_fixture_looks_like_a_real_help_dump():
         assert anchor in flags
 
 
-@pytest.mark.parametrize(
-    "key", [k for k, s in CATALOG.items() if s.engine in ("any", "llama.cpp")])
+@pytest.mark.parametrize("key", MAINLINE_KEYS)
 def test_mainline_setting_uses_a_flag_upstream_accepts(key):
     # Asserts on setting.flag alone, NOT on the aliases: _render_setting always
     # emits the primary flag, so a setting whose flag was renamed still breaks
@@ -75,9 +82,10 @@ IK_FIXTURE = (pathlib.Path(__file__).resolve().parents[1]
               / "fixtures" / "ik_llama_server_flags_cu12.txt")
 
 
-def _ik_flags() -> set[str]:
-    return {ln.strip() for ln in IK_FIXTURE.read_text().splitlines()
-            if ln.strip() and not ln.startswith("#")}
+@functools.cache
+def _ik_flags() -> frozenset[str]:
+    return frozenset(ln.strip() for ln in IK_FIXTURE.read_text().splitlines()
+                     if ln.strip() and not ln.startswith("#"))
 
 
 def test_ik_fixture_looks_like_a_real_capture():
@@ -92,8 +100,7 @@ def test_ik_fixture_looks_like_a_real_capture():
     assert "--n-gpu-layers" in flags
 
 
-@pytest.mark.parametrize(
-    "key", [k for k, s in CATALOG.items() if s.engine in ("any", "ik_llama.cpp")])
+@pytest.mark.parametrize("key", IK_KEYS)
 def test_setting_reaching_ik_is_accepted_by_ik(key):
     setting = CATALOG[key]
     if setting.engine == "any":
@@ -106,14 +113,14 @@ def test_setting_reaching_ik_is_accepted_by_ik(key):
         f"launch, but ik does not accept {setting.flag}. {hint}")
 
 
-def test_ik_only_settings_are_actually_checked_against_ik():
-    # The parametrised test above used to select engine == "any" only, which
-    # left every ik-only flag unpinned: a typo there kept the suite green while
-    # the ik launch died. Keep the ik bucket in the selection.
-    ik_only = [k for k, s in CATALOG.items() if s.engine == "ik_llama.cpp"]
-    assert ik_only
-    ik = _ik_flags()
-    assert all(CATALOG[k].flag in ik for k in ik_only)
+def test_parametrised_selections_cover_the_engine_specific_buckets():
+    # The ik case used to select engine == "any" only, which left every ik-only
+    # flag unpinned: a typo there kept the suite green while the ik launch died.
+    # Guard the selections themselves, not the per-key assertion.
+    assert any(CATALOG[k].engine == "ik_llama.cpp" for k in IK_KEYS)
+    assert any(CATALOG[k].engine == "llama.cpp" for k in MAINLINE_KEYS)
+    assert not any(CATALOG[k].engine == "llama.cpp" for k in IK_KEYS)
+    assert not any(CATALOG[k].engine == "ik_llama.cpp" for k in MAINLINE_KEYS)
 
 
 def test_mainline_only_flags_are_actually_absent_from_ik():

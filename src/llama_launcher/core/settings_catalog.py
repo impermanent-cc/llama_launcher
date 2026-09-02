@@ -35,14 +35,6 @@ KV_CACHE_TYPES = ("f32", "f16", "bf16", "q8_0", "q4_0", "q4_1", "iq4_nl", "q5_0"
 # case-sensitive. The wider ik iq-quants need GGML_IQK_FA_ALL_QUANTS=ON images.
 IK_EXTRA_KV_CACHE_TYPES = ("q6_0", "q8_KV")
 
-# ik parses -ngl and -ngld with a bare stoi, so mainline's "auto"/"all" tokens
-# for the int_or_token layer settings abort an ik launch ("stoi" plus the usage
-# text; probed against ik-llama-cpp:cpu-server). On an ik launch "auto" (let the
-# engine decide) drops the flag, since ik's own default is the only "auto" it
-# has, and "all" becomes 999, the conventional everything value both engines
-# take as an integer. None means "emit nothing".
-IK_LAYER_TOKENS = {"auto": None, "all": "999"}
-
 # The shared spec-type enum uses mainline's spellings (common/speculative.cpp
 # name map). ik's map (also common/speculative.cpp there) has no "draft-"
 # prefix on the draft-model types, so these are renamed at emit time on an ik
@@ -55,6 +47,47 @@ IK_SPEC_TYPE_RENAMES = {
     "draft-dspark": "dspark",
     "draft-mtp": "mtp",
 }
+
+# engine_value() returns this when the setting must emit nothing at all.
+SKIP = object()
+
+
+def engine_value(key: str, setting: "Setting", value, engine: str):
+    """Translate one setting VALUE for the engine that will parse it, or SKIP.
+
+    The one place per-engine value rules live, so command_builder (argv) and
+    router_preset (INI) cannot drift; both call this after the engine gate on
+    `setting.engine`, which handles whole settings rather than values.
+
+    * ik-only KV-cache quants (q6_0/q8_KV) layer onto the shared cache-type-k/-v
+      enums; a JSON-leftover value is dropped on a mainline launch.
+    * spec-type: ik-only values are dropped on mainline, and the shared draft-*
+      spellings are renamed to ik's un-prefixed ones on ik.
+    * int_or_token layer counts: ik parses -ngl/-ngld with a bare stoi, so the
+      "auto"/"all" tokens abort an ik launch ("stoi" plus the usage text, probed
+      against ik-llama-cpp:cpu-server). "auto" drops the flag (ik's own default
+      is its only auto) and "all" becomes the setting's maximum, an integer both
+      engines take.
+    * An enum left at its own default is a "leave it at the engine default"
+      sentinel; re-emitting it is redundant at best and, for ik's --mla-use
+      "auto", invalid. Scoped to enums so numeric defaults that are legitimate
+      values (sleep-idle-seconds -1) still emit.
+    """
+    is_ik = engine == "ik_llama.cpp"
+    if key in ("cache-type-k", "cache-type-v") and value in IK_EXTRA_KV_CACHE_TYPES and not is_ik:
+        return SKIP
+    if key == "spec-type":
+        if value in IK_EXTRA_SPEC_TYPES and not is_ik:
+            return SKIP
+        if is_ik:
+            value = IK_SPEC_TYPE_RENAMES.get(value, value)
+    if setting.type == "int_or_token" and is_ik and value in setting.tokens:
+        if value == "auto":
+            return SKIP
+        value = int(setting.maximum)
+    if setting.type == "enum" and value == setting.default:
+        return SKIP
+    return value
 
 # ik-only spec-type values, layered onto the shared enum like the KV-cache
 # extras: offered by the UI only on the ik engine, dropped at emit time on a
@@ -816,12 +849,6 @@ _ALL = [
     # ik_llama.cpp-only flags (engine-gated). Shown only when engine == ik and
     # dropped from argv on a mainline launch (current_profile + command_builder).
     #
-    # These eight used to sit in their own "ik_llama.cpp" form group. The
-    # 2026-09-01 completeness pass took that group out: with 68 ik-only settings
-    # a single flat section was unnavigable, and for_engine() already hides them
-    # on mainline, so each now lives with the mainline settings it belongs
-    # beside. Only the `group` strings changed; keys, flags and behaviour did
-    # not, so saved profiles are untouched.
     Setting("run-time-repack", "--run-time-repack", "bool", False, "GPU & Memory", ("-rtr",),
             engine="ik_llama.cpp",
             tooltip="ik_llama.cpp only. Repack tensors kept in RAM to a row-interleaved "
@@ -1255,18 +1282,11 @@ _ALL = [
 # against ghcr.io/ikawrakow/ik-llama-cpp:cu12-server and checking for "unknown
 # argument". Regenerate with tests/fixtures/regen_ik_flags.sh.
 #
-# SHORTER THAN IT WAS: five settings left this list in the 2026-09-01 completeness
-# pass without losing anything on mainline. Mainline renamed each of these and
-# kept the ik spelling as an alias, so switching `flag` to the older spelling
-# makes ONE setting serve both engines instead of gating it to mainline:
-#     --typical-p        -> --typical
-#     --sampler-seq      -> --sampling-seq
-#     --spec-draft-ngl   -> --gpu-layers-draft
-#     --spec-draft-threads -> --threads-draft
-#     --spec-draft-device  -> --device-draft
-# The Setting keys are unchanged, so saved profiles keep working. This leans on
-# mainline keeping those aliases; test_catalog_upstream_flags pins every flag
-# against both engines, so a future removal shows up as a fixture diff.
+# When mainline keeps the ik spelling as an alias (--typical for --typical-p,
+# say), point the Setting's `flag` at that spelling and keep the mainline one
+# in `aliases` instead of listing it here: one setting then serves both engines.
+# test_catalog_upstream_flags pins every flag against both engines, so mainline
+# dropping such an alias shows up as a fixture diff.
 MAINLINE_ONLY_FLAGS: frozenset = frozenset({
     "--agent", "--api-prefix", "--cache-reuse", "--checkpoint-min-step",
     "--cors-headers", "--cors-methods", "--cors-origins", "--cpu-mask",
