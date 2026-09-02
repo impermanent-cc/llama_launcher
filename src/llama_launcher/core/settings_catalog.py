@@ -119,7 +119,9 @@ _ALL = [
             0, 999, 1, tokens=("auto", "all"),
             tooltip="Number of model layers offloaded to the GPU. Higher = faster but more "
                     "VRAM. 'all' offloads everything; 'auto' lets llama.cpp choose; a big "
-                    "number like 99 effectively means all."),
+                    "number like 99 effectively means all. ik_llama.cpp takes only a "
+                    "number: 'all' is sent as 999 and 'auto' leaves ik's own default "
+                    "(no offload), so set a number for ik."),
     Setting("n-cpu-moe", "--n-cpu-moe", "int", 0, "GPU & Memory", ("-ncmoe",), 0, 999, 1,
             tooltip="For Mixture-of-Experts models: keep the experts of the first N layers "
                     "on the CPU to fit a large model in limited VRAM. Higher N = less VRAM, "
@@ -417,7 +419,9 @@ _ALL = [
     Setting("spec-draft-ngl", "--gpu-layers-draft", "int_or_token", "auto", "Speculative Decoding",
             ("-ngld", "--spec-draft-ngl"), 0, 999, 1, tokens=("auto", "all"),
             tooltip="Draft-model layers to offload to GPU for speculative decoding. "
-                    "'auto' lets llama.cpp decide."),
+                    "'auto' lets llama.cpp decide. ik_llama.cpp takes only a number: "
+                    "'all' is sent as 999 and 'auto' leaves ik's own default (no "
+                    "offload), so set a number for ik."),
     Setting("spec-draft-n-max", "--spec-draft-n-max", "int", 3, "Speculative Decoding", (),
             1, 64, 1,
             tooltip="Tokens the draft model proposes per step (speculative decoding). "

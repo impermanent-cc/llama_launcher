@@ -16,7 +16,7 @@ not on the release page, so the two never drift.
 
 ### Fixed
 
-## [0.1.0] - 2026-09-01
+## [0.1.0] - 2026-09-02
 
 llama_launcher v0.1.0: first release
 
