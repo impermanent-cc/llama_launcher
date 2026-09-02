@@ -43,12 +43,18 @@ After installing (below), the GUI opens on the **Configure** tab:
    The launcher reads its metadata and shows a live VRAM-fit estimate.
 3. **Set the image.** Click **Detect** to list llama.cpp images you've already pulled, or type
    one, e.g. `ghcr.io/ggml-org/llama.cpp:server-cuda` (GPU) or a CPU-tagged build for
-   CPU-only (see [Running without a GPU](#running-without-a-gpu)).
+   CPU-only (see [Running without a GPU](#running-without-a-gpu)). **Fetch latest** asks
+   GHCR for the newest tag of that image and updates the field; it sets the tag only, so
+   pull the build yourself.
 4. **Choose GPU mode** (Runtime section): **CDI** for NVIDIA (see [GPU passthrough](#gpu-passthrough)),
    or **None** for CPU-only.
 5. **Save** the profile (give it a name), then **Launch**. A terminal window opens and streams
    `llama-server`; when it's ready, the **Monitor** tab shows live throughput and the **Open Web
    UI** button opens the server.
+
+![Fetch latest: the image field updated to the newest published tag](assets/screenshots/detect.png)
+
+*Fetch latest: the Image field now carries the newest GHCR tag; the build itself is not downloaded until you pull it.*
 
 The command being built is always visible in the preview strip at the bottom. Nothing is
 hidden. `--dry-run` (below) prints it without launching.
@@ -253,6 +259,10 @@ Click a row to point the full Monitor (and logs) below at that instance; the
 profile you're editing.
 
 ## Benchmark
+
+![Benchmark tab: prompt-eval and generation tok/s per prompt size](assets/screenshots/bench.png)
+
+*The Benchmark tab: pick prompt sizes, n-predict, warmup, and repeats; each run reports prompt-eval and generation tok/s per size next to the live Stats dock.*
 
 The **Benchmark** tab runs a controlled, repeatable speed
 measurement so a config change (flags or model) can be compared apples-to-apples.

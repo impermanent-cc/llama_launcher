@@ -14,11 +14,14 @@ not on the release page, so the two never drift.
 
 ### Changed
 
+- README: new Benchmark and Fetch latest screenshots; refreshed Build, Monitor
+  and Router screenshots.
 - Code comments and docstrings now describe only what the code does; history,
   review and plan narration was removed throughout `src/` and `tests/`.
 
 ### Fixed
 
+- Dialog titles no longer carry a Qt-added " — Llama Launcher" suffix.
 - The Configure form hides the native-only and RPC-only rows on first start
   instead of only after the launch-mode combo is flipped.
 

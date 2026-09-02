@@ -203,8 +203,9 @@ def main(argv=None) -> int:
     app = QApplication([sys.argv[0]] + unknown)
     # Identity so the KDE/Wayland taskbar maps the window to the .desktop entry
     # (correct icon + pin-to-taskbar). Must match the installed .desktop basename.
+    # No applicationDisplayName: Qt would append it to every window title with
+    # an em dash ("Latest build — Llama Launcher").
     app.setApplicationName("Llama Launcher")
-    app.setApplicationDisplayName("Llama Launcher")
     app.setDesktopFileName("llama-launcher")
     # Apply our own SVG to every window and the taskbar; the .desktop
     # association alone does not set the running window's icon, so without
