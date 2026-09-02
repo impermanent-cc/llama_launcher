@@ -8,7 +8,7 @@ def test_runtime_node_defaults_to_local():
 
 def test_old_profile_json_without_node_loads_as_local():
     d = profile_to_dict(Profile(name="p"))
-    d["runtime"].pop("node", None)          # simulate a pre-node profile file
+    d["runtime"].pop("node", None)          # a profile file with no node field
     assert profile_from_dict(d).runtime.node == "local"
 
 

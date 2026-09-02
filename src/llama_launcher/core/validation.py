@@ -34,7 +34,7 @@ def _bind_host_is_addressish(bind_host: str) -> bool:
 LOOPBACK_HOSTS: frozenset = frozenset({
     "127.0.0.1", "localhost", "::1", "[::1]",
 })
-_LOOPBACK_HOSTS = LOOPBACK_HOSTS   # retained: referenced by the router rules below
+_LOOPBACK_HOSTS = LOOPBACK_HOSTS   # alias used by the router rules below
 
 
 def dial_host(bind_host: str) -> str:
@@ -94,9 +94,9 @@ def validate(profile: Profile, running_ports: tuple = (),
 
     # ik_llama.cpp has no router: its llama-server carries no --models-preset (or
     # any preset/router option at all), so a router launch dies immediately on
-    # "unknown argument". Verified against ik-llama-cpp:cu12-server. Keyed on
-    # the image as well as the engine field, because the engine defaults to
-    # llama.cpp and nothing sets it from the image.
+    # "unknown argument". Keyed on the image as well as the engine field,
+    # because the engine defaults to llama.cpp and nothing sets it from the
+    # image.
     if profile.mode == "router" and (is_ik or looks_ik):
         issues.append(Issue("error",
             "ik_llama.cpp has no router mode (no --models-preset). Use the llama.cpp "
@@ -162,7 +162,7 @@ def validate(profile: Profile, running_ports: tuple = (),
                or (not is_native and run_args_expose(profile.runtime.extra_run_args)))
     if exposed:
         # Match the renderer's blank-drop: a whitespace-only key is dropped from
-        # argv, so it is NOT real authentication (the "blank key" exposure hole).
+        # argv, so it is NOT real authentication.
         has_key = api_key_present if profile.mode == "router" \
             else bool(str(profile.settings.get("api-key", "")).strip())
         if not has_key:
@@ -365,9 +365,8 @@ def _validate_router(profile: Profile, members: tuple,
                 f"preset and will be dropped: {'; '.join(problems)}"))
 
         # llama.cpp spawns each member instance on its OWN random loopback port
-        # and strips/overrides --port from the preset (verified live b10298:
-        # "spawning server instance ... on port 45001"). A port set on a member
-        # profile therefore does nothing here -- warn, or a user watching the
+        # and strips/overrides --port from the preset. A port set on a member
+        # profile therefore does nothing here; warn, or a user watching the
         # logs concludes the router itself is randomizing its port. Clients
         # always connect through the router's port.
         if member_profile.settings.get("port") not in (None, DEFAULT_PORT):
@@ -392,7 +391,7 @@ def _validate_router(profile: Profile, members: tuple,
     # Absent OR blank both mean "--cors-origins is omitted from the argv", so
     # the server runs with upstream's default "*": read both as the CATALOG
     # default, else the most dangerous configuration becomes unwarnable
-    # (profiles saved by older UI versions stored cors-origins as "").
+    # (a saved profile can carry cors-origins as "").
     origins = str(profile.settings.get("cors-origins")
                   or CATALOG["cors-origins"].default)
     uses_agent_tools = bool(profile.settings.get("tools")

@@ -105,12 +105,12 @@ def test_merge_no_raw_is_owned_unchanged():
     assert warns == []
 
 
-# -- old mainline spellings still fold ---------------------------------------
+# -- alias mainline spellings still fold -------------------------------------
 
 def test_raw_old_spelling_folds_onto_the_respelled_setting():
-    """Before the respelling the launcher emitted --typical-p / --spec-draft-ngl
-    itself, so saved raw_args carry them. They must still fold onto the setting
-    (override, with a warning) rather than reaching argv as a second flag that
+    """Saved raw_args and copied commands can carry --typical-p /
+    --spec-draft-ngl. Those alias spellings fold onto the setting (override,
+    with a warning) rather than reaching argv as a second flag that
     llama-server's last-wins parsing silently prefers."""
     from llama_launcher.core.command_builder import build_command, raw_arg_warnings
     from llama_launcher.core.spec import Profile

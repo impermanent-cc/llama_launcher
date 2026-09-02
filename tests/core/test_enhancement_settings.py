@@ -33,12 +33,9 @@ def test_draft_model_round_trips():
 
 
 def test_draft_model_uses_ik_spelling_on_ik_engine():
-    """ik_llama.cpp rejects --spec-draft-model; it only accepts -md/--model-draft.
-
-    Probed by execution against ik-llama-cpp:cu12-server, whose parser answers
-    "unknown argument: --spec-draft-model". Emitting the mainline spelling killed
-    the launch for every ik profile with a draft model set.
-    """
+    """ik_llama.cpp rejects --spec-draft-model ("unknown argument") and only
+    accepts -md/--model-draft, so an ik launch with a draft model set emits
+    that spelling."""
     p = Profile(name="p", image="ik-llama-cpp:cu12-server",
                 runtime=Runtime(engine="ik_llama.cpp"),
                 model="/models/m.gguf", draft_model="/models/draft.gguf",

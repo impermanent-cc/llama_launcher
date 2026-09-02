@@ -88,7 +88,7 @@ class MonitorPanel(QWidget):
         self.log_view.setReadOnly(True)
         self.log_view.setMaximumBlockCount(5000)
         # The log is the primary payload of this tab; a floor plus stretch=1
-        # lets it own the height (the benchmark lives on its own tab now).
+        # lets it own the height.
         self.log_view.setMinimumHeight(240)
         layout.addWidget(self.log_view, 1)
 
@@ -275,10 +275,10 @@ class MonitorPanel(QWidget):
     @staticmethod
     def _card_title(inst) -> str:
         """Display title for a StatCard built from an Instance. An rpc-worker
-        container shares its pool head's profile label (Task 4), so it needs
-        its own title -- see core.instances.worker_card_title -- instead of
-        rendering identically to the head's card. Any other instance keeps
-        its profile name (StatCard.update_row appends port/node itself)."""
+        container shares its pool head's profile label, so it takes its own
+        title from core.instances.worker_card_title instead of rendering
+        identically to the head's card. Any other instance keeps its profile
+        name (StatCard.update_row appends port/node itself)."""
         from llama_launcher.core.instances import worker_card_title
         if inst.mode == "rpc-worker":
             return worker_card_title(inst)

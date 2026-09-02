@@ -160,7 +160,7 @@ def test_stop_timers_cancels_and_stops_a_running_benchmark_thread(win, monkeypat
     assert win._benchmark._benchmark_thread is None
 
 
-# --- Task 6: availability gate + per-profile history on reset ---------------
+# --- availability gate + per-profile history on reset -----------------------
 
 def _ready_status_stubs(monkeypatch):
     """Stub the status-poll dependencies so update_status() reads server/ready

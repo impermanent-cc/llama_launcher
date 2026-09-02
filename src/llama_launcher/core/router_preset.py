@@ -85,7 +85,7 @@ def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
     argv-generation paths agree: engine-gated flags never reach a mismatched
     engine, per-engine value rules come from the shared engine_value() helper,
     blanks emit nothing, and --load-mode supersedes the legacy --no-mmap/--mlock.
-    A router that skipped these emitted flags the child llama-server then rejects.
+    Without this gating the preset carries flags the child llama-server rejects.
     """
     out: list[tuple[str, str]] = []
     engine = profile.runtime.engine

@@ -3,17 +3,17 @@ from llama_launcher.services.metrics import kv_usage_ratio, kv_ratio
 
 
 def test_kv_usage_ratio_takes_busiest_slot_not_summed():
-    # KV% is a per-slot occupancy, so it reports the fullest slot -- NOT the old
-    # behaviour of summing tokens over one denominator of all slots' ctx summed.
+    # KV% is a per-slot occupancy, so it reports the fullest slot, not tokens
+    # summed over one denominator of every slot's ctx.
     slots = [{"n_ctx": 100, "n_prompt_tokens": 20},
              {"n_ctx": 100, "n_prompt_tokens": 30}]
     assert abs(kv_usage_ratio(slots) - 0.30) < 1e-9
 
 
 def test_kv_usage_ratio_active_slot_not_diluted_by_idle_ctx():
-    # The old code summed every slot's n_ctx into the denominator, so three idle
-    # slots dragged a half-full active slot's KV% down toward 0. It must instead
-    # report the active (is_processing) slot's own occupancy.
+    # Three idle slots must not drag a half-full active slot's KV% toward 0:
+    # report the active (is_processing) slot's own occupancy, not tokens over
+    # every slot's n_ctx summed.
     slots = [
         {"n_ctx": 4096, "is_processing": False},
         {"n_ctx": 4096, "is_processing": False},

@@ -111,7 +111,7 @@ def test_set_profile_key_overwrites_and_reads_back(tmp_path):
     assert mode == 0o600
 
 
-# Task 3: Resolver + launch-time materializer
+# -- resolver + launch-time materializer -------------------------------------
 from llama_launcher.core.spec import Profile, Runtime
 
 
@@ -120,7 +120,7 @@ def _profile(name, mode):
 
 
 def test_resolve_global_prefers_global_key(tmp_path):
-    api_key.ensure_api_key(tmp_path, "R")            # a legacy per-profile key exists
+    api_key.ensure_api_key(tmp_path, "R")            # a per-profile key exists
     api_key.write_global_key(tmp_path, "sk-shared")
     assert api_key.resolve_api_key(tmp_path, _profile("R", "global")) == "sk-shared"
 

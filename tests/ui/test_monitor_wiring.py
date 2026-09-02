@@ -17,16 +17,11 @@ def test_on_stop_clears_log_follower_and_spawns_async_stop(qtbot, monkeypatch):
     """on_stop() kills the log follower immediately and spawns `podman stop`
     asynchronously (never blocking the UI thread) with the right argv."""
     spawned = {}
-    # NOTE: patched on LaunchController (not MainWindow). Launch code now
-    # calls self._spawn_async directly on the LaunchController instance (the
-    # facade unwind repointed launch_controller.py's own calls off
-    # self.window._spawn_async), so LaunchController is the class that must
-    # be patched for this test to observe the call. tests/ui/conftest.py's
-    # autouse _hermetic_ui_boundaries fixture ALSO class-patches
-    # LaunchController._spawn_async (as a no-op); this same-symbol
-    # class-patch still wins the override race because both use monkeypatch
-    # and this test body's setattr runs after fixture setup (last write
-    # wins, both undone at teardown).
+    # Patched on LaunchController (not MainWindow): launch code calls
+    # self._spawn_async on the LaunchController instance, so that is the
+    # class to patch. conftest's autouse _hermetic_ui_boundaries fixture also
+    # class-patches LaunchController._spawn_async as a no-op; this setattr
+    # runs after fixture setup, so it wins (both undone at teardown).
     monkeypatch.setattr(LaunchController, "_spawn_async",
                         lambda self, argv, on_done=None: spawned.setdefault("argv", argv))
     w = mw.MainWindow()
@@ -372,10 +367,10 @@ def test_log_updates_are_coalesced_until_flush(qtbot):
     """Incoming `podman logs` chunks are buffered and NOT written to the widget
     per chunk; one flush writes them all at once.
 
-    This is the anti-freeze fix: during heavy generation the log follower fires
-    readyRead very rapidly, and a per-chunk widget append floods the UI thread.
-    _enqueue_log must defer to the flush timer so the widget updates at a bounded
-    rate instead of once per chunk.
+    During heavy generation the log follower fires readyRead very rapidly, and
+    a per-chunk widget append floods the UI thread; _enqueue_log defers to the
+    flush timer so the widget updates at a bounded rate instead of once per
+    chunk.
     """
     w = mw.MainWindow()
     qtbot.addWidget(w)
@@ -398,11 +393,10 @@ def test_flush_with_no_pending_is_a_noop(qtbot):
 
 
 def test_router_model_switch_refetches(qtbot, monkeypatch):
-    # Strict form (restored after the _status_timer teardown fix, 2026-08-07):
-    # a one-shot iterator over the model-id sequence raises StopIteration on any
-    # unplanned extra update_status() call, and a shared counter catches stray
-    # fetch_props() calls. Both are safe now that a torn-down window's timer is
-    # stopped and can't fire update_status() into this test.
+    # A one-shot iterator over the model-id sequence raises StopIteration on
+    # any unplanned extra update_status() call, and a shared counter catches
+    # stray fetch_props() calls; a torn-down window's timer is stopped, so it
+    # can't fire update_status() into this test.
     _ready(monkeypatch)
     monkeypatch.setattr(ConfigurePanel, "current_profile",
                         lambda self: _router_profile())
@@ -436,8 +430,8 @@ def test_on_launch_native_spawns_process_not_container(qtbot, monkeypatch):
     monkeypatch.setattr(native_svc, "launch_native",
                         lambda p, base, now_iso: calls.setdefault(
                             "res", NativeResult(True, "llama-nat", "127.0.0.1", 8080, 4242)))
-    # No live instance for this profile -- the double-launch guard (Fix 1)
-    # must let the launch proceed.
+    # No live instance for this profile, so the double-launch guard must let
+    # the launch proceed.
     monkeypatch.setattr(native_svc, "list_native_instances", lambda base_dir: [])
     # Fail the test loudly if the container path is taken instead.
     monkeypatch.setattr(LaunchController, "_spawn_async",
@@ -448,13 +442,8 @@ def test_on_launch_native_spawns_process_not_container(qtbot, monkeypatch):
     p.runtime.launch_mode = "native"
     p.runtime.native_binary = "/opt/bin/llama-server"
     w._configure_panel.load_profile(p)
-    # NOTE (deviation from task-8-brief.md): ConfigurePanel does not yet
-    # round-trip Runtime.launch_mode/native_binary through load_profile() /
-    # current_profile() -- that widget wiring is Task 11's scope and has not
-    # landed in this worktree (only Tasks 1-7 are merged ahead of this one).
-    # current_profile() is the actual interface on_launch() consumes, so
-    # patch it directly to return our native profile rather than relying on
-    # a UI round-trip that doesn't exist yet.
+    # current_profile() is the interface on_launch() consumes, so patch it
+    # directly to return the native profile.
     monkeypatch.setattr(w._configure_panel, "current_profile", lambda: p)
     # bypass VRAM/validation dialogs
     monkeypatch.setattr(w._launch, "_validate_or_warn", lambda: True)
@@ -464,8 +453,8 @@ def test_on_launch_native_spawns_process_not_container(qtbot, monkeypatch):
 
 
 def test_on_launch_native_refuses_when_already_running(qtbot, monkeypatch):
-    """Fix 1: relaunching a native profile that already has a live instance
-    must NOT spawn a second llama-server -- doing so would fail to bind the
+    """Relaunching a native profile that already has a live instance must
+    NOT spawn a second llama-server: doing so would fail to bind the
     in-use port and orphan the original process (registry entry overwritten
     with the dead PID, original left running with no way to stop it)."""
     from llama_launcher.services import native as native_svc

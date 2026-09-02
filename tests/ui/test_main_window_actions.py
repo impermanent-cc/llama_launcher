@@ -37,8 +37,8 @@ def test_save_and_reload_profile(qtbot, tmp_path, monkeypatch):
 
 def test_startup_does_not_show_first_profile_as_loaded(qtbot, tmp_path, monkeypatch):
     """At startup the dropdown must not display a saved profile as if loaded:
-    addItems auto-selects index 0 without running load_profile, so the form
-    holds blank defaults while the combo showed a real profile name. The combo
+    addItems auto-selects index 0 without running load_profile, which would
+    leave the form on blank defaults under a real profile name. The combo
     starts unselected (a 'choose a profile' placeholder) until the user picks."""
     monkeypatch.setattr(mw, "base_dir", lambda: tmp_path)
     seed = mw.MainWindow()
@@ -191,10 +191,10 @@ def test_on_launch_blocks_on_validation_error(qtbot, monkeypatch):
 
 
 def test_fetch_latest_updates_image(qtbot, monkeypatch):
-    # on_fetch_latest runs the lookup on a worker thread (see
-    # tests/ui/test_fetch_latest_ui.py); stub _UpdateWorker.start to emit `found`
-    # synchronously here rather than spinning a real QThread, and stub the
-    # resulting info dialog to avoid a modal exec() in headless tests.
+    # on_fetch_latest runs the lookup on a worker thread; stub
+    # _UpdateWorker.start to emit `found` synchronously rather than spinning a
+    # real QThread, and stub the resulting info dialog to avoid a modal exec()
+    # in headless tests.
     monkeypatch.setattr(mw.registry, "fetch_latest",
                         lambda repo, prefix, timeout=10.0: "server-cuda12-b9999")
     monkeypatch.setattr(launch_controller.QMessageBox, "information", lambda *a, **k: None)

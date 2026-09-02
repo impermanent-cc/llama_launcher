@@ -185,6 +185,6 @@ def test_container_mode_shows_container_fields(qtbot):
     assert cp.image_edit.isVisibleTo(cp)
     assert not cp.native_binary_edit.isVisibleTo(cp)
     assert cp.extra_args_edit.isVisibleTo(cp)
-    # detached checkbox is shown for a container server profile (see native test)
+    # detached checkbox is shown for a container server profile
     assert cp.detached_check.isVisibleTo(cp.detached_check.parentWidget())
     assert cp.selinux_check.isVisibleTo(cp)

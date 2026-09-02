@@ -101,8 +101,8 @@ def kv_usage_ratio(slots: list) -> float | None:
 
     KV is per-slot, so the figure is the fullest slot's occupancy against its
     OWN context -- not tokens summed over a denominator of every slot's ctx
-    added together, which let idle slots drag a busy slot's KV% down toward 0
-    (the "KV always reads 0" bug). Prefers a processing slot (what the user is
+    added together, which lets idle slots drag a busy slot's KV% down toward 0.
+    Prefers a processing slot (what the user is
     watching) over an idle one holding a stale sequence. None if no slot has ctx.
     """
     active = [r for s in slots if s.get("is_processing")

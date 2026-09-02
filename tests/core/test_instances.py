@@ -78,7 +78,7 @@ def test_native_row_carries_kind_and_pid():
 
 def test_rpc_worker_device_resolved_by_name_index():
     """A worker container shares its pool head's `llama-launcher.profile` label
-    (Task 4), so its device comes from the profile's rpc_workers list, indexed
+    label, so its device comes from the profile's rpc_workers list, indexed
     by the `-rpcN` suffix on the container's own name."""
     containers = [
         {"name": "llama-pool-rpc0", "running": True, "profile": "pool", "mode": "rpc-worker"},

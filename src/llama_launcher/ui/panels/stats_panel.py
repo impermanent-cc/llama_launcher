@@ -24,9 +24,9 @@ class StatsPanel(QWidget):
 
     Width is kept CONSTANT across updates on purpose: a monospace font plus
     fixed-width sparklines (pre-filled to _SPARK_W) and fixed-width numeric
-    fields. Otherwise the sparkline grew 1->_SPARK_W chars as history filled,
-    which widened the labels and made the QDockWidget (and the whole window)
-    grow tick after tick, never shrinking back.
+    fields. A sparkline that grows from 1 to _SPARK_W chars as history fills
+    would widen the labels and make the QDockWidget (and the whole window)
+    grow tick after tick without ever shrinking back.
     """
     def __init__(self, parent=None):
         super().__init__(parent)

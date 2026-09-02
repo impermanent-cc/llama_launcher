@@ -14,9 +14,9 @@ def win(qtbot, tmp_path, monkeypatch):
 def test_window_minimum_height_fits_1080p(win, qtbot):
     win.show()
     win.layout().activate()
-    # Before the fix the minimum height is ~959 (taller than a 1080p screen with a
-    # taskbar can comfortably show). After wrapping the left column it must drop well
-    # below that so the window is resizable to fit.
+    # The wrapped left column keeps the minimum height well below ~959 (an
+    # unwrapped column is taller than a 1080p screen with a taskbar can
+    # comfortably show), so the window is resizable to fit.
     assert win.minimumSizeHint().height() <= 720
 
 

@@ -54,8 +54,7 @@ def test_instance_summary_gen_row_shows_tok_s(win, monkeypatch):
 def test_build_instances_data_scans_profiles_once_and_builds_rows(monkeypatch):
     """The off-thread builder is a pure function of a primitives-only target: it
     does all the blocking I/O (list_launcher_containers + per-instance probes)
-    and scans profiles exactly ONCE for the whole table (folding the old N+1
-    per-instance list_profiles scans)."""
+    and scans profiles exactly ONCE for the whole table."""
     from llama_launcher.ui.controllers import monitor_controller as mc
     profs = [Profile(name="emb", image="img", settings={"port": 8081, "embeddings": True}),
              Profile(name="gen", image="img", settings={"port": 8080})]
@@ -103,9 +102,9 @@ def test_build_instances_data_enriches_rows_with_tok_kv_mode(monkeypatch):
 
 def test_build_instances_data_titles_rpc_worker_row(monkeypatch):
     """A worker container shares its pool head's `llama-launcher.profile` label
-    (Task 4) so it joins to the SAME stored profile as the head -- without a
-    title override its row would show the head's own name/port. The worker
-    row instead gets its own "rpc-worker · <node> · <device>" title and no port."""
+    so it joins to the SAME stored profile as the head; without a title
+    override its row would show the head's own name/port. The worker row
+    instead gets its own "rpc-worker · <node> · <device>" title and no port."""
     from llama_launcher.core.spec import RpcWorker
     from llama_launcher.ui.controllers import monitor_controller as mc
     profs = [Profile(name="pool", image="img", runtime=Runtime(
@@ -238,8 +237,8 @@ def test_instances_rows_rendered_off_thread(win, monkeypatch):
     """The instances table is gathered off the UI thread: the first tick only
     dispatches the pooled gather (no rows yet); a later tick renders the result.
 
-    Mirrors the monitor-summary off-thread cadence so N per-instance probes never
-    block the event loop on a Monitor tick.
+    Same cadence as the monitor summary, so N per-instance probes never block
+    the event loop on a Monitor tick.
     """
     from PySide6.QtCore import QThreadPool
     base = store.default_base_dir()
@@ -259,7 +258,7 @@ def test_instances_rows_rendered_off_thread(win, monkeypatch):
 def test_active_instance_cleared_when_its_container_vanishes(win, monkeypatch):
     """A monitored instance whose container disappears on its own (crash, external
     stop) is auto-cleared so the Monitor falls back to the form profile instead of
-    stranding on a dead target -- previously only explicit Stop/Remove cleared it."""
+    stranding on a dead target."""
     from PySide6.QtCore import QThreadPool
     base = store.default_base_dir()
     store.save_profile(Profile(name="emb", image="img", settings={"port": 8081}), base)

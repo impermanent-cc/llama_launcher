@@ -8,7 +8,7 @@ def test_each_tool_checkbox_has_distinct_tooltip(qtbot):
     tips = {opt: cb.toolTip() for opt, cb in w._checks.items()}
     # every tool has a non-empty tooltip...
     assert all(tips.values())
-    # ...and they are no longer all identical (the reported bug)
+    # ...and they are not all identical
     assert len(set(tips.values())) == len(tips)
     # spot-check a few are actually about the right tool
     assert "read" in tips["read_file"].lower()

@@ -143,7 +143,7 @@ def test_delete_built_tag_confirms_then_removes(qtbot, tmp_path, monkeypatch):
 
     p.outputs_table.setCurrentCell(0, 0)
     p.delete_selected_output()
-    # rmi runs off-thread now; wait for the poll chain to finish the delete.
+    # rmi runs off-thread; wait for the poll chain to finish the delete.
     qtbot.waitUntil(lambda: load_outputs(tmp_path) == [], timeout=3000)
 
     assert calls and calls[0][1] == "t:1"
@@ -412,8 +412,8 @@ def test_preview_and_outputs_share_tabbed_splitter(qtbot, tmp_path):
 
 
 def test_fresh_panel_emits_only_touched_options(qtbot, tmp_path):
-    # Regression net for the default-init class of bug: a fresh panel with just
-    # CUDA ticked must not emit explicit OFFs or empty values for anything else.
+    # A fresh panel with just CUDA ticked must not emit explicit OFFs or empty
+    # values for anything else.
     p = _panel(qtbot, tmp_path)
     p.target_combo.setCurrentIndex(p.target_combo.findData("container"))
     p.name_edit.setText("just-cuda")
@@ -427,15 +427,16 @@ def test_fresh_panel_emits_only_touched_options(qtbot, tmp_path):
 
 def test_fresh_form_has_no_phantom_options(qtbot, tmp_path):
     # Untouched string widgets with non-empty defaults (blas-vendor,
-    # sycl-target) must not appear in options as "" -- they polluted saved
-    # configs and broke _matching_entry equality across load round-trips.
+    # sycl-target) must not appear in options as "": a phantom "" entry
+    # pollutes saved configs and breaks _matching_entry equality across load
+    # round-trips.
     p = _panel(qtbot, tmp_path)
     assert p.current_build_config().options == {}
 
 
 def test_cross_engine_load_does_not_leak_stash(qtbot, tmp_path):
     # Loading an ik config over a llama form must not re-stash the outgoing
-    # llama-only values: flipping back to llama.cpp silently re-applied a
+    # llama-only values; otherwise flipping back to llama.cpp re-applies a
     # cuda-fa=False the loaded config never contained.
     from llama_launcher.core.build_spec import BuildConfig
     p = _panel(qtbot, tmp_path)
@@ -484,10 +485,9 @@ def test_overlapping_outputs_refresh_renders_newest(qtbot, tmp_path, monkeypatch
 
     # Synchronous pool: the real global pool gives no ordering guarantee
     # between the two gathers, so the iterator could feed 'stale' to the
-    # NEWER gather (seen flaking under the slower localci container). Running
-    # each gather inline pins gather 1 = stale and, deliberately, has the
-    # stale gather FINISH FIRST -- the exact case the superseding logic must
-    # drop on render.
+    # NEWER gather. Running each gather inline pins gather 1 = stale and,
+    # deliberately, has the stale gather FINISH FIRST: the exact case the
+    # superseding logic must drop on render.
     class _InlinePool:
         @staticmethod
         def globalInstance():

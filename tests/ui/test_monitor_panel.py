@@ -310,7 +310,7 @@ def test_card_click_emits_instance_selected(qtbot):
 
 
 def test_monitor_panel_has_no_benchmark_widgets(qtbot):
-    # Benchmark moved to its own BenchmarkPanel/tab; the Monitor panel is now
+    # Benchmark lives in its own BenchmarkPanel/tab; the Monitor panel is
     # just instances + logs and must not carry the benchmark controls.
     from llama_launcher.ui.panels.monitor_panel import MonitorPanel
     panel = MonitorPanel(); qtbot.addWidget(panel)
@@ -325,16 +325,16 @@ def test_benchmark_panel_has_controls_table_and_clear(qtbot):
     assert panel.bench_table is not None
     assert panel.bench_clear_btn is not None
     assert not hasattr(panel, "bench_legend")
-    # legend text now lives behind an on-demand InfoButton popover
+    # legend text lives behind an on-demand InfoButton popover
     assert panel.findChildren(InfoButton)
-    # the separate history list was folded into the grouped table
+    # no separate history list; runs live in the grouped table
     assert not hasattr(panel, "bench_history")
 
 
 def test_card_title_rpc_worker_includes_node(qtbot):
-    """MonitorPanel._card_title special-cases an rpc-worker Instance (which
-    otherwise shares its pool head's profile name/port -- Task 4's containers
-    are labeled with the SAME `llama-launcher.profile`) so its StatCard title
+    """MonitorPanel._card_title special-cases an rpc-worker Instance, which
+    otherwise shares its pool head's profile name/port (worker containers
+    carry the SAME `llama-launcher.profile` label), so its StatCard title
     identifies the worker's own node instead of duplicating the head's."""
     from llama_launcher.core.instances import Instance
     p = MonitorPanel(); qtbot.addWidget(p)
@@ -357,8 +357,8 @@ def test_monitor_stats_legend_explains_gen_prompt_kv(qtbot):
     p = MonitorPanel()
     qtbot.addWidget(p)
     assert not hasattr(p, "stats_legend")
-    # legend text now lives ONLY on the compact InfoButton (popover + its own
-    # hover), NOT on the full-width summary bar -- a tooltip there fired on
+    # legend text lives ONLY on the compact InfoButton (popover + its own
+    # hover), NOT on the full-width summary bar: a tooltip there fires on
     # hover anywhere along the bar, duplicating the button.
     assert p.summary.toolTip() == ""
     btn = p.findChild(InfoButton)

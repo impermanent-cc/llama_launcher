@@ -71,7 +71,7 @@ def test_stop_pool_stops_head_then_workers(tmp_path, monkeypatch):
 
 
 def test_launch_pool_head_fail_clears_tunnels_entry(tmp_path, monkeypatch):
-    # I1 regression: a head that fails to start after every worker is ready
+    # A head that fails to start after every worker is ready
     # must not leave a stale _TUNNELS[profile.name] entry pointing at
     # already-terminated tunnel handles.
     monkeypatch.setattr(rpc, "get_node", lambda base, name:
@@ -95,7 +95,7 @@ def test_launch_pool_head_fail_clears_tunnels_entry(tmp_path, monkeypatch):
 
 
 def test_launch_pool_terminates_stale_tunnels_on_relaunch(tmp_path, monkeypatch):
-    # I2 regression: relaunching a pool without an intervening stop_pool must
+    # Relaunching a pool without an intervening stop_pool must
     # not orphan the previous call's ssh tunnel handles.
     monkeypatch.setattr(rpc, "get_node", lambda base, name:
         {"box2": rpc.Node(name="box2", kind="remote", connection="box2",
@@ -130,7 +130,7 @@ def test_launch_pool_terminates_stale_tunnels_on_relaunch(tmp_path, monkeypatch)
 
 
 def test_launch_pool_bad_ssh_target_tears_down_started_worker(tmp_path, monkeypatch):
-    # m1 regression: tunnel_argv raising ValueError for a malformed ssh_target
+    # tunnel_argv raising ValueError for a malformed ssh_target
     # (after the worker's container already started) must still tear down the
     # started worker and fail cleanly instead of leaking it.
     monkeypatch.setattr(rpc, "get_node", lambda base, name:

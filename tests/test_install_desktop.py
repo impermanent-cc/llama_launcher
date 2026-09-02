@@ -61,7 +61,7 @@ def test_install_creates_entry_and_icon(tmp_path):
     assert desktop.exists(), "desktop entry was not created"
     text = desktop.read_text()
     # Icon must point at the installed file by absolute path so a changed SVG
-    # actually shows up regardless of icon-theme cache staleness (the bug).
+    # actually shows up regardless of icon-theme cache staleness.
     assert f"Icon={icon}" in text, f"Icon line not pointing at installed file:\n{text}"
 
 

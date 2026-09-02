@@ -117,8 +117,7 @@ def test_array_head_counts_collapse_to_scalar():
 
 
 def test_array_head_counts_feed_vram_estimate_without_crash():
-    # Regression: launching such a model used to crash vram_check with
-    # "int() argument must be ... not 'list'".
+    # The collapsed scalar head counts feed vram.estimate() without raising.
     from llama_launcher.core import vram
     m = parse_gguf_header(_arr_head_gguf())
     est = vram.estimate(n_layers=m.n_layers, n_head=m.n_head or 1,

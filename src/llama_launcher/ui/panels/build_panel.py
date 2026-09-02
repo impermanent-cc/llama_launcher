@@ -147,7 +147,7 @@ class BuildPanel(QWidget):
 
         # The form area and the two big bottom widgets share a draggable
         # vertical splitter; preview and outputs live in tabs so only one of
-        # them takes height at a time (both stacked squeezed the forms).
+        # them takes height at a time.
         body_widget = QWidget()
         body = QHBoxLayout(body_widget)
         body.setContentsMargins(0, 0, 0, 0)
@@ -756,7 +756,7 @@ class BuildPanel(QWidget):
                 fail_prefix = f"Failed to delete build dir {build_dir}"
             # `podman rmi` on a big layered image can run for minutes and
             # rmtree of a build dir isn't cheap either: run the blocking part
-            # off the UI thread (project rule) and finish in _poll_delete.
+            # off the UI thread and finish in _poll_delete.
             if self._delete_gather is not None:
                 return                     # a delete is already in flight
             self.delete_output_btn.setEnabled(False)

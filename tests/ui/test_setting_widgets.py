@@ -169,8 +169,8 @@ def test_api_key_widget_is_password_masked(qtbot):
 
 
 def test_bool_widget_initializes_to_setting_default(qtbot):
-    # The build catalog has default-True bools (the runtime catalog never did);
-    # an unchecked box for a default-ON option would read as "explicitly OFF".
+    # The build catalog has default-True bools; an unchecked box for a
+    # default-ON option would read as "explicitly OFF".
     from llama_launcher.core.build_catalog import BUILD_CATALOG
     w = make_widget(BUILD_CATALOG["cuda-fa"])   # GGML_CUDA_FA, default True
     qtbot.addWidget(w)
@@ -180,9 +180,9 @@ def test_bool_widget_initializes_to_setting_default(qtbot):
 
 def test_string_widget_initializes_to_setting_default(qtbot):
     # Non-empty-default strings exist in BOTH catalogs (build: blas-vendor
-    # "Generic"; runtime: cors-origins "*"). A fresh empty editor would read
-    # as "explicitly set to blank": is_set() True with value "" polluted
-    # saved configs/profiles with phantom entries and made the router's
+    # "Generic"; runtime: cors-origins "*"). A fresh empty editor must not
+    # read as "explicitly set to blank": is_set() True with value "" pollutes
+    # saved configs/profiles with phantom entries and makes the router's
     # wildcard-CORS warning unfireable from UI-saved profiles.
     from llama_launcher.core.build_catalog import BUILD_CATALOG
     from llama_launcher.core.settings_catalog import CATALOG

@@ -39,8 +39,6 @@ def test_enum_settings_render_their_value():
 def test_bool_settings_render_true_under_their_own_flag_name():
     # A Setting whose flag is already negative (--no-cors-credentials) must
     # render under its own flag name, not as "cors-credentials = true".
-    # The original test used flash-attn, which is an enum, so it exercised
-    # neither the bool branch nor the flag-name mapping.
     p = Profile(name="Q", model="/m.gguf", settings={"cors-credentials": True})
     text = render_preset([(_member(), p)]).text
     assert "no-cors-credentials = true" in text
@@ -136,8 +134,8 @@ def test_multiple_members_each_get_a_section():
 
 
 def test_raw_args_negative_values_are_not_mistaken_for_flags():
-    # llama.cpp uses -1 sentinels widely; treating "-1" as a flag silently
-    # turned the real flag into "true" and emitted a junk "1 = true" key.
+    # llama.cpp uses -1 sentinels widely; "-1" must parse as a value, not as
+    # a flag that turns the real flag into "true" and emits a junk "1 = true".
     pairs, problems = convert_raw_args("--temp -1")
     assert pairs == {"temp": "-1"}
     assert problems == []

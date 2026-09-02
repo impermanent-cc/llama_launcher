@@ -68,8 +68,7 @@ def available_free_bytes(free_bytes_per_gpu, split_mode: str = "layer",
     With `split-mode none` the whole model lands on a single card (`main-gpu`),
     so only that card's free VRAM counts. Every other split mode (layer/row/
     tensor, the default) spreads the model across all visible GPUs, so the budget
-    is their COMBINED free VRAM -- using a single card's free (the old behaviour)
-    wrongly warned that a model fitting across two GPUs would not fit.
+    is their COMBINED free VRAM.
     """
     free = [int(b) for b in free_bytes_per_gpu]
     if not free:

@@ -26,8 +26,7 @@ def _run(args: list[str], timeout: float = _DEFAULT_TIMEOUT) -> subprocess.Compl
 
 def _base(binary: str, connection: str = "") -> list[str]:
     """Command head, with the remote-connection flag when set. podman selects a
-    remote host with `--connection`, docker with `--context` -- the same concept,
-    different flag, so a docker node was previously unreachable."""
+    remote host with `--connection`, docker with `--context`."""
     if not connection:
         return [binary]
     flag = "--context" if binary == "docker" else "--connection"
@@ -40,10 +39,9 @@ def binary_available(binary: str) -> bool:
 
 def is_rootless(binary: str) -> bool:
     # podman exposes a boolean at Host.Security.Rootless; docker info has no such
-    # field (the template errors, leaving stdout empty -> always False, so a
-    # rootless docker daemon was misreported as rootful in the diagnostic
-    # report). docker instead lists "name=rootless" among SecurityOptions -- use
-    # a runtime-appropriate probe, like _base/node_reachable do.
+    # field (the template errors, leaving stdout empty) and instead lists
+    # "name=rootless" among SecurityOptions, so the probe is per runtime, like
+    # _base/node_reachable.
     if binary == "docker":
         res = _run([binary, "info", "--format",
                     "{{range .SecurityOptions}}{{println .}}{{end}}"])
@@ -102,8 +100,7 @@ def stats(name: str, binary: str, connection: str = "") -> dict | None:
     if not row:
         return None
     # podman and docker name the same fields differently: podman uses
-    # cpu_percent/mem_usage, docker uses CPUPerc/MemUsage. Reading only the
-    # docker names left live CPU/MEM blank on podman -- the DEFAULT runtime.
+    # cpu_percent/mem_usage, docker uses CPUPerc/MemUsage; read both.
     return {"cpu_perc": row.get("cpu_percent") or row.get("CPUPerc", ""),
             "mem_usage": row.get("mem_usage") or row.get("MemUsage", "")}
 
@@ -235,12 +232,11 @@ def _normalize_labels(labels) -> dict:
 def parse_ps_json(output: str) -> list[dict]:
     """Normalise `podman ps -a --format json` rows this launcher owns.
 
-    Containers created before labels existed are still adopted, by falling back
-    to the `llama-` name prefix. Anything else is ignored.
+    An unlabelled container is still adopted by its `llama-` name prefix.
+    Anything else is ignored.
 
     Accepts both podman's single JSON array and docker's NDJSON (one bare object
-    per line): reading only the array shape left the whole Monitor/Instances
-    panel empty on docker even though the launch had succeeded.
+    per line).
     """
     data = _parse_ps_payload(output)
 

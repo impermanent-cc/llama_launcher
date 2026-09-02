@@ -2,9 +2,8 @@
 
 This guards a failure mode the rest of the suite cannot see: the other catalog
 tests assert that the app EMITS a flag, which stays green even when the server
-rejects it. That is how `--tensor-read-lazy` survived upstream renaming it to
-`--lazy-mode`, and how 27 settings reached ik_llama.cpp launches that ik has
-never accepted.
+rejects it (a flag upstream has renamed, or a mainline-only flag reaching an
+ik_llama.cpp launch).
 
 Two engines, two fixtures, and they are NOT gathered the same way:
 
@@ -114,9 +113,10 @@ def test_setting_reaching_ik_is_accepted_by_ik(key):
 
 
 def test_parametrised_selections_cover_the_engine_specific_buckets():
-    # The ik case used to select engine == "any" only, which left every ik-only
-    # flag unpinned: a typo there kept the suite green while the ik launch died.
-    # Guard the selections themselves, not the per-key assertion.
+    # The ik selection must include the engine="ik_llama.cpp" bucket, not only
+    # engine="any"; otherwise a typo in an ik-only flag keeps the suite green
+    # while the ik launch dies. Guard the selections themselves, not the
+    # per-key assertion.
     assert any(CATALOG[k].engine == "ik_llama.cpp" for k in IK_KEYS)
     assert any(CATALOG[k].engine == "llama.cpp" for k in MAINLINE_KEYS)
     assert not any(CATALOG[k].engine == "llama.cpp" for k in IK_KEYS)
@@ -143,6 +143,6 @@ def test_every_mainline_only_flag_still_exists_in_the_catalog():
 
 def test_retag_actually_took_effect():
     # MAINLINE_ONLY_FLAGS is applied by a post-pass over _ALL; if that pass were
-    # dropped, every test above would still pass while ik launches broke again.
+    # dropped, every test above would still pass while ik launches broke.
     tagged = {s.flag for s in CATALOG.values() if s.engine == "llama.cpp"}
     assert tagged == set(MAINLINE_ONLY_FLAGS)

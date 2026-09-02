@@ -15,7 +15,7 @@ def test_key_mode_round_trips(tmp_path):
 
 
 def test_old_profile_without_key_mode_loads_as_global():
-    # Simulates JSON written before this field existed.
+    # JSON with no router_key_mode field.
     p = store.profile_from_dict(
         {"name": "r", "image": "img", "runtime": {"binary": "podman"}})
     assert p.runtime.router_key_mode == "global"

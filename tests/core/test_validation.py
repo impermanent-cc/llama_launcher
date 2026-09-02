@@ -228,7 +228,7 @@ def test_models_max_above_one_warns():
 
 
 def test_port_choice_never_warns_about_discovery():
-    # The old outside-harness discovery-scan warning is gone: any port is fine.
+    # Any router port is fine; there is no discovery-scan port warning.
     for port in (8080, 9999):
         p = _router(settings={"port": port})
         issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
@@ -255,7 +255,7 @@ def test_unconvertible_member_raw_args_warns():
 def test_blank_cors_origins_reads_as_upstream_wildcard():
     # A stored "" means --cors-origins is omitted, so the server runs with
     # upstream's '*' default: the exposed-bind wildcard warning must still
-    # fire (older UI versions saved cors-origins as "" on untouched forms).
+    # fire.
     from llama_launcher.core.spec import Runtime
     p = _router(runtime=Runtime(bind_host="0.0.0.0"),
                 settings={"port": 8080, "cors-origins": ""})
@@ -401,8 +401,7 @@ def test_native_binary_present_and_executable_passes():
 
 def test_ik_engine_router_is_refused():
     """ik_llama.cpp has no router: its llama-server carries no --models-preset,
-    so the container would die on "unknown argument" the moment it started.
-    Verified by execution against ik-llama-cpp:cu12-server."""
+    so the container would die on "unknown argument" the moment it started."""
     issues = validate(_router(runtime=Runtime(engine="ik_llama.cpp"), image="ik-llama-cpp"),
                       members=[(RouterMember(profile="Qwen"), _member_profile())],
                       api_key_present=True)
@@ -411,10 +410,9 @@ def test_ik_engine_router_is_refused():
 
 def test_router_on_an_ik_image_is_refused_even_with_the_mainline_engine():
     """The Runtime engine defaults to llama.cpp and nothing sets it from the
-    image, so a router whose image is an ik build used to pass validate() with
-    only the looks-ik warning, launch, and die on unknown argument
-    --models-preset. Following that warning's advice then hit the engine
-    refusal instead."""
+    image, so a router whose image looks like an ik build is refused outright
+    (the container would die on unknown argument --models-preset), not merely
+    given the looks-ik warning."""
     issues = validate(_router(image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"),
                       members=[(RouterMember(profile="Qwen"), _member_profile())],
                       api_key_present=True)
@@ -509,8 +507,8 @@ def test_rpc_router_mode_is_error():
 
 
 def test_router_port_choice_raises_no_discovery_warning():
-    """No outside-harness coupling: any router port is fine (the old rule
-    warned when the port fell outside a specific tool's discovery scan)."""
+    """Any router port is fine; validation does not couple to an outside
+    harness's discovery scan."""
     p = _router(settings={"port": 9123})
     issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
                       api_key_present=True)

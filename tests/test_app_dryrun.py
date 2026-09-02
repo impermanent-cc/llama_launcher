@@ -1,9 +1,4 @@
-"""
-TDD tests for the --dry-run CLI mode in llama_launcher.app.
-
-These tests are written BEFORE the implementation (RED phase).
-All tests should fail until dry_run() and the refactored main() are implemented.
-"""
+"""Tests for the --dry-run CLI mode in llama_launcher.app."""
 import shlex
 
 import pytest
@@ -11,7 +6,6 @@ import pytest
 from llama_launcher.core.spec import Mount, Profile, Runtime
 from llama_launcher.store.profiles import save_config, save_profile
 
-# Import the functions under test; these don't exist yet, so import errors are expected.
 from llama_launcher.app import dry_run, main
 
 

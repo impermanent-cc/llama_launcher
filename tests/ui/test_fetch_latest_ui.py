@@ -157,7 +157,7 @@ def test_update_badge_disabled_during_fetch_and_reenabled_on_finish(win, monkeyp
                         lambda self: None)
     # No found/failed fires in this test, so _on_fetch_finished's "no newer
     # build" path would pop a real modal dialog and block the test; stub it
-    # out like the existing finished-state tests do.
+    # out.
     monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
                         lambda *a, **k: None)
     win._launch.on_fetch_latest()

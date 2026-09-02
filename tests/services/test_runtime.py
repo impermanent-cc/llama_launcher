@@ -54,7 +54,7 @@ def test_is_rootless_true(monkeypatch):
 
 def test_is_rootless_docker_reads_security_options(monkeypatch):
     # docker has no Host.Security.Rootless field (that podman template errors and
-    # leaves stdout empty -> always False, a live-repro parity bug). A rootless
+    # leaves stdout empty, which would read as always False). A rootless
     # docker daemon lists "name=rootless" among SecurityOptions instead.
     calls = {}
 
@@ -151,7 +151,7 @@ def test_parse_ps_json_extracts_name_state_and_labels():
 
 
 def test_parse_ps_json_falls_back_to_name_prefix_for_unlabelled():
-    # Containers created before labels existed still need to be adoptable.
+    # Unlabelled containers must still be adoptable.
     out = json.dumps([{"Names": ["llama-old"], "State": "running", "Labels": {}}])
     [row] = runtime.parse_ps_json(out)
     assert row["profile"] == "old"

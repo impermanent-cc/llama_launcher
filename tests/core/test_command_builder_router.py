@@ -94,8 +94,8 @@ def test_api_key_setting_never_reaches_router_argv():
 
 
 def test_server_args_never_emit_router_only_flags():
-    # Defence in depth: the UI filters by mode, but a Profile loaded from older
-    # JSON (written before that filtering existed) can still carry the key.
+    # Defence in depth: the UI filters by mode, but a Profile loaded from JSON
+    # can still carry the key.
     p = Profile(name="Solo", image="img", model="/models/a.gguf",
                 mounts=[Mount(host="/h", container="/models")],
                 settings={"port": 8080, "models-max": 4, "models-autoload": True})

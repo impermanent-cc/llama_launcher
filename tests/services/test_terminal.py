@@ -6,7 +6,7 @@ from llama_launcher.services.terminal import (
 )
 
 
-# --- backward-compat: existing behavior unchanged ---
+# --- {cmd} terminals: single quoted command string ---
 
 def test_build_terminal_argv_konsole():
     argv = build_terminal_argv(["podman", "run", "--rm", "img"])
@@ -111,7 +111,7 @@ def test_launch_uses_detected_terminal(monkeypatch):
     assert calls["argv"][0] == "ptyxis"
 
 
-# --- W2c: a custom template from (possibly shared) config.json is screened ---
+# --- a custom template from (possibly shared) config.json is screened ---
 
 def _which_all(name):          # every binary "installed"
     return f"/usr/bin/{name}"

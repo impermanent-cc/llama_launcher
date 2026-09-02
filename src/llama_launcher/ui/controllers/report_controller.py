@@ -27,17 +27,13 @@ class ReportController:
     `self.window._<owner>.<x>` (e.g. `self.window._configure_panel.
     current_profile`, `self.window._monitor._poll_api_key`).
 
-    `base_dir` is looked up via a deferred
-    `from llama_launcher.ui.main_window import base_dir` inside the methods
-    that use it (not imported at module scope here), because
-    tests/ui/test_report.py monkeypatches it as `mw.base_dir` -- a rebind of
-    the name on main_window's module namespace. A fresh per-call import
-    resolves that rebind; a module-scope `from ... import base_dir` here
-    would bind a stale copy that the monkeypatch can't reach.
+    `base_dir` is imported from `llama_launcher.ui.main_window` inside the
+    methods that use it, not at module scope, so a rebind of that name on
+    main_window's module namespace (a monkeypatch) is picked up on every
+    call instead of being shadowed by a stale module-level copy.
 
-    `ReportDialog` is imported at module scope from its canonical home
-    (`llama_launcher.ui.dialogs.report_dialog`); tests patch it via
-    `monkeypatch.setattr("llama_launcher.ui.controllers.report_controller.ReportDialog", ...)`.
+    `ReportDialog` is imported at module scope from
+    `llama_launcher.ui.dialogs.report_dialog`; patch it on this module.
     """
 
     def __init__(self, window):
@@ -117,8 +113,8 @@ class ReportController:
                     "to capture tok/s and KV-cache usage here)")
         # Mirror collect_monitor_data's host/key/scope derivation: /metrics needs
         # the API key, and on a router it is per-model (?model=id) reached via the
-        # router host. Without these the report's fetch 401'd (or returned nothing)
-        # and always printed the "no metrics returned" note for routers.
+        # router host. Without these the fetch 401s (or returns nothing) and the
+        # report always prints the "no metrics returned" note for routers.
         host = dial_host(p.runtime.bind_host)
         key = self.window._monitor._poll_api_key(p)
         model_scope = None

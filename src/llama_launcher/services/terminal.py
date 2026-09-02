@@ -3,9 +3,9 @@
 The launcher's foreground (non-detached) container launch opens a terminal so
 the user can watch llama-server's output. Terminals are DE-specific, so instead
 of hardcoding one we keep an ordered candidate list and pick the first that is
-actually installed (``shutil.which``). konsole is first, so KDE behaves exactly
-as before; GNOME/others fall through to ptyxis, gnome-terminal, etc. A user can
-override everything with a ``terminal`` template in config.
+actually installed (``shutil.which``). konsole is first; GNOME/others fall
+through to ptyxis, gnome-terminal, etc. A user can override everything with a
+``terminal`` template in config.
 
 Two placeholders are supported in a template:
   {cmd}     -> the shell-quoted command, as argv following an ``-e``/``--`` that
@@ -25,8 +25,8 @@ import subprocess
 _HOLD_SUFFIX = '; printf "\\n[process exited -- press Enter to close] "; read _'
 
 # (binary, template, shell_hold). shell_hold=True appends _HOLD_SUFFIX to the
-# command for terminals that have no native hold flag. Ordered by preference;
-# konsole first so an existing KDE setup is byte-for-byte unchanged.
+# command for terminals that have no native hold flag. Ordered by preference,
+# konsole first.
 TERMINALS: list[tuple[str, str, bool]] = [
     ("konsole", "konsole --hold -e bash -lc {cmd}", False),
     ("ptyxis", "ptyxis -- bash -lc {cmd}", True),
@@ -48,7 +48,7 @@ TERMINALS: list[tuple[str, str, bool]] = [
     ("x-terminal-emulator", "x-terminal-emulator -e {bashcmd}", True),
 ]
 
-# Backwards-compatible default (konsole) for callers that pass no template.
+# Default (konsole) for callers that pass no template.
 DEFAULT_TEMPLATE = TERMINALS[0][1]
 
 

@@ -27,10 +27,10 @@ _ESCALATING_RUN_FLAGS = frozenset({
     "--runtime", "--hooks-dir", "--conmon",
 })
 # System roots whose mount into a container is a host-filesystem escape. Matched
-# by PREFIX (any subpath counts), not exact membership -- the exact-match form
-# silently let /var/run/docker.sock, ~/.ssh, /root/.aws, etc. through. /home is
-# special-cased in is_sensitive_host_path: ordinary home data mounts stay
-# allowed, only credential dotfile dirs under it are sensitive.
+# by PREFIX (any subpath counts), not exact membership, so /var/run/docker.sock,
+# /root/.aws and the like count too. /home is special-cased in
+# is_sensitive_host_path: ordinary home data mounts stay allowed, only
+# credential dotfile dirs under it are sensitive.
 _SENSITIVE_ROOTS = ("/etc", "/root", "/var", "/usr", "/boot", "/sys", "/proc",
                     "/dev", "/bin", "/sbin", "/lib", "/run")
 _RUNTIME_SOCKETS = ("docker.sock", "podman.sock")
@@ -204,11 +204,10 @@ def _canonical_flag(flag: str) -> str:
 def _draft_model_flag(engine: str) -> str:
     """The draft-model flag spelling this engine's parser accepts.
 
-    Mainline renamed it to --spec-draft-model and keeps -md/--model-draft as
-    aliases; ik_llama.cpp only ever had -md/--model-draft and rejects the new
-    spelling outright ("unknown argument"), which killed the launch for any ik
-    profile with a draft model set. Probed by execution against
-    ik-llama-cpp:cu12-server and llama.cpp:server-b10711.
+    Mainline's flag is --spec-draft-model, with -md/--model-draft as aliases;
+    ik_llama.cpp accepts only -md/--model-draft and rejects --spec-draft-model
+    ("unknown argument"). Probed against ik-llama-cpp:cu12-server and
+    llama.cpp:server-b10711.
     """
     return "--model-draft" if engine == "ik_llama.cpp" else "--spec-draft-model"
 
@@ -307,9 +306,8 @@ def needs_server_entrypoint(image: str) -> bool:
 
 def _connection_flag(binary: str) -> str:
     """The remote-host selector flag for a runtime: podman uses --connection,
-    docker uses --context (the same concept, different flag). Mirrors
-    services.runtime._base -- a docker launch that emitted --connection would be
-    rejected ("unknown flag") while stop/status, which go through _base, worked."""
+    docker uses --context (the same concept, different flag; docker rejects
+    --connection as "unknown flag"). Same rule as services.runtime._base."""
     return "--context" if binary == "docker" else "--connection"
 
 
@@ -384,8 +382,8 @@ def _run_level_args(profile: Profile, router_host_dir: str = "",
     # An RPC pool head ALWAYS needs this override regardless of tag: a pool image
     # must carry both llama-server and ggml-rpc-server, so it is a full-style
     # (tools.sh-entrypoint) build, yet a user's custom tag (e.g. `…:rpc-cuda`)
-    # won't match the full/light tag heuristic. Verified live 2026-08-20: without
-    # this, the head ran tools.sh and printed usage instead of serving.
+    # won't match the full/light tag heuristic; without the override the head
+    # runs tools.sh and prints usage instead of serving.
     has_entrypoint = any(a == "--entrypoint" or a.startswith("--entrypoint=") for a in extra)
     force_server = needs_server_entrypoint(profile.image) or profile.runtime.launch_mode == "rpc"
     if force_server and not has_entrypoint:
@@ -445,8 +443,7 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
         if key in suppress:
             continue
         # Router-only flags are rejected by a single-model llama-server. The UI
-        # filters them out by mode, but profile JSON written before that
-        # filtering existed can still carry one.
+        # filters them out by mode, but a profile JSON can still carry one.
         if key in ROUTER_ONLY_KEYS:
             continue
         # Engine-gated flags (ik_llama.cpp) must never reach a mainline launch.
@@ -563,10 +560,9 @@ def build_rpc_endpoints(workers: list[RpcWorker],
     return ",".join(f"127.0.0.1:{resolve(w)}" for w in workers)
 
 
-# Current llama.cpp builds the RPC server as `ggml-rpc-server` (upstream
-# tools/rpc/CMakeLists.txt: `set(TARGET ggml-rpc-server)`); the older
-# `rpc-server` name no longer exists. Verified live 2026-08-20 against a
-# GGML_RPC=ON image.
+# llama.cpp builds the RPC server as `ggml-rpc-server` (upstream
+# tools/rpc/CMakeLists.txt: `set(TARGET ggml-rpc-server)`); a GGML_RPC=ON
+# image carries no `rpc-server` binary.
 _RPC_ENTRYPOINT = "/app/ggml-rpc-server"
 
 
@@ -591,8 +587,8 @@ def build_worker_command(profile, worker, index, connection="", wport=None):
     argv += ["-p", f"127.0.0.1:{port}:{port}"]
     argv += ["--entrypoint", _RPC_ENTRYPOINT, profile.image]
     argv += ["-H", "0.0.0.0", "-p", str(port), "-d", worker.device]
-    # NB: current `ggml-rpc-server` has no per-worker memory-budget flag (its
-    # only options are -t/-d/-H/-p/-c; verified live 2026-08-20). `worker.mem_mb`
+    # NB: `ggml-rpc-server` has no per-worker memory-budget flag (its only
+    # options are -t/-d/-H/-p/-c). `worker.mem_mb`
     # is therefore a preflight-only pledge (feeds pooled_fit + the overcommit
     # warning) and is deliberately NOT passed to the worker; an unknown arg
     # makes ggml-rpc-server exit with "unknown argument".

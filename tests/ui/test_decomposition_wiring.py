@@ -1,17 +1,10 @@
-"""Additive composition assertions for the MainWindow decomposition (Tasks 1-8).
+"""Composition assertions for the MainWindow decomposition.
 
-These tests don't exercise new behavior -- every path here is already covered
-by the pre-existing 854 tests. This file exists purely to pin the *structure*
-the decomposition promised: that ConfigurePanel + the four controllers
-actually exist as separate objects on MainWindow, that the LaunchController
-owns _spawn_async, and that MainWindow's own teardown orchestration still
-reaches all three worker-owning controllers.
-
-The forwarding facade (`@property` widget-forwards + one-line method
-delegators on MainWindow, e.g. `w.image_edit`, `w.on_launch()`) is being
-deleted (facade-shrink Task 7), so this file no longer asserts identity
-through it -- only the surviving composition (`w._configure_panel`,
-`w._monitor`, `w._launch`, `w._benchmark`, `w._report`) is pinned here.
+These tests pin structure, not behavior: ConfigurePanel and the four
+controllers exist as separate objects on MainWindow (`w._configure_panel`,
+`w._monitor`, `w._launch`, `w._benchmark`, `w._report`), the LaunchController
+owns _spawn_async, and MainWindow's own teardown orchestration reaches all
+three worker-owning controllers.
 """
 from llama_launcher.ui.main_window import MainWindow
 from llama_launcher.ui.panels.configure_panel import ConfigurePanel
@@ -46,9 +39,8 @@ def test_controllers_hold_window_back_reference(qtbot):
 
 
 def test_spawn_async_is_owned_by_launch_controller(qtbot):
-    """_spawn_async is the highest-risk member of the facade-shrink plan (it's
-    class-patched on MainWindow by an autouse fixture ahead of every UI test).
-    Pin that it's a real LaunchController method, not just forwarded through."""
+    """_spawn_async is a real LaunchController method, not a forward: the autouse
+    fixture class-patches it there ahead of every UI test."""
     w = MainWindow()
     qtbot.addWidget(w)
     assert hasattr(w._launch, "_spawn_async")
@@ -56,9 +48,8 @@ def test_spawn_async_is_owned_by_launch_controller(qtbot):
 
 
 def test_stop_timers_drains_all_three_worker_owning_controllers(qtbot, monkeypatch):
-    """_stop_timers is the one piece of orchestration Task 7 confirmed stays on
-    MainWindow itself (it coordinates draining across controllers); pin that it
-    still reaches all three drain()-owning controllers.
+    """_stop_timers stays on MainWindow itself (it coordinates draining across
+    controllers) and reaches all three drain()-owning controllers.
     """
     w = MainWindow()
     qtbot.addWidget(w)

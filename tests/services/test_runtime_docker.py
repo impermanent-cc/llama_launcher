@@ -1,7 +1,7 @@
 """Docker/podman parity for the runtime layer.
 
-The launcher advertises docker as a first-class runtime, but several helpers
-assumed podman-only CLI shapes. These pin the cross-runtime behavior.
+The launcher advertises docker as a first-class runtime, so no helper may
+assume podman-only CLI shapes.
 """
 from unittest.mock import patch
 

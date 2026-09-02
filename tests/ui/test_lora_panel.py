@@ -33,7 +33,7 @@ def test_lora_panel_item_changed_emits_signal(qtbot):
 
 
 def test_add_row_does_not_crash_when_changed_reads_loras(qtbot):
-    # Regression for Bug 3.
+    # A changed slot that reads loras() must not crash on a half-built row.
     panel = LoraPanel()
     qtbot.addWidget(panel)
     panel.changed.connect(panel.loras)
@@ -44,7 +44,7 @@ def test_add_row_does_not_crash_when_changed_reads_loras(qtbot):
 
 
 def test_scale_change_emits_zero_arg_changed(qtbot):
-    # Regression for Bug 4: valueChanged passes an arg to the 0-arg signal.
+    # valueChanged passes an arg; the 0-arg changed signal must still fire.
     panel = LoraPanel()
     qtbot.addWidget(panel)
     panel.set_loras([LoraRef(path="/loras/a.gguf", scale=1.0)])
