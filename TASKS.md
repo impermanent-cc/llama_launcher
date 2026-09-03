@@ -41,15 +41,32 @@ then update the AGENTS.md version line.
       ignore rule relaxed (`!docs/plans/`) in the first real cycle.
 - [ ] Review the control-vector family and --spec-replace (see ROADMAP.md
       "Next").
+- [ ] Eight settings-catalog group names contain "&" ("Model & Context",
+      "GPU & Memory", "CPU & Threading", "Embedding & Reranking",
+      "Multi-GPU & Graph", "Networking & CORS", "Performance & Batching",
+      "Server & Tools"). configure_panel builds each QGroupBox with the
+      name verbatim, and Qt reads "&" as a mnemonic, so the title renders
+      with an underlined space: "Model_Context". Predates this cycle (the
+      strings are unchanged since the catalog commits). Fix by doubling
+      the ampersand for display, not in the catalog data, since the group
+      name is also a lookup key.
 
 ## Pending owner smokes
 
-- [ ] Launch a real profile from this branch and confirm the UI text
-      renders unchanged (the glyph escapes are byte-identical at runtime,
-      the suite covers the strings, but the GUI is the proof).
-- [ ] Open a fresh session in this repo and confirm the session-start
-      summary prints this file's current phase.
-- [ ] Live multi-node test on a GPU worker when one is available.
+- [x] Launch a real profile and confirm the UI text renders unchanged.
+      Done 2026-09-03 on KDE/Wayland through XWayland (QT_QPA_PLATFORM=xcb):
+      the e2b profile loaded through the profile combo's activated signal,
+      the command preview matched `--dry-run --profile e2b` exactly, and
+      the glyphs rendered as glyphs, not tofu. An AST comparison of every
+      non-ASCII string constant in src/ against the pre-cycle tree found 66
+      distinct constants over 81 occurrences, all byte-identical.
+- [x] Open a fresh session in this repo and confirm the session-start
+      summary prints this file's current phase. Done 2026-09-03 by running
+      ~/.claude/hooks/session-start.sh, which is what a session runs; it
+      printed the branch, the last ten commits and this file's phase.
+- [ ] Live multi-node test on a GPU worker when one is available. Still
+      blocked: nvidia-smi is absent on this box and the Stats dock reports
+      "GPU: unavailable".
 
 ## Done this cycle
 

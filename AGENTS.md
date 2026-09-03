@@ -2,7 +2,7 @@
 
 Read this file at the start of every session. Owner habits and consent rules
 live in project memory, not here. This repository is public and released
-(v0.1.0): every change is user-visible, so README, CHANGELOG and packaging
+(v0.1.1): every change is user-visible, so README, CHANGELOG and packaging
 change only when the work calls for it.
 
 ## What this is
