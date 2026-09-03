@@ -13,7 +13,7 @@ jobs:
   sanity:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: No em or en dashes in tracked text
         run: |
           if git ls-files -z | grep -zvE '\.(png|jpe?g|gif|ico|svg|pdf|woff2?|ttf|otf|onnx|wav|ogg|mp3|zip|gz)$' \
@@ -32,7 +32,7 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: actions/setup-python@v6
         with:
           python-version: "3.x"
@@ -53,7 +53,7 @@ jobs:
         python-version: ["3.12", "3.13"]
     name: test (py${{ matrix.python-version }})
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # Qt runtime libs PySide6 needs headless (offscreen). No audio libs:
       # Llama Launcher uses only QtCore/QtGui/QtWidgets. Mirrored by the
       # localci Containerfile, so keep the two lists in sync.
