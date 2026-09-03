@@ -50,6 +50,16 @@ then update the AGENTS.md version line.
       strings are unchanged since the catalog commits). Fix by doubling
       the ampersand for display, not in the catalog data, since the group
       name is also a lookup key.
+- [ ] `--dry-run` prints a konsole invocation on a box that has no
+      konsole. app.py takes `load_config(base_dir).get("terminal",
+      DEFAULT_TEMPLATE)` and DEFAULT_TEMPLATE is TERMINALS[0], konsole,
+      so with no "terminal" key in config.json the preview never consults
+      detect_terminal(). The launch path is correct: terminal.launch()
+      with template=None detects, and stripping konsole from PATH walks
+      gnome-terminal, xfce4-terminal, xterm as intended. So the preview
+      and the launch disagree wherever konsole is absent. Dates to
+      285592b, the commit that added --dry-run. Fix by falling back to
+      detect_terminal() before DEFAULT_TEMPLATE.
 
 ## Pending owner smokes
 
