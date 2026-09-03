@@ -5,19 +5,14 @@
 Idle: no cycle open. The workflow standard's stamp and its ruff gate
 landed on main 2026-09-03 as merge f37f6a5, a --no-ff merge of
 chore/ruff-gate with chore/workflow-stamp beneath it. Both branches are
-deleted locally. origin/chore/ruff-gate is still there: the deny list
-refuses `git push --delete` from a session, so the owner clears it with
-
-    git push --no-verify origin --delete chore/ruff-gate
-
-(--no-verify because a deletion has nothing to test and the pre-push hook
-would otherwise run a full localci for it).
+gone, locally and on origin, and origin now carries main alone.
 
 actions/checkout is at v7 and actions/setup-python at v7, the two bumps
-dependabot opened as PRs 2 and 3 once the config landed. Neither project
-breaking change reaches this workflow: it has no pull_request_target or
-workflow_run trigger, and it never passed setup-python's removed
-pip-install input.
+dependabot opened as PRs 2 and 3 once the config landed; both PRs are
+closed against the commit that applied them and their branches deleted.
+Neither project breaking change reaches this workflow: it has no
+pull_request_target or workflow_run trigger, and it never passed
+setup-python's removed pip-install input.
 
 0.1.1 is cut in CHANGELOG.md and pyproject.toml but is not tagged, so the
 changelog's 0.1.1 link and the AGENTS.md "released (v0.1.0)" line resolve
