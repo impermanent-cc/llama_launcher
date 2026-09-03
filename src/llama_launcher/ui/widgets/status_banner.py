@@ -17,11 +17,11 @@ class StatusBanner(QWidget):
         root.addWidget(self.banner)
 
     def set_connected(self, connected: bool) -> None:
-        self.status_label.setText("● connected" if connected else "● disconnected")
+        self.status_label.setText("\u25cf connected" if connected else "\u25cf disconnected")
 
     def set_error(self, text: str) -> None:
         """Report a failed control-plane action next to the buttons that caused it."""
-        self.status_label.setText(f"● {text}" if text else "● connected")
+        self.status_label.setText(f"\u25cf {text}" if text else "\u25cf connected")
 
     def set_exposure_warning(self, text: str) -> None:
         self.banner.setText(text)

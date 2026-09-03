@@ -262,7 +262,7 @@ class ConfigurePanel(QWidget):
         self.rpc_workers_table = RpcWorkersTable(node_names=self._node_names())
         self.rpc_workers_table.changed.connect(self.refresh_preview)
         self.rpc_workers_table.setToolTip(
-            "rpc-server workers this profile's head connects to (--rpc host:port,…). "
+            "rpc-server workers this profile's head connects to (--rpc host:port,\u2026). "
             "Each row is a worker: which node it runs on, which device it exposes, "
             "an optional --mem budget, and its rpc-server port.")
 
@@ -295,7 +295,7 @@ class ConfigurePanel(QWidget):
         self.stop_timeout_spin.setSuffix(" s")
         self.stop_timeout_spin.setToolTip(
             "Grace period after Stop before the container is force-killed "
-            "(SIGTERM → wait → SIGKILL). Raise it if a large model needs longer "
+            "(SIGTERM \u2192 wait \u2192 SIGKILL). Raise it if a large model needs longer "
             "to unload cleanly.\n\nApplies to this profile's own container; in "
             "router mode that's the router container; each router member's kill "
             "delay is the per-row 'Stop timeout (s)' in the Router members table.")
@@ -320,11 +320,11 @@ class ConfigurePanel(QWidget):
         self.members_list.verticalHeader().setVisible(False)
         self.members_list.setMaximumHeight(140)
         self.members_list.itemChanged.connect(lambda _i: self.refresh_preview())
-        self.add_member_btn = QPushButton("Add member…")
+        self.add_member_btn = QPushButton("Add member\u2026")
         self.add_member_btn.clicked.connect(self._on_add_member)
         self.remove_member_btn = QPushButton("Remove member")
         self.remove_member_btn.clicked.connect(self._on_remove_member)
-        self.edit_member_btn = QPushButton("Edit member…")
+        self.edit_member_btn = QPushButton("Edit member\u2026")
         self.edit_member_btn.setToolTip(
             "Load the selected member's profile into the form to set its GPU "
             "layers, MoE offload, context, etc. (double-clicking a row does the same).")
@@ -488,9 +488,9 @@ class ConfigurePanel(QWidget):
 
         # lifecycle / launch buttons (added to a shared row in MainWindow, below
         # the tab widget, so they're visible regardless of the active tab)
-        self.launch_btn = QPushButton("▶ Launch")
-        self.stop_btn = QPushButton("■ Stop")
-        self.restart_btn = QPushButton("⟳ Restart")
+        self.launch_btn = QPushButton("\u25b6 Launch")
+        self.stop_btn = QPushButton("\u25a0 Stop")
+        self.restart_btn = QPushButton("\u27f3 Restart")
         self.web_ui_btn = QPushButton("Open Web UI")
         self.web_ui_btn.setEnabled(False)
         self.web_ui_btn.clicked.connect(self.window._report.open_web_ui)
@@ -632,7 +632,7 @@ class ConfigurePanel(QWidget):
             self.check_fit_label.setText("Select a model first.")
             return
         estimate_bytes = self._model_estimate_bytes(p)
-        self.check_fit_label.setText("Checking fit…")
+        self.check_fit_label.setText("Checking fit\u2026")
         self.check_fit_btn.setEnabled(False)
         self._check_fit_result = None
         self._check_fit_inflight = True
@@ -922,7 +922,7 @@ class ConfigurePanel(QWidget):
         row.addWidget(line_edit, 1)
         if dot is not None:
             row.addWidget(dot)
-        btn = QPushButton("Browse…")
+        btn = QPushButton("Browse\u2026")
         btn.clicked.connect(lambda: self._browse_into(line_edit))
         row.addWidget(btn)
         return container
@@ -941,7 +941,7 @@ class ConfigurePanel(QWidget):
         row = QHBoxLayout(container)
         row.setContentsMargins(0, 0, 0, 0)
         row.addWidget(self.native_binary_edit, 1)
-        btn = QPushButton("Browse…")
+        btn = QPushButton("Browse\u2026")
         btn.clicked.connect(self._browse_native_binary)
         row.addWidget(btn)
         return container
@@ -1220,7 +1220,7 @@ class ConfigurePanel(QWidget):
             line = ""
         elif s.fits:
             line = (f"fit{note}: est ~{s.est_bytes/gib:.1f} / ~{s.free_bytes/gib:.1f} "
-                    f"GiB free (margin {s.margin/gib:.1f} GiB) ✓")
+                    f"GiB free (margin {s.margin/gib:.1f} GiB) \u2713")
         else:
             line = (f'<span style="color:#c62828">may not fit{note}: est '
                     f"~{s.est_bytes/gib:.1f} GiB &gt; ~{s.free_bytes/gib:.1f} GiB "
@@ -1325,4 +1325,4 @@ class ConfigurePanel(QWidget):
                 bits.append("SWA")
             if caps.ctx_train:
                 bits.append(f"{caps.ctx_train // 1024}K ctx")
-        return "  ·  ".join(bits)
+        return "  \u00b7  ".join(bits)

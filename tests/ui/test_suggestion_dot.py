@@ -8,10 +8,10 @@ def test_dot_states(qtbot):
     d.set_state("none")
     assert not d.isVisible() or d.text() == ""
     d.set_state("suggested", "MoE model: offload experts to CPU")
-    assert d.isVisible() and d.text() == "●"
+    assert d.isVisible() and d.text() == "\u25cf"
     assert d.toolTip() == "MoE model: offload experts to CPU"
     d.set_state("muted", "Not a MoE model")
-    assert d.text() == "○"
+    assert d.text() == "\u25cb"
 
 
 def test_dot_click_applies(qtbot):
@@ -35,4 +35,4 @@ def test_setting_widget_exposes_set_suggestion(qtbot):
     w = make_widget(CATALOG["flash-attn"])
     qtbot.addWidget(w)
     w.set_suggestion("suggested", "Enable flash attention")
-    assert w._dot.text() == "●"
+    assert w._dot.text() == "\u25cf"

@@ -381,7 +381,7 @@ def _run_level_args(profile: Profile, router_host_dir: str = "",
     # them straight at llama-server unless the user already set an --entrypoint.
     # An RPC pool head ALWAYS needs this override regardless of tag: a pool image
     # must carry both llama-server and ggml-rpc-server, so it is a full-style
-    # (tools.sh-entrypoint) build, yet a user's custom tag (e.g. `…:rpc-cuda`)
+    # (tools.sh-entrypoint) build, yet a user's custom tag (e.g. `...:rpc-cuda`)
     # won't match the full/light tag heuristic; without the override the head
     # runs tools.sh and prints usage instead of serving.
     has_entrypoint = any(a == "--entrypoint" or a.startswith("--entrypoint=") for a in extra)

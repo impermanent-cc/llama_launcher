@@ -48,15 +48,15 @@ def _worker_device(name: str, mode: str, prof: Profile | None) -> str:
 
 
 def worker_card_title(inst: Instance) -> str:
-    """Display title for an rpc-worker StatCard: "rpc-worker · <node>[ · <device>]".
+    """Display title for an rpc-worker StatCard: "rpc-worker \u00b7 <node>[ \u00b7 <device>]".
 
     A worker container shares its pool head's `llama-launcher.profile` label,
     so the profile name/port cannot tell its card from the head's; the title
     carries the worker's own identity instead.
     """
-    title = f"rpc-worker · {inst.node}"
+    title = f"rpc-worker \u00b7 {inst.node}"
     if inst.device:
-        title += f" · {inst.device}"
+        title += f" \u00b7 {inst.device}"
     return title
 
 

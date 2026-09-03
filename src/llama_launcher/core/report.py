@@ -46,7 +46,7 @@ def build_report(data: dict, sections: dict) -> str:
         lines += ["## Validation & status", ""]
         for v in data.get("validation", []) or ["(none)"]:
             lines.append(f"- {v}")
-        hist = " → ".join(data.get("status_history", []))
+        hist = " \u2192 ".join(data.get("status_history", []))
         lines += ["", f"Status history: {hist}", ""]
     if sections.get("runtime"):
         lines += ["## Runtime / GPU / host", "",

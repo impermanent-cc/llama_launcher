@@ -212,11 +212,11 @@ def _sug_embedding(caps, settings, mmproj_set, draft_set):
         if have:
             return []
         return [Suggestion(
-            "Reranker → enable rerank (--reranking + --pooling rank + --embeddings)",
+            "Reranker \u2192 enable rerank (--reranking + --pooling rank + --embeddings)",
             {"reranking": True, "pooling": "rank", "embeddings": True}, {})]
     if caps.is_embedding and not settings.get("embeddings"):
         pool = caps.pooling_type or "mean"
-        return [Suggestion(f"Embedding model → enable --embeddings, pooling = {pool}",
+        return [Suggestion(f"Embedding model \u2192 enable --embeddings, pooling = {pool}",
                           {"embeddings": True, "pooling": pool}, {})]
     return []
 

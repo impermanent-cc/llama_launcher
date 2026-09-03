@@ -55,7 +55,7 @@ def test_gate_valid_server_passes_and_launches_exit_0(monkeypatch, capsys):
 
 
 def test_gate_exposed_keyless_server_exits_2(monkeypatch, capsys):
-    # bind_host past loopback + no api-key setting → real validate() refuses it.
+    # bind_host past loopback + no api-key setting means real validate() refuses it.
     _profiles(monkeypatch, [_server("s", bind="0.0.0.0")], last="s")
     monkeypatch.setattr(app, "binary_available", lambda b: True)
     assert app.main(["--launch", "--profile", "s"]) == 2
@@ -122,7 +122,7 @@ def test_gate_last_profile_fallback(monkeypatch):
     monkeypatch.setattr(app, "binary_available", lambda b: True)
     monkeypatch.setattr(app, "validate", lambda p, **kw: [])
     monkeypatch.setattr(app.headless, "router_status", lambda p, binary: "running")
-    # No --profile given → resolves "r" from last_profile, gate passes, health runs.
+    # No --profile given means resolves "r" from last_profile, gate passes, health runs.
     assert app.main(["--health"]) == 0
 
 

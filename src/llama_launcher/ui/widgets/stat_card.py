@@ -1,7 +1,7 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
 
-_DOT = {"ready": "●", "starting": "◐", "loading": "◐"}
+_DOT = {"ready": "\u25cf", "starting": "\u25d0", "loading": "\u25d0"}
 
 
 class StatCard(QFrame):
@@ -10,8 +10,8 @@ class StatCard(QFrame):
     Shows the profile/port, a health dot, a headline stat (gen tok/s, or "ready"
     for an embedding/rerank server, or "router" for a router) and KV%. Clickable
     to focus (emits `selected`). Its action button is dual-mode:
-    running -> ■ emits `stop_requested`;
-    stopped -> ✕ emits `remove_requested` (podman rm a dead container). Reused
+    running -> \u25a0 emits `stop_requested`;
+    stopped -> \u2715 emits `remove_requested` (podman rm a dead container). Reused
     across ticks -- the owning panel calls update_row() to refresh labels in place.
     """
     selected = Signal(str)
@@ -30,7 +30,7 @@ class StatCard(QFrame):
         top = QHBoxLayout()
         self._title = QLabel()
         self._title.setStyleSheet("font-weight: bold;")
-        self._stop_btn = QPushButton("■")
+        self._stop_btn = QPushButton("\u25a0")
         self._stop_btn.setFixedWidth(28)
         self._stop_btn.setToolTip("Stop this instance")
         self._stop_btn.clicked.connect(self._on_action)
@@ -67,17 +67,17 @@ class StatCard(QFrame):
     def update_row(self, row: dict) -> None:
         running = row.get("running", True)
         self._running = running
-        self._stop_btn.setText("■" if running else "✕")
+        self._stop_btn.setText("\u25a0" if running else "\u2715")
         self._stop_btn.setToolTip("Stop this instance" if running else "Remove this stopped container")
         port = row.get("port")
         title = row.get("profile") or self._name
         title = f"{title}  :{port}" if port else title
         node = row.get("node")
         if node and node != "local":
-            title = f"{title} · {node}"
+            title = f"{title} \u00b7 {node}"
         self._title.setText(title)
         health = row.get("health", "down")
-        self._health.setText(f"{_DOT.get(health, '○')} {health}")
+        self._health.setText(f"{_DOT.get(health, '\u25cb')} {health}")
         if row.get("mode") == "router":
             headline = "router"
         elif row.get("embeddings") or row.get("reranking"):

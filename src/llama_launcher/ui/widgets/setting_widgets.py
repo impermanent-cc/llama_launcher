@@ -10,7 +10,7 @@ from llama_launcher.ui.widgets.no_wheel import (
 
 
 class SuggestionDot(QToolButton):
-    """Inline per-setting indicator: filled ● = suggested, hollow ○ = N/A.
+    """Inline per-setting indicator: filled \u25cf = suggested, hollow \u25cb = N/A.
 
     When a concrete value suggestion exists, the dot is clickable and applies
     it (on_apply); otherwise it is a passive indicator. Hover explains why.
@@ -27,11 +27,11 @@ class SuggestionDot(QToolButton):
         self._on_apply = on_apply
         self.setToolTip(reason)
         if state == "suggested":
-            self.setText("●")
+            self.setText("\u25cf")
             self.setStyleSheet("QToolButton { color: palette(highlight); border: none; }")
             self.setVisible(True)
         elif state == "muted":
-            self.setText("○")
+            self.setText("\u25cb")
             self.setStyleSheet("QToolButton { color: palette(mid); border: none; }")
             self.setVisible(True)
         else:  # none
@@ -59,7 +59,7 @@ class SettingWidget(QWidget):
 
         tooltip = setting.tooltip
         if setting.danger:
-            tooltip = "⚠ DANGER: " + tooltip
+            tooltip = "\u26a0 DANGER: " + tooltip
             self.setObjectName("dangerSetting")
 
         if t == "bool":
@@ -140,7 +140,7 @@ class SettingWidget(QWidget):
                 self._editor.setEchoMode(QLineEdit.Password)
                 self._editor.setToolTip((self._editor.toolTip() + "  ").strip())
                 reveal = QToolButton()
-                reveal.setText("👁")
+                reveal.setText("\U0001f441")
                 reveal.setCheckable(True)
                 reveal.setToolTip("Show / hide")
                 reveal.toggled.connect(

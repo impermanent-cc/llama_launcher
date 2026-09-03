@@ -6,7 +6,7 @@ def test_carries_text_and_hover(qtbot):
     qtbot.addWidget(b)
     assert b.info_text == "gen/prompt = tok/s of the last request"
     assert b.toolTip() == b.info_text          # hover still works
-    assert "💡" not in b.text() and b.text() == "ⓘ"   # non-emoji glyph
+    assert "\U0001f4a1" not in b.text() and b.text() == "\u24d8"   # non-emoji glyph
 
 
 def test_click_does_not_crash(qtbot):

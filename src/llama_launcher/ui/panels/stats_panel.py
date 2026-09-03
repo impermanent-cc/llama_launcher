@@ -33,9 +33,9 @@ class StatsPanel(QWidget):
         layout = QVBoxLayout(self)
         mono = QFont("monospace")
         mono.setStyleHint(QFont.StyleHint.Monospace)
-        self.gpu_label = QLabel("GPU: …")
-        self.system_label = QLabel("System: …")
-        self.container_label = QLabel("Container: …")
+        self.gpu_label = QLabel("GPU: \u2026")
+        self.system_label = QLabel("System: \u2026")
+        self.container_label = QLabel("Container: \u2026")
         for w in (self.gpu_label, self.system_label, self.container_label):
             w.setFont(mono)
             w.setWordWrap(True)
@@ -72,7 +72,7 @@ class StatsPanel(QWidget):
                 f"{g.name}\n"
                 f"  util {spark} {g.util_pct:3d}%\n"
                 f"  vram {_gib_from_mib(g.mem_used_mib):5.1f} / "
-                f"{_gib_from_mib(g.mem_total_mib):5.1f} GiB  {g.temp_c:3d}°C{power}")
+                f"{_gib_from_mib(g.mem_total_mib):5.1f} GiB  {g.temp_c:3d}\u00b0C{power}")
         self.gpu_label.setText("GPU\n" + "\n".join(blocks))
 
     def _render_system(self, snap) -> None:

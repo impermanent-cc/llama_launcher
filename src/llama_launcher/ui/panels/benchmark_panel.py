@@ -26,8 +26,8 @@ _BENCH_INTRO = ("Benchmark the running server: POSTs filler prompts and reads "
                  "llama.cpp timings for prompt-eval / generation tok/s. History is "
                  "kept per profile so you can A/B a flag or model change.")
 
-_BENCH_LEGEND = ("pp t/s = prefill (prompt-processing) throughput  ·  "
-                 "gen t/s = generation throughput  ·  total s = wall-clock per size")
+_BENCH_LEGEND = ("pp t/s = prefill (prompt-processing) throughput  \u00b7  "
+                 "gen t/s = generation throughput  \u00b7  total s = wall-clock per size")
 
 
 class BenchmarkPanel(QWidget):
@@ -152,7 +152,7 @@ class BenchmarkPanel(QWidget):
                 bits.append(f"gen {gen:+.0f}%")
             if bits:
                 parts.append(f"{entry.get('size')}: " + " ".join(bits))
-        summary = "Δ " + " · ".join(parts) if parts else "Δ"
+        summary = "\u0394 " + " \u00b7 ".join(parts) if parts else "\u0394"
         if delta.get("sizes_differ"):
             summary += " (sizes differ)"
         current = self.bench_progress.text()
@@ -164,7 +164,7 @@ class BenchmarkPanel(QWidget):
         self.bench_table.insertRow(row)
         label = self._snapshot_label(run.get("snapshot") or {})
         ts = run.get("timestamp", "")
-        text = f"{ts}  ·  {label}" if label else str(ts)
+        text = f"{ts}  \u00b7  {label}" if label else str(ts)
         item = QTableWidgetItem(text)
         font = item.font()
         font.setBold(True)

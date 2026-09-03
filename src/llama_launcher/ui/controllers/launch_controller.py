@@ -318,7 +318,7 @@ class LaunchController:
             self._launch_pool(p)
 
         self._fit_gate_inflight = True
-        self.window.status_label.setText("● checking pool fit…")
+        self.window.status_label.setText("\u25cf checking pool fit\u2026")
         self._run_pool_async(work, done)
 
     def _launch_pool(self, p) -> None:
@@ -330,7 +330,7 @@ class LaunchController:
         if self._pool_inflight:
             return
         self._pool_inflight = True
-        self.window.status_label.setText("● starting pool…")
+        self.window.status_label.setText("\u25cf starting pool\u2026")
         base = self.window.base_dir()
         self._run_pool_async(lambda: rpc.launch_pool(p, base), self._on_pool_result)
 
@@ -394,7 +394,7 @@ class LaunchController:
         if self._pool_inflight:
             return False
         self._pool_inflight = True
-        self.window.status_label.setText("● stopping pool…")
+        self.window.status_label.setText("\u25cf stopping pool\u2026")
         base = self.window.base_dir()
         self._run_pool_async(lambda: rpc.stop_pool(profile, base), self._on_pool_stopped)
         return True
@@ -410,7 +410,7 @@ class LaunchController:
         # the GUI.
         self.window._monitor._stop_log_follower()
         connection = self._connection_for_profile(p)
-        self.window.status_label.setText("● stopping…")
+        self.window.status_label.setText("\u25cf stopping\u2026")
         argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary,
                                  timeout=p.runtime.stop_timeout, connection=connection)
         self._stop_proc = self._spawn_async(argv, on_done=self.window._monitor.update_status)
@@ -419,7 +419,7 @@ class LaunchController:
         self.window._monitor._stop_log_follower()
         p = self.window._configure_panel.current_profile()
         connection = self._connection_for_profile(p)
-        self.window.status_label.setText("● restarting…")
+        self.window.status_label.setText("\u25cf restarting\u2026")
         argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary,
                                  timeout=p.runtime.stop_timeout, connection=connection)
         # Launch only after the stop completes, so the new container's --name/port
@@ -497,7 +497,7 @@ class LaunchController:
         seconds later, by which point the user may have switched profiles
         or flipped the mode combo -- current_profile() at that moment would
         no longer describe the launch that actually failed."""
-        self.window.status_label.setText("● failed to start")
+        self.window.status_label.setText("\u25cf failed to start")
         reason = (f"launch failed: {text.splitlines()[-1][:200]}"
                   if text else "launch failed")
         self.window._set_router_error(reason)
@@ -522,7 +522,7 @@ class LaunchController:
         self._fetch_repo = repo
         self._fetch_got_result = False
         self.window._configure_panel.fetch_btn.setEnabled(False)
-        self.window._configure_panel.fetch_btn.setText("Fetching…")
+        self.window._configure_panel.fetch_btn.setText("Fetching\u2026")
         self.window._configure_panel.update_badge.setEnabled(False)
         worker = _UpdateWorker(repo, prefix, parent=self.window)
         worker.found.connect(self._on_fetch_found)

@@ -21,7 +21,7 @@ _DRAFT_RE = re.compile(
 
 
 def parse_draft_stats(text: str) -> DraftStats | None:
-    """Return the LAST complete 'draft acceptance = …' line in text, or None."""
+    """Return the LAST complete 'draft acceptance = \u2026' line in text, or None."""
     last = None
     for m in _DRAFT_RE.finditer(text):
         last = m
@@ -37,7 +37,7 @@ def parse_draft_stats(text: str) -> DraftStats | None:
     )
 
 
-_BLOCKS = "▁▂▃▄▅▆▇█"
+_BLOCKS = "\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588"
 
 
 def sparkline(values, width: int = 0) -> str:

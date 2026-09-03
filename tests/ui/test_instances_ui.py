@@ -104,7 +104,7 @@ def test_build_instances_data_titles_rpc_worker_row(monkeypatch):
     """A worker container shares its pool head's `llama-launcher.profile` label
     so it joins to the SAME stored profile as the head; without a title
     override its row would show the head's own name/port. The worker row
-    instead gets its own "rpc-worker · <node> · <device>" title and no port."""
+    instead gets its own "rpc-worker \u00b7 <node> \u00b7 <device>" title and no port."""
     from llama_launcher.core.spec import RpcWorker
     from llama_launcher.ui.controllers import monitor_controller as mc
     profs = [Profile(name="pool", image="img", runtime=Runtime(
@@ -314,7 +314,7 @@ def test_stop_instance_spawns_stop_argv(win, monkeypatch):
 
 
 def test_stop_instance_uses_instance_stop_timeout(win, monkeypatch):
-    """A card ■ Stop resolves the container's own grace period from the built
+    """A card \u25a0 Stop resolves the container's own grace period from the built
     instance, so each instance honors its profile's stop_timeout."""
     win._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
     win._monitor._instances = [Instance(
@@ -328,7 +328,7 @@ def test_stop_instance_uses_instance_stop_timeout(win, monkeypatch):
 
 
 def test_stop_instance_uses_instance_binary(win, monkeypatch):
-    """The card ■ Stop controls the container with ITS profile's binary, not
+    """The card \u25a0 Stop controls the container with ITS profile's binary, not
     whatever binary the currently-loaded form profile happens to use."""
     win._configure_panel.load_profile(
         Profile(name="Solo", image="img", runtime=Runtime(binary="podman"), settings={"port": 8080}))
@@ -344,7 +344,7 @@ def test_stop_instance_uses_instance_binary(win, monkeypatch):
 
 
 def test_remove_instance_uses_instance_binary(win, monkeypatch):
-    """The card ■ Remove uses the stopped container's own binary, not the form's."""
+    """The card \u25a0 Remove uses the stopped container's own binary, not the form's."""
     win._configure_panel.load_profile(
         Profile(name="Solo", image="img", runtime=Runtime(binary="podman"), settings={"port": 8080}))
     win._monitor._instances = [Instance(

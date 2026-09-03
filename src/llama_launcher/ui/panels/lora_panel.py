@@ -138,7 +138,7 @@ class LoraPanel(QWidget):
         if target is None:
             return
         host, port, key = target
-        self.live_status.setText("Reading adapters…")
+        self.live_status.setText("Reading adapters\u2026")
         self._start(lambda: lora_api.list_adapters(host, port, key, timeout=5.0),
                     self._apply_synced)
 
@@ -176,7 +176,7 @@ class LoraPanel(QWidget):
         if not rows:
             self.live_status.setText("Nothing to apply: no adapter rows.")
             return
-        self.live_status.setText("Applying scales…")
+        self.live_status.setText("Applying scales\u2026")
 
         def _work():
             # Re-read first: ids are assigned by the server at load time, so the
@@ -230,7 +230,7 @@ class LoraPanel(QWidget):
             scale.setValue(lora.scale)
             scale.valueChanged.connect(lambda *_: self.changed.emit())
             self.table.setCellWidget(r, 1, scale)
-            browse_btn = QPushButton("Browse…")
+            browse_btn = QPushButton("Browse\u2026")
             row_index = r
 
             def _make_browse(row):

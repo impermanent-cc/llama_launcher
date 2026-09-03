@@ -38,7 +38,7 @@ class MonitorPanel(QWidget):
         # of collapsing when the log view claims the vertical space.
         self._cards_scroll.setMinimumHeight(150)
         self._cards_scroll.setMaximumHeight(175)
-        # Wrap a compact header (title + ⓘ) above the strip into one block so the
+        # Wrap a compact header (title + info button) above the strip into one block so the
         # rest of __init__ can keep treating the cards area as a single top widget
         # (later insertWidget indices depend on that).
         cards_header = QHBoxLayout()
@@ -68,12 +68,12 @@ class MonitorPanel(QWidget):
         # so it legitimately reads 0 on an idle server. Kept as a hover tooltip +
         # on-demand InfoButton popover instead of an always-visible label, to
         # avoid cluttering the tab with reminder text.
-        _legend = ("gen = live generation tok/s (0 when idle)  ·  "
-                   "prompt = prefill tok/s of the last request  ·  "
+        _legend = ("gen = live generation tok/s (0 when idle)  \u00b7  "
+                   "prompt = prefill tok/s of the last request  \u00b7  "
                    "KV = KV-cache used (approx, from slots)")
         # Deliberately NOT a tooltip on `summary`: the summary spans the whole
         # bar, so a tooltip there fires on hover anywhere along it, duplicating
-        # the info button. The legend lives only on the compact ⓘ button.
+        # the info button. The legend lives only on the compact info button.
         summary_row = QHBoxLayout()
         summary_row.addWidget(self.summary, 1)
         summary_row.addWidget(InfoButton(_legend))
@@ -139,7 +139,7 @@ class MonitorPanel(QWidget):
         if info.n_ctx is not None:
             parts.append(f"ctx {info.n_ctx}")
         if info.modalities:
-            mods = " ".join(f"{k}{'✓' if v else '✗'}"
+            mods = " ".join(f"{k}{'\u2713' if v else '\u2717'}"
                             for k, v in info.modalities.items())
             parts.append(mods)
         if info.model_alias:
@@ -149,7 +149,7 @@ class MonitorPanel(QWidget):
         if not parts:
             self.info_label.setVisible(False)
             return
-        self.info_label.setText("Info:  " + " · ".join(parts))
+        self.info_label.setText("Info:  " + " \u00b7 ".join(parts))
         self.info_label.setVisible(True)
 
     def update_stats(self, data: dict):
@@ -170,16 +170,16 @@ class MonitorPanel(QWidget):
             ptok = plive if plive is not None else data.get("prompt_tok_s")
             speed = f"gen {gen:.1f} tok/s" if gen is not None else "gen n/a"
             if ptok is not None:
-                speed += f"  ·  prompt {ptok:.0f} tok/s"
+                speed += f"  \u00b7  prompt {ptok:.0f} tok/s"
         kv = data.get("kv_pct")
         kv_s = f"KV {kv * 100:.0f}%" if kv is not None else "KV n/a"
         parts = [speed, kv_s]
         if data.get("speculating"):
-            parts.append("spec ●")
+            parts.append("spec \u25cf")
         for g in data.get("gpus", []):
-            parts.append(f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, GPU {g.util_pct}%, {g.temp_c}°C")
+            parts.append(f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, GPU {g.util_pct}%, {g.temp_c}\u00b0C")
         if data.get("cpu") or data.get("mem"):
-            parts.append(f"container CPU {data.get('cpu','')} · MEM {data.get('mem','')}")
+            parts.append(f"container CPU {data.get('cpu','')} \u00b7 MEM {data.get('mem','')}")
         if data.get("uptime"):
             parts.append(f"uptime {data['uptime']}")
         self._last = "    ".join(parts)
@@ -219,8 +219,8 @@ class MonitorPanel(QWidget):
     @staticmethod
     def _mtp_text(d, source: str = "log") -> str:
         pos = " / ".join(f"{p * 100:.0f}%" for p in d.per_position)
-        return (f"MTP  accept {d.acceptance * 100:.0f}%  ·  len {d.mean_len:.2f}  "
-                f"·  pos {pos}  ({source})")
+        return (f"MTP  accept {d.acceptance * 100:.0f}%  \u00b7  len {d.mean_len:.2f}  "
+                f"\u00b7  pos {pos}  ({source})")
 
     def reset(self):
         self._draft = None

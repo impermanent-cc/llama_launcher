@@ -43,18 +43,18 @@ def test_moe_mtp_model_marks_dots_suggested(qtbot, tmp_path):
     # in-file MTP head -> a concrete suggestion fires on spec-type, so its
     # dot is suggested and mentions MTP in the click-apply reason.
     spec_dot = w._configure_panel._widgets["spec-type"]._dot
-    assert spec_dot.text() == "●"
+    assert spec_dot.text() == "\u25cf"
     assert "MTP" in spec_dot.toolTip()
     # MoE model -> n-cpu-moe is RECOMMENDED tier.
     moe_dot = w._configure_panel._widgets["n-cpu-moe"]._dot
-    assert moe_dot.text() == "●"
+    assert moe_dot.text() == "\u25cf"
     assert "MoE" in moe_dot.toolTip()
     # no vision sibling -> mmproj field dot is muted (N/A).
-    assert w._configure_panel._mmproj_dot.text() == "○"
+    assert w._configure_panel._mmproj_dot.text() == "\u25cb"
     assert "Not applicable" in w._configure_panel._mmproj_dot.toolTip()
     # no SWA -> muted.
     swa_dot = w._configure_panel._widgets["swa-full"]._dot
-    assert swa_dot.text() == "○"
+    assert swa_dot.text() == "\u25cb"
     assert "MoE" in w._configure_panel.model_meta_label.text() and "MTP" in w._configure_panel.model_meta_label.text()
 
 
@@ -68,7 +68,7 @@ def test_clicking_suggestion_dot_applies_it(qtbot, tmp_path):
                 model="/models/m.gguf", settings={"port": 8080, "spec-type": "none"})
     w._configure_panel.load_profile(p)
     dot = w._configure_panel._widgets["spec-type"]._dot
-    assert dot.text() == "●"
+    assert dot.text() == "\u25cf"
     dot.click()
     assert w._configure_panel._widgets["spec-type"].value() == "draft-mtp"   # in-file MTP suggestion applied
 
@@ -91,8 +91,8 @@ def test_mtp_sibling_suggestion_fans_out_to_both_dots(qtbot, tmp_path):
 
     spec_dot = w._configure_panel._widgets["spec-type"]._dot
     draft_dot = w._configure_panel._draft_model_dot
-    assert spec_dot.text() == "●"
-    assert draft_dot.text() == "●"
+    assert spec_dot.text() == "\u25cf"
+    assert draft_dot.text() == "\u25cf"
     assert "m-mtp.gguf" in spec_dot.toolTip()
     assert spec_dot.toolTip() == draft_dot.toolTip()   # same Suggestion.text
 

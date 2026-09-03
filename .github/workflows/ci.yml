@@ -5,6 +5,24 @@ on:
   pull_request:
 
 jobs:
+  sanity:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: No em or en dashes in tracked text
+        run: |
+          if git ls-files -z | grep -zvE '\.(png|jpe?g|gif|ico|svg|pdf|woff2?|ttf|otf|onnx|wav|ogg|mp3|zip|gz)$' \
+            | grep -zvE '^(README\.md|CHANGELOG\.md|RPC\.md)$' \
+            | LC_ALL=C xargs -0 grep -nP '\xe2\x80\x94|\xe2\x80\x93' 2>/dev/null; then
+            echo "em or en dash found"; exit 1; fi
+      - name: Tracked text is ASCII
+        run: |
+          if git ls-files -z | grep -zvE '\.(png|jpe?g|gif|ico|svg|pdf|woff2?|ttf|otf|onnx|wav|ogg|mp3|zip|gz)$' \
+            | grep -zvE '^(uv|poetry)\.lock$' \
+            | grep -zvE '^(README\.md|CHANGELOG\.md|RPC\.md)$' \
+            | LC_ALL=C xargs -0 grep -nP '[\x80-\xff]' 2>/dev/null; then
+            echo "non-ASCII text found"; exit 1; fi
+
   test:
     runs-on: ubuntu-latest
     strategy:

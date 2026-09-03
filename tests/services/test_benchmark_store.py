@@ -38,7 +38,7 @@ def test_delta_percent_and_size_mismatch():
     old = asdict(_run("o", 100, 50, size=512))
     d = store.delta(new, old)
     assert d["sizes_differ"] is False
-    assert abs(d["shared"][0]["pp_pct"] - 100.0) < 1e-6   # 100→200 = +100%
-    assert abs(d["shared"][0]["gen_pct"] - 20.0) < 1e-6   # 50→60  = +20%
+    assert abs(d["shared"][0]["pp_pct"] - 100.0) < 1e-6   # 100 to 200 = +100%
+    assert abs(d["shared"][0]["gen_pct"] - 20.0) < 1e-6   # 50 to 60   = +20%
     d2 = store.delta(asdict(_run("n", 200, 60, size=256)), old)
     assert d2["sizes_differ"] is True

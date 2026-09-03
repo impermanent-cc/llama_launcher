@@ -4,7 +4,7 @@ from PySide6.QtWidgets import (
     QPushButton, QRadioButton, QVBoxLayout, QWidget,
 )
 
-_MASK = "••••••••••••"
+_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 
 
 class ApiKeyBox(QWidget):
@@ -31,7 +31,7 @@ class ApiKeyBox(QWidget):
         self.copy_btn = QPushButton("Copy")
         self.copy_btn.clicked.connect(self._copy_key)
         key_row.addWidget(self.copy_btn)
-        self.edit_btn = QPushButton("Edit…")
+        self.edit_btn = QPushButton("Edit\u2026")
         self.edit_btn.clicked.connect(self._open_edit)
         key_row.addWidget(self.edit_btn)
         root.addLayout(key_row)

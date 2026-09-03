@@ -44,7 +44,7 @@ def test_click_enters_working_state_and_starts_worker(win, monkeypatch):
     monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
                         lambda self: None)          # don't spin a real thread
     win._launch.on_fetch_latest()
-    assert win._configure_panel.fetch_btn.text() == "Fetching…"
+    assert win._configure_panel.fetch_btn.text() == "Fetching\u2026"
     assert win._configure_panel.fetch_btn.isEnabled() is False
     assert win._launch._fetch_worker is not None
     assert win._launch._fetch_repo == "ghcr.io/ggml-org/llama.cpp"

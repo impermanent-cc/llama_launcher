@@ -52,7 +52,7 @@ def test_running_card_stop_button_emits_stop_requested(qtbot):
 def test_stopped_card_action_button_offers_remove(qtbot):
     c = StatCard("llama-dead"); qtbot.addWidget(c)
     c.update_row(_row(running=False, health="down"))
-    assert c.stop_button().text() == "✕"
+    assert c.stop_button().text() == "\u2715"
     got = []; c.remove_requested.connect(got.append)
     stop_got = []; c.stop_requested.connect(stop_got.append)
     c.stop_button().click()

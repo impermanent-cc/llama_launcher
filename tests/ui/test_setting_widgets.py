@@ -68,7 +68,7 @@ def test_danger_widget_tooltip(qtbot):
     qtbot.addWidget(w)
     tip = w.toolTip()
     assert tip
-    assert tip.startswith("⚠ DANGER:")
+    assert tip.startswith("\u26a0 DANGER:")
 
 
 def test_danger_border_scoped(qtbot):

@@ -6,7 +6,7 @@ from llama_launcher.services import benchmark as bm
 def test_filler_prompt_deterministic_and_scales():
     a = bm.filler_prompt(128)
     assert a == bm.filler_prompt(128)          # deterministic
-    assert len(bm.filler_prompt(512)) > len(a)  # bigger target → longer text
+    assert len(bm.filler_prompt(512)) > len(a)  # bigger target means longer text
     assert a.strip()                            # non-empty
 
 
@@ -46,7 +46,7 @@ def test_run_benchmark_warmup_discarded_and_rows_per_size():
     run = bm.run_benchmark(c, sizes=[128, 512], n_predict=128, warmup=1, repeats=2,
                            snapshot={"model": "m"}, timestamp="2026-08-07T00:00:00")
     assert [r.target_size for r in run.rows] == [128, 512]
-    assert c.calls == 2 * (1 + 2)               # 2 sizes × (warmup + repeats)
+    assert c.calls == 2 * (1 + 2)               # 2 sizes x (warmup + repeats)
     assert run.snapshot == {"model": "m"} and run.n_predict == 128
 
 

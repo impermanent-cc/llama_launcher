@@ -37,7 +37,7 @@ def test_kv_usage_ratio_empty():
 
 
 def test_decode_rate_computes_live_tok_s():
-    # Δ(n_decode_total)/Δt is the live generation rate: 23 tokens over 1.0s = 23 tok/s.
+    # delta(n_decode_total) / delta t is the live generation rate: 23 tokens over 1.0s = 23 tok/s.
     assert abs(met.decode_rate((100, 10.0), (123, 11.0)) - 23.0) < 1e-9
 
 

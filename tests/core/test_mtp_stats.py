@@ -39,23 +39,23 @@ def test_sparkline_empty():
 
 
 def test_sparkline_single_value():
-    assert sparkline([5.0]) == "▁"
+    assert sparkline([5.0]) == "\u2581"
 
 
 def test_sparkline_flat_series_all_low():
-    assert sparkline([5, 5, 5]) == "▁▁▁"
+    assert sparkline([5, 5, 5]) == "\u2581\u2581\u2581"
 
 
 def test_sparkline_ascending_ramp():
     s = sparkline([1, 2, 3, 4, 5, 6, 7, 8])
     assert len(s) == 8
-    assert s[0] == "▁" and s[-1] == "█"
+    assert s[0] == "\u2581" and s[-1] == "\u2588"
     # monotonically non-decreasing block heights
-    assert list(s) == sorted(s, key="▁▂▃▄▅▆▇█".index)
+    assert list(s) == sorted(s, key="\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588".index)
 
 
 def test_sparkline_width_keeps_last_n():
-    assert sparkline([1, 2, 3, 4, 5], width=2) == "▁█"
+    assert sparkline([1, 2, 3, 4, 5], width=2) == "\u2581\u2588"
 
 
 from llama_launcher.core.mtp_stats import SpecCounters, spec_counters, spec_delta

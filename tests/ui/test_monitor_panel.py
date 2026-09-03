@@ -33,7 +33,7 @@ def test_append_log(qtbot):
 
 
 def test_instances_window_has_info_popover(qtbot):
-    """The instance cards strip carries an ⓘ describing what the cards show."""
+    """The instance cards strip carries an \u24d8 describing what the cards show."""
     p = MonitorPanel()
     qtbot.addWidget(p)
     assert isinstance(p.cards_info, InfoButton)
@@ -248,14 +248,14 @@ def test_update_stats_shows_speculating_indicator(qtbot):
     panel = MonitorPanel()
     qtbot.addWidget(panel)
     panel.update_stats({"metrics_on": False, "speculating": True})
-    assert "spec ●" in panel.summary.text()
+    assert "spec \u25cf" in panel.summary.text()
 
 
 def test_update_stats_omits_indicator_when_not_speculating(qtbot):
     panel = MonitorPanel()
     qtbot.addWidget(panel)
     panel.update_stats({"metrics_on": False, "speculating": False})
-    assert "spec ●" not in panel.summary.text()
+    assert "spec \u25cf" not in panel.summary.text()
 
 
 def _rows():

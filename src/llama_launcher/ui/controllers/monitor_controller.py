@@ -581,7 +581,7 @@ class MonitorController:
             self._refresh_stats_target()
         p = self._monitored_profile()
         if not runtime.binary_available(p.runtime.binary):
-            self.window.status_label.setText("● stopped")
+            self.window.status_label.setText("\u25cf stopped")
             self.window._configure_panel.web_ui_btn.setEnabled(False)
             self.window.benchmark_panel.set_benchmark_available(False)
             self._monitor_target = {"running": False}
@@ -601,7 +601,7 @@ class MonitorController:
         hstatus = health.probe_health(profile_port(p),
                                      host=dial_host(p.runtime.bind_host)) \
             if state == "running" else "down"
-        self.window.status_label.setText("● " + health.derive_status(state, hstatus))
+        self.window.status_label.setText("\u25cf " + health.derive_status(state, hstatus))
         self.window._configure_panel.web_ui_btn.setEnabled(state == "running")
         router_model_key = None
         if state == "running":

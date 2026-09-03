@@ -18,7 +18,7 @@ def _container_name(profile) -> str:
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess:
-    """Blocking subprocess; OSError (e.g. binary missing) → rc 127, never raises."""
+    """Blocking subprocess; OSError (e.g. binary missing) \u2192 rc 127, never raises."""
     try:
         return subprocess.run(argv, capture_output=True, text=True, check=False)
     except OSError as exc:
@@ -109,7 +109,7 @@ def stop_router(profile, binary, timeout: int = 10) -> bool:
 
 
 def router_status(profile, binary) -> str:
-    """Container state + /health → a display status (see health.derive_status)."""
+    """Container state + /health \u2192 a display status (see health.derive_status)."""
     name = _container_name(profile)
     cstate = container_state(name, binary)
     if cstate != "running":

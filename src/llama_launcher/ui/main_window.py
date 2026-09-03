@@ -185,13 +185,13 @@ class MainWindow(QMainWindow):
 
         # profile bar (added to the top of root via insertLayout)
         bar = QHBoxLayout()
-        self.stats_toggle_btn = QPushButton("📊 Stats")
+        self.stats_toggle_btn = QPushButton("\U0001f4ca Stats")
         self.stats_toggle_btn.setCheckable(True)
         self.stats_toggle_btn.setToolTip("Show/hide the live stats panel (Ctrl+Shift+S)")
-        self.nodes_btn = QPushButton("Nodes…")
+        self.nodes_btn = QPushButton("Nodes\u2026")
         self.nodes_btn.setToolTip("Add/test/remove remote podman-over-SSH nodes")
         self.nodes_btn.clicked.connect(self.open_nodes_dialog)
-        self.status_label = QLabel("● stopped")
+        self.status_label = QLabel("\u25cf stopped")
         bar.addWidget(QLabel("Name"))
         bar.addWidget(self._configure_panel.name_edit, 1)
         bar.addWidget(self._configure_panel.profile_combo, 1)
@@ -351,7 +351,7 @@ class MainWindow(QMainWindow):
 
     def base_dir(self):
         """Config-root accessor for panels that need it directly (e.g. the
-        Configure panel's node list, the Nodes… dialog) -- same underlying
+        Configure panel's node list, the Nodes\u2026 dialog) -- same underlying
         directory as router_base_dir(), just named for the general case."""
         return base_dir()
 

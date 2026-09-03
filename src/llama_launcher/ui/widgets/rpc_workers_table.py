@@ -11,7 +11,7 @@ _DEVICES = ["CPU", "CUDA0", "CUDA1"]
 
 
 class RpcWorkersTable(QWidget):
-    """RPC-pool launch mode: one row per worker (Node · Device · Mem MB · Port).
+    """RPC-pool launch mode: one row per worker (Node \u00b7 Device \u00b7 Mem MB \u00b7 Port).
 
     Cell widgets rather than editable QTableWidgetItems, since every column
     here is an enum/number best picked from a combo/spin box (the same

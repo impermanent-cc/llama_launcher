@@ -117,11 +117,11 @@ def test_non_worker_instance_has_no_device():
 def test_worker_card_title_includes_node():
     inst = Instance(name="llama-pool-rpc1", profile="pool", mode="rpc-worker", running=True,
                     port=None, host="127.0.0.1", embeddings=False, reranking=False, node="box2")
-    assert worker_card_title(inst) == "rpc-worker · box2"
+    assert worker_card_title(inst) == "rpc-worker \u00b7 box2"
 
 
 def test_worker_card_title_includes_device_when_resolved():
     inst = Instance(name="llama-pool-rpc1", profile="pool", mode="rpc-worker", running=True,
                     port=None, host="127.0.0.1", embeddings=False, reranking=False,
                     node="box2", device="CUDA0")
-    assert worker_card_title(inst) == "rpc-worker · box2 · CUDA0"
+    assert worker_card_title(inst) == "rpc-worker \u00b7 box2 \u00b7 CUDA0"

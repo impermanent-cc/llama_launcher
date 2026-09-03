@@ -103,7 +103,7 @@ class NodesDialog(QDialog):
         binary = node.binary if node else self.binary_combo.currentText()
         reachable, gpus = self.test_node(conn, target, binary)
         self.status.setText(
-            f"{'reachable' if reachable else 'UNREACHABLE'} · "
+            f"{'reachable' if reachable else 'UNREACHABLE'} \u00b7 "
             f"{'GPUs visible' if gpus else 'no GPUs'}")
 
     def _on_remove(self) -> None:
