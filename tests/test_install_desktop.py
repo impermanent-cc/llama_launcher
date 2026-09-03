@@ -3,6 +3,7 @@
 These run the real script against a temporary XDG home, with no-op stubs on PATH
 for the desktop/icon-cache refresh tools so the test stays hermetic and fast.
 """
+
 import os
 import subprocess
 from pathlib import Path
@@ -17,8 +18,13 @@ SRC_SVG = REPO / "assets" / "llama-launcher.svg"
 def _stub_dir(tmp_path: Path) -> Path:
     d = tmp_path / "stubs"
     d.mkdir()
-    for name in ("gtk-update-icon-cache", "gtk4-update-icon-cache",
-                 "update-desktop-database", "kbuildsycoca6", "kbuildsycoca5"):
+    for name in (
+        "gtk-update-icon-cache",
+        "gtk4-update-icon-cache",
+        "update-desktop-database",
+        "kbuildsycoca6",
+        "kbuildsycoca5",
+    ):
         p = d / name
         p.write_text("#!/usr/bin/env bash\nexit 0\n")
         p.chmod(0o755)
@@ -52,12 +58,13 @@ def _paths(tmp_path: Path):
 @pytest.mark.skipif(not SCRIPT.exists(), reason="install script missing")
 def test_install_creates_entry_and_icon(tmp_path):
     env = _env(tmp_path)
-    r = subprocess.run(["bash", str(SCRIPT)], env=env,
-                       capture_output=True, text=True)
+    r = subprocess.run(["bash", str(SCRIPT)], env=env, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
     desktop, icon = _paths(tmp_path)
     assert icon.exists(), "icon was not installed"
-    assert icon.read_bytes() == SRC_SVG.read_bytes(), "installed icon differs from asset"
+    assert icon.read_bytes() == SRC_SVG.read_bytes(), (
+        "installed icon differs from asset"
+    )
     assert desktop.exists(), "desktop entry was not created"
     text = desktop.read_text()
     # Icon must point at the installed file by absolute path so a changed SVG
@@ -68,10 +75,16 @@ def test_install_creates_entry_and_icon(tmp_path):
 @pytest.mark.skipif(not SCRIPT.exists(), reason="install script missing")
 def test_uninstall_removes_entry_and_icon(tmp_path):
     env = _env(tmp_path)
-    subprocess.run(["bash", str(SCRIPT)], env=env, check=True,
-                   capture_output=True, text=True)
-    subprocess.run(["bash", str(SCRIPT), "--uninstall"], env=env, check=True,
-                   capture_output=True, text=True)
+    subprocess.run(
+        ["bash", str(SCRIPT)], env=env, check=True, capture_output=True, text=True
+    )
+    subprocess.run(
+        ["bash", str(SCRIPT), "--uninstall"],
+        env=env,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
     desktop, icon = _paths(tmp_path)
     assert not desktop.exists()
     assert not icon.exists()
@@ -95,22 +108,39 @@ def test_desktop_exec_quotes_python_path_with_spaces(tmp_path):
     desktop, _ = _paths(tmp_path)
     text = desktop.read_text()
     # The spec quotes an executable path containing spaces with double quotes.
-    assert f'Exec="{venv_py}" -m llama_launcher.app' in text, \
+    assert f'Exec="{venv_py}" -m llama_launcher.app' in text, (
         f"Exec line not spec-quoted for a spaced path:\n{text}"
+    )
 
 
 @pytest.mark.skipif(not SCRIPT.exists(), reason="install script missing")
 def test_desktop_categories_has_one_main_category(tmp_path):
     """Two main categories (e.g. Development;Utility;) make the entry show up
     twice in spec-following menus (GNOME/XFCE/MATE)."""
-    MAIN = {"AudioVideo", "Audio", "Video", "Development", "Education", "Game",
-            "Graphics", "Network", "Office", "Science", "Settings", "System",
-            "Utility"}
-    r = subprocess.run(["bash", str(SCRIPT)], env=_env(tmp_path),
-                       capture_output=True, text=True)
+    MAIN = {
+        "AudioVideo",
+        "Audio",
+        "Video",
+        "Development",
+        "Education",
+        "Game",
+        "Graphics",
+        "Network",
+        "Office",
+        "Science",
+        "Settings",
+        "System",
+        "Utility",
+    }
+    r = subprocess.run(
+        ["bash", str(SCRIPT)], env=_env(tmp_path), capture_output=True, text=True
+    )
     assert r.returncode == 0, r.stderr
     desktop, _ = _paths(tmp_path)
-    line = next(l for l in desktop.read_text().splitlines()
-                if l.startswith("Categories="))
+    line = next(
+        item
+        for item in desktop.read_text().splitlines()
+        if item.startswith("Categories=")
+    )
     cats = [c for c in line.split("=", 1)[1].split(";") if c]
     assert len(MAIN.intersection(cats)) == 1, f"{line} lists >1 main category"

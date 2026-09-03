@@ -16,6 +16,7 @@ Two placeholders are supported in a template:
 Terminals without a native "hold" flag (keep the window open after the process
 exits) get a portable shell hold appended to the command instead.
 """
+
 import shlex
 import shutil
 import subprocess
@@ -31,7 +32,7 @@ TERMINALS: list[tuple[str, str, bool]] = [
     ("konsole", "konsole --hold -e bash -lc {cmd}", False),
     ("ptyxis", "ptyxis -- bash -lc {cmd}", True),
     ("gnome-terminal", "gnome-terminal -- bash -lc {cmd}", True),
-    ("foot", "foot bash -lc {cmd}", True),          # wlroots/sway native
+    ("foot", "foot bash -lc {cmd}", True),  # wlroots/sway native
     ("kgx", "kgx -e {bashcmd}", True),
     ("xfce4-terminal", "xfce4-terminal --hold -x bash -lc {cmd}", False),
     ("mate-terminal", "mate-terminal -- bash -lc {cmd}", True),
@@ -67,8 +68,9 @@ def detect_terminal(which=shutil.which) -> tuple[str, bool] | None:
     return None
 
 
-def build_terminal_argv(command_argv: list[str], template: str = DEFAULT_TEMPLATE,
-                        shell_hold: bool = False) -> list[str]:
+def build_terminal_argv(
+    command_argv: list[str], template: str = DEFAULT_TEMPLATE, shell_hold: bool = False
+) -> list[str]:
     inner = shlex.join(command_argv)
     if shell_hold:
         inner += _HOLD_SUFFIX
@@ -84,8 +86,12 @@ def build_terminal_argv(command_argv: list[str], template: str = DEFAULT_TEMPLAT
     return out
 
 
-def launch(command_argv: list[str], template: str | None = None,
-           shell_hold: bool = False, which=shutil.which) -> None:
+def launch(
+    command_argv: list[str],
+    template: str | None = None,
+    shell_hold: bool = False,
+    which=shutil.which,
+) -> None:
     """Open command_argv in a terminal.
 
     template=None auto-detects an installed terminal (and its shell_hold); a
@@ -98,9 +104,11 @@ def launch(command_argv: list[str], template: str | None = None,
         if detected is None:
             raise NoTerminalError(
                 "No terminal emulator found (tried: "
-                + ", ".join(b for b, _t, _h in TERMINALS) + "). Install one, set a "
+                + ", ".join(b for b, _t, _h in TERMINALS)
+                + "). Install one, set a "
                 "'terminal' command in the launcher config, or use 'Run detached' "
-                "(or a native profile) -- neither needs a terminal.")
+                "(or a native profile) -- neither needs a terminal."
+            )
         template, shell_hold = detected
     else:
         # A custom template comes from config.json, which may be shared/untrusted.
@@ -113,12 +121,14 @@ def launch(command_argv: list[str], template: str | None = None,
             raise NoTerminalError(
                 "The configured 'terminal' template must include a {cmd} or "
                 "{bashcmd} placeholder for the launch command. Fix the 'terminal' "
-                "value in the launcher config, or remove it to auto-detect.")
+                "value in the launcher config, or remove it to auto-detect."
+            )
         if which(toks[0]) is None:
             raise NoTerminalError(
                 f"The configured 'terminal' program {toks[0]!r} is not installed "
                 f"(not on PATH). Fix the 'terminal' value in the launcher config, "
-                f"or remove it to auto-detect.")
+                f"or remove it to auto-detect."
+            )
     argv = build_terminal_argv(command_argv, template, shell_hold)
     try:
         subprocess.Popen(argv, start_new_session=True)
@@ -128,4 +138,5 @@ def launch(command_argv: list[str], template: str | None = None,
         # graceful dialog, not an unhandled crash of the launch.
         raise NoTerminalError(
             f"Terminal '{argv[0]}' could not be started: {exc}. Set a 'terminal' "
-            "command in the launcher config, or use 'Run detached'.") from exc
+            "command in the launcher config, or use 'Run detached'."
+        ) from exc

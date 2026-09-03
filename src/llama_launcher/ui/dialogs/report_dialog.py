@@ -1,6 +1,4 @@
-from PySide6.QtWidgets import (
-    QDialog, QVBoxLayout, QCheckBox, QDialogButtonBox, QLabel
-)
+from PySide6.QtWidgets import QCheckBox, QDialog, QDialogButtonBox, QLabel, QVBoxLayout
 
 from llama_launcher.core.report import REPORT_SECTIONS
 

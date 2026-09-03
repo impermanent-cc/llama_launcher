@@ -9,7 +9,8 @@ def test_exposure_banner_hidden_by_default(qtbot):
 
 def test_exposure_warning_toggles_visibility(qtbot):
     b = StatusBanner()
-    qtbot.addWidget(b); b.show()
+    qtbot.addWidget(b)
+    b.show()
     b.set_exposure_warning("Bound to 0.0.0.0")
     assert b.banner.isVisible() and "0.0.0.0" in b.banner.text()
     b.set_exposure_warning("")

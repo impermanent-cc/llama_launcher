@@ -1,7 +1,7 @@
 from dataclasses import replace
 
-from llama_launcher.core.spec import Profile, Mount, Runtime, LoraRef
 from llama_launcher.core.command_builder import build_command
+from llama_launcher.core.spec import LoraRef, Mount, Profile, Runtime
 
 
 def _golden_profile():
@@ -9,16 +9,37 @@ def _golden_profile():
         name="Qwen3-235B coding",
         image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
         runtime=Runtime(binary="podman", gpu_mode="cdi"),
-        mounts=[Mount(host="/mnt/storage/AI/Models", container="/models",
-                      role="model", mode="ro")],
+        mounts=[
+            Mount(
+                host="/mnt/storage/AI/Models",
+                container="/models",
+                role="model",
+                mode="ro",
+            )
+        ],
         model="/models/modelpath/",
         settings={
-            "n-gpu-layers": 99, "n-cpu-moe": 20, "flash-attn": "on",
-            "ctx-size": 65536, "cache-type-k": "q8_0", "cache-type-v": "q8_0",
-            "threads": 18, "temp": 0.6, "top-p": 0.95, "top-k": 20, "min-p": 0.0,
-            "repeat-penalty": 1.0, "dry-multiplier": 0.8, "dry-base": 1.75,
-            "dry-allowed-length": 2, "ubatch-size": 512, "cache-reuse": 256,
-            "parallel": 1, "no-mmap": True, "jinja": True, "tools": "all",
+            "n-gpu-layers": 99,
+            "n-cpu-moe": 20,
+            "flash-attn": "on",
+            "ctx-size": 65536,
+            "cache-type-k": "q8_0",
+            "cache-type-v": "q8_0",
+            "threads": 18,
+            "temp": 0.6,
+            "top-p": 0.95,
+            "top-k": 20,
+            "min-p": 0.0,
+            "repeat-penalty": 1.0,
+            "dry-multiplier": 0.8,
+            "dry-base": 1.75,
+            "dry-allowed-length": 2,
+            "ubatch-size": 512,
+            "cache-reuse": 256,
+            "parallel": 1,
+            "no-mmap": True,
+            "jinja": True,
+            "tools": "all",
             "port": 8080,
         },
     )
@@ -30,7 +51,11 @@ def _pairs(argv):
     i = 0
     while i < len(argv):
         tok = argv[i]
-        if tok.startswith("--") and i + 1 < len(argv) and not argv[i + 1].startswith("-"):
+        if (
+            tok.startswith("--")
+            and i + 1 < len(argv)
+            and not argv[i + 1].startswith("-")
+        ):
             pairs.add((tok, argv[i + 1]))
             i += 2
         else:
@@ -54,9 +79,17 @@ def test_host_injected_and_port_present():
 def test_changed_settings_rendered():
     argv = build_command(_golden_profile())
     text = " ".join(argv)
-    for frag in ["--ctx-size 65536", "--flash-attn on", "--cache-type-k q8_0",
-                 "--n-cpu-moe 20", "--temp 0.6", "--top-k 20", "--cache-reuse 256",
-                 "--tools all", "--n-gpu-layers 99"]:
+    for frag in [
+        "--ctx-size 65536",
+        "--flash-attn on",
+        "--cache-type-k q8_0",
+        "--n-cpu-moe 20",
+        "--temp 0.6",
+        "--top-k 20",
+        "--cache-reuse 256",
+        "--tools all",
+        "--n-gpu-layers 99",
+    ]:
         assert frag in text, frag
     # bool flags are bare
     assert "--no-mmap" in argv
@@ -75,7 +108,9 @@ def test_mmproj_device_string_flag():
 def test_settings_emitted_in_catalog_order():
     argv = build_command(_golden_profile())
     # ctx-size (Model&Context) precedes n-gpu-layers (GPU) precedes temp (Sampling)
-    assert argv.index("--ctx-size") < argv.index("--n-gpu-layers") < argv.index("--temp")
+    assert (
+        argv.index("--ctx-size") < argv.index("--n-gpu-layers") < argv.index("--temp")
+    )
 
 
 def test_deterministic():
@@ -86,11 +121,13 @@ def test_deterministic():
 def test_mmproj_and_loras():
     p = _golden_profile()
     p.mmproj = "/models/mmproj.gguf"
-    p.loras = [LoraRef(path="/models/a.gguf", scale=1.0),
-               LoraRef(path="/models/b.gguf", scale=0.5)]
+    p.loras = [
+        LoraRef(path="/models/a.gguf", scale=1.0),
+        LoraRef(path="/models/b.gguf", scale=0.5),
+    ]
     argv = build_command(p)
     assert argv[argv.index("--mmproj") + 1] == "/models/mmproj.gguf"
-    assert "/models/a.gguf" in argv               # scale 1.0 -> plain --lora
+    assert "/models/a.gguf" in argv  # scale 1.0 -> plain --lora
     assert argv[argv.index("--lora") + 1] == "/models/a.gguf"
     assert "--lora-scaled" in argv
     assert "/models/b.gguf:0.5" in argv
@@ -117,7 +154,7 @@ def test_spec_type_mtp_emitted():
 
 
 def test_spec_type_absent_when_unset():
-    argv = build_command(_golden_profile())   # no spec-type key
+    argv = build_command(_golden_profile())  # no spec-type key
     assert "--spec-type" not in argv
 
 
@@ -137,7 +174,7 @@ def test_mmproj_offload_and_override_tensor_render():
     p.settings["split-mode"] = "tensor"
     argv = build_command(p)
     text = " ".join(argv)
-    assert "--no-mmproj-offload" in argv          # bare bool flag
+    assert "--no-mmproj-offload" in argv  # bare bool flag
     assert "--override-tensor exps=CPU" in text
     assert "--split-mode tensor" in text
 
@@ -194,10 +231,17 @@ def test_spec_draft_backend_sampling_emits_no_flag_only_when_checked():
 
 def _embed_profile(**settings):
     return Profile(
-        name="embed", image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
+        name="embed",
+        image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
         runtime=Runtime(binary="podman", gpu_mode="cdi"),
-        mounts=[Mount(host="/mnt/storage/AI/Models", container="/models",
-                      role="model", mode="ro")],
+        mounts=[
+            Mount(
+                host="/mnt/storage/AI/Models",
+                container="/models",
+                role="model",
+                mode="ro",
+            )
+        ],
         model="/models/nomic-embed.gguf",
         settings={"port": 8080, **settings},
     )
@@ -212,7 +256,9 @@ def test_embedding_flags_render():
 
 
 def test_reranking_flags_render():
-    argv = build_command(_embed_profile(reranking=True, pooling="rank", embeddings=True))
+    argv = build_command(
+        _embed_profile(reranking=True, pooling="rank", embeddings=True)
+    )
     assert "--reranking" in argv
     assert "--embeddings" in argv
     i = argv.index("--pooling")
@@ -226,9 +272,13 @@ def test_pooling_absent_emits_no_flag():
 
 def _srv(raw="", **settings):
     return Profile(
-        name="s", image="img", runtime=Runtime(bind_host="127.0.0.1"), mode="server",
+        name="s",
+        image="img",
+        runtime=Runtime(bind_host="127.0.0.1"),
+        mode="server",
         mounts=[Mount(host="/h", container="/models", role="model")],
-        model="/models/m.gguf", raw_args=raw,
+        model="/models/m.gguf",
+        raw_args=raw,
         settings={"port": 8080, **settings},
     )
 
@@ -238,13 +288,13 @@ def test_server_raw_ngl_overrides_setting_no_duplicate():
     assert argv.count("--n-gpu-layers") == 1
     i = argv.index("--n-gpu-layers")
     assert argv[i + 1] == "50"
-    assert "-ngl" not in argv           # raw short form folded onto the owned long form
+    assert "-ngl" not in argv  # raw short form folded onto the owned long form
 
 
 def test_server_raw_port_cannot_override():
     argv = build_command(_srv(raw="--port 9000"))
     assert argv.count("--port") == 1
-    assert "9000" not in argv           # launcher keeps 8080
+    assert "9000" not in argv  # launcher keeps 8080
 
 
 def test_server_noncolliding_raw_still_appended():
@@ -255,9 +305,10 @@ def test_server_noncolliding_raw_still_appended():
 def test_server_multiple_loras_preserved_with_raw_lora():
     p = _srv(raw="--lora /r.gguf")
     from llama_launcher.core.spec import LoraRef
+
     p.loras.append(LoraRef(path="/models/base.gguf"))
     argv = build_command(p)
-    assert argv.count("--lora") == 2    # owned lora + raw lora both present
+    assert argv.count("--lora") == 2  # owned lora + raw lora both present
 
 
 def test_server_empty_string_setting_emits_nothing():
@@ -336,7 +387,8 @@ def test_load_mode_at_default_does_not_suppress_legacy():
 
 def _ik_profile(engine):
     return Profile(
-        name="p", image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
+        name="p",
+        image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
         runtime=Runtime(engine=engine),
         mounts=[Mount(host="/m", container="/models", role="model")],
         model="/models/x.gguf",
@@ -357,9 +409,12 @@ def test_ik_flag_never_emitted_on_llama_cpp_engine():
 
 def _ik_srv(**settings):
     return Profile(
-        name="p", image="ik-img", runtime=Runtime(engine="ik_llama.cpp"),
+        name="p",
+        image="ik-img",
+        runtime=Runtime(engine="ik_llama.cpp"),
         mounts=[Mount(host="/m", container="/models", role="model")],
-        model="/models/x.gguf", settings={"port": 8080, **settings},
+        model="/models/x.gguf",
+        settings={"port": 8080, **settings},
     )
 
 
@@ -437,11 +492,16 @@ def test_mla_use_real_value_emitted():
 
 
 def test_native_launch_uses_binary_not_container():
-    p = Profile(name="n", model="/home/me/models/m.gguf",
-                runtime=Runtime(launch_mode="native",
-                                native_binary="/opt/bin/llama-server",
-                                bind_host="127.0.0.1"),
-                settings={"port": 9001})
+    p = Profile(
+        name="n",
+        model="/home/me/models/m.gguf",
+        runtime=Runtime(
+            launch_mode="native",
+            native_binary="/opt/bin/llama-server",
+            bind_host="127.0.0.1",
+        ),
+        settings={"port": 9001},
+    )
     argv = build_command(p)
     assert argv[0] == "/opt/bin/llama-server"
     assert "run" not in argv and "-v" not in argv and "--name" not in argv
@@ -452,19 +512,29 @@ def test_native_launch_uses_binary_not_container():
 
 
 def test_native_host_defaults_to_bind_host_0000():
-    p = Profile(name="n", model="/m.gguf",
-                runtime=Runtime(launch_mode="native",
-                                native_binary="/opt/bin/llama-server",
-                                bind_host="0.0.0.0"),
-                settings={"port": 8080})
+    p = Profile(
+        name="n",
+        model="/m.gguf",
+        runtime=Runtime(
+            launch_mode="native",
+            native_binary="/opt/bin/llama-server",
+            bind_host="0.0.0.0",
+        ),
+        settings={"port": 8080},
+    )
     argv = build_command(p)
     assert argv[argv.index("--host") + 1] == "0.0.0.0"
 
 
 def test_container_launch_host_unchanged():
     # Container mode still binds 0.0.0.0 inside the container regardless of bind_host.
-    p = Profile(name="c", image="img:tag", model="/models/m.gguf",
-                runtime=Runtime(bind_host="127.0.0.1"), settings={"port": 8080})
+    p = Profile(
+        name="c",
+        image="img:tag",
+        model="/models/m.gguf",
+        runtime=Runtime(bind_host="127.0.0.1"),
+        settings={"port": 8080},
+    )
     argv = build_command(p)
     assert argv[argv.index("--host") + 1] == "0.0.0.0"
     assert argv[0] == "podman" and "run" in argv
@@ -474,6 +544,7 @@ def test_container_launch_host_unchanged():
 # ik parses -ngl/-ngld with a bare stoi: "--n-gpu-layers all" and "auto" print
 # "stoi" plus the usage text and exit before the model loads, while an
 # integer proceeds.
+
 
 def test_ik_launch_translates_all_layers_to_an_integer():
     p = _ik_srv(**{"n-gpu-layers": "all", "spec-draft-ngl": "all"})

@@ -1,4 +1,5 @@
 """Qt-free router lifecycle for the headless CLI. Synchronous subprocess only."""
+
 import subprocess
 import time
 from dataclasses import dataclass, field
@@ -18,7 +19,7 @@ def _container_name(profile) -> str:
 
 
 def _run(argv: list[str]) -> subprocess.CompletedProcess:
-    """Blocking subprocess; OSError (e.g. binary missing) → rc 127, never raises."""
+    """Blocking subprocess; OSError (e.g. binary missing) \u2192 rc 127, never raises."""
     try:
         return subprocess.run(argv, capture_output=True, text=True, check=False)
     except OSError as exc:
@@ -56,7 +57,9 @@ def launch_router(profile, base_dir, binary) -> LaunchResult:
 
     proc = _run(argv)
     if proc.returncode != 0:
-        return LaunchResult(False, name, host, port, result.warnings, proc.stderr.strip())
+        return LaunchResult(
+            False, name, host, port, result.warnings, proc.stderr.strip()
+        )
     return LaunchResult(True, name, host, port, result.warnings, None)
 
 
@@ -86,15 +89,23 @@ def launch_server(profile, base_dir, binary) -> LaunchResult:
 def launch(profile, base_dir, binary) -> LaunchResult:
     """Dispatch to the router or server launcher by profile.mode."""
     if profile.runtime.launch_mode == "native":
-        return LaunchResult(False, _container_name(profile),
-                            profile.runtime.bind_host,
-                            profile_port(profile),
-                            [], "native launch is GUI-only in this version")
+        return LaunchResult(
+            False,
+            _container_name(profile),
+            profile.runtime.bind_host,
+            profile_port(profile),
+            [],
+            "native launch is GUI-only in this version",
+        )
     if profile.runtime.launch_mode == "rpc":
-        return LaunchResult(False, _container_name(profile),
-                            profile.runtime.bind_host,
-                            profile_port(profile),
-                            [], "RPC pool launch is GUI-only in this version")
+        return LaunchResult(
+            False,
+            _container_name(profile),
+            profile.runtime.bind_host,
+            profile_port(profile),
+            [],
+            "RPC pool launch is GUI-only in this version",
+        )
     if profile.mode == "router":
         return launch_router(profile, base_dir, binary)
     return launch_server(profile, base_dir, binary)
@@ -109,13 +120,14 @@ def stop_router(profile, binary, timeout: int = 10) -> bool:
 
 
 def router_status(profile, binary) -> str:
-    """Container state + /health → a display status (see health.derive_status)."""
+    """Container state + /health \u2192 a display status (see health.derive_status)."""
     name = _container_name(profile)
     cstate = container_state(name, binary)
     if cstate != "running":
         return derive_status(cstate, "down")
-    health = probe_health(profile_port(profile),
-                          host=dial_host(profile.runtime.bind_host))
+    health = probe_health(
+        profile_port(profile), host=dial_host(profile.runtime.bind_host)
+    )
     return derive_status(cstate, health)
 
 

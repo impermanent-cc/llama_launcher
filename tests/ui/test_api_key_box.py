@@ -5,7 +5,7 @@ def test_reveal_shows_key(qtbot):
     box = ApiKeyBox()
     qtbot.addWidget(box)
     box.set_key("sk-secret")
-    assert "secret" not in box.key_label.text()   # masked by default
+    assert "secret" not in box.key_label.text()  # masked by default
     box.reveal_check.setChecked(True)
     assert box.key_label.text() == "sk-secret"
 
@@ -24,7 +24,7 @@ def test_set_scope_does_not_emit(qtbot):
     fired = []
     box.key_scope_changed.connect(fired.append)
     box.set_scope("own")
-    assert fired == []                              # programmatic set is silent
+    assert fired == []  # programmatic set is silent
     assert box._current_scope() == "own"
 
 

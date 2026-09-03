@@ -1,9 +1,11 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QToolButton
+from PySide6.QtWidgets import QToolButton, QVBoxLayout, QWidget
 
 
 class CollapsibleSection(QWidget):
-    def __init__(self, title: str, content: QWidget, collapsed: bool = True, parent=None):
+    def __init__(
+        self, title: str, content: QWidget, collapsed: bool = True, parent=None
+    ):
         super().__init__(parent)
         self._content = content
 

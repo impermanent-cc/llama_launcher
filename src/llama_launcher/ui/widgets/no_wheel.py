@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QComboBox, QSpinBox, QDoubleSpinBox
+from PySide6.QtWidgets import QComboBox, QDoubleSpinBox, QSpinBox
 
 
 class _NoWheelMixin:

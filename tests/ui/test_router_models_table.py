@@ -4,19 +4,23 @@ from llama_launcher.ui.widgets.router_models_table import RouterModelsTable
 
 
 def test_models_window_has_info_popover(qtbot):
-    """The 'Model id' window carries an ⓘ describing what the ids are for."""
+    """The 'Model id' window carries an \u24d8 describing what the ids are for."""
     t = RouterModelsTable()
     qtbot.addWidget(t)
     assert isinstance(t.info, InfoButton)
     assert "model id" in t.info.info_text.lower()
-    t.info.click()   # popover must not raise
+    t.info.click()  # popover must not raise
 
 
 def test_table_populates(qtbot):
     t = RouterModelsTable()
     qtbot.addWidget(t)
-    t.set_models([RouterModel(id="qwen", status="loaded"),
-                  RouterModel(id="gemma", status="sleeping")])
+    t.set_models(
+        [
+            RouterModel(id="qwen", status="loaded"),
+            RouterModel(id="gemma", status="sleeping"),
+        ]
+    )
     assert t.table.rowCount() == 2
     assert t.table.item(0, 0).text() == "qwen"
     assert t.table.item(0, 1).text() == "loaded"
@@ -34,7 +38,7 @@ def test_load_button_emits_id(qtbot):
 def test_capped_height_for_scroll(qtbot):
     t = RouterModelsTable()
     qtbot.addWidget(t)
-    assert t.table.maximumHeight() <= 160    # ~3-4 rows then scrolls
+    assert t.table.maximumHeight() <= 160  # ~3-4 rows then scrolls
 
 
 def test_unload_button_emits_id(qtbot):

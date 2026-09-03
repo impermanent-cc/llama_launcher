@@ -8,6 +8,7 @@ Tests install a synchronous seam -- `_run_pool_async(work, on_done)` ->
 one integration test that the real seam runs work off-thread and delivers the
 result on the UI thread.
 """
+
 import threading
 
 from PySide6.QtCore import QCoreApplication, QThreadPool
@@ -23,8 +24,7 @@ def _rpc_profile():
 def _sync_seam(ctl, monkeypatch):
     """Run the pool orchestrator inline and deliver its result immediately,
     standing in for the off-thread dispatch."""
-    monkeypatch.setattr(ctl, "_run_pool_async",
-                        lambda work, on_done: on_done(work()))
+    monkeypatch.setattr(ctl, "_run_pool_async", lambda work, on_done: on_done(work()))
 
 
 def test_on_launch_rpc_calls_launch_pool(main_window, monkeypatch):
@@ -34,6 +34,7 @@ def test_on_launch_rpc_calls_launch_pool(main_window, monkeypatch):
     _sync_seam(ctl, monkeypatch)
 
     import llama_launcher.services.rpc as rpc
+
     called = {}
 
     def _launch_pool(p, base, **k):
@@ -54,12 +55,20 @@ def test_on_launch_rpc_reports_error_on_failure(main_window, monkeypatch):
     _sync_seam(ctl, monkeypatch)
 
     import llama_launcher.services.rpc as rpc
+
     monkeypatch.setattr(
-        rpc, "launch_pool", lambda p, base, **k: rpc.PoolResult(False, "worker 0 failed"))
+        rpc,
+        "launch_pool",
+        lambda p, base, **k: rpc.PoolResult(False, "worker 0 failed"),
+    )
     reported = {}
     monkeypatch.setattr(
-        ctl, "_report_launch_error",
-        lambda text=None, *, show_dialog=False: reported.setdefault("text", (text, show_dialog)))
+        ctl,
+        "_report_launch_error",
+        lambda text=None, *, show_dialog=False: reported.setdefault(
+            "text", (text, show_dialog)
+        ),
+    )
 
     ctl.on_launch()
 
@@ -74,17 +83,24 @@ def test_on_launch_rpc_refuses_when_pool_already_running(main_window, monkeypatc
     ctl = main_window._launch
     main_window._configure_panel.load_profile(_rpc_profile())
     monkeypatch.setattr(ctl, "_validate_or_warn", lambda: True)
-    monkeypatch.setattr(_runtime, "container_state",
-                        lambda name, binary, connection="": "running")
+    monkeypatch.setattr(
+        _runtime, "container_state", lambda name, binary, connection="": "running"
+    )
 
     import llama_launcher.services.rpc as rpc
+
     called = {}
     monkeypatch.setattr(
-        rpc, "launch_pool", lambda p, base, **k: called.setdefault("ok", True))
+        rpc, "launch_pool", lambda p, base, **k: called.setdefault("ok", True)
+    )
     reported = {}
     monkeypatch.setattr(
-        ctl, "_report_launch_error",
-        lambda text=None, *, show_dialog=False: reported.setdefault("text", (text, show_dialog)))
+        ctl,
+        "_report_launch_error",
+        lambda text=None, *, show_dialog=False: reported.setdefault(
+            "text", (text, show_dialog)
+        ),
+    )
 
     ctl.on_launch()
 
@@ -100,9 +116,11 @@ def test_on_stop_rpc_calls_stop_pool(main_window, monkeypatch):
     _sync_seam(ctl, monkeypatch)
 
     import llama_launcher.services.rpc as rpc
+
     called = {}
     monkeypatch.setattr(
-        rpc, "stop_pool", lambda p, base, **k: called.setdefault("ok", True))
+        rpc, "stop_pool", lambda p, base, **k: called.setdefault("ok", True)
+    )
 
     ctl.on_stop()
 
@@ -110,6 +128,7 @@ def test_on_stop_rpc_calls_stop_pool(main_window, monkeypatch):
 
 
 # -- off-thread dispatch --------------------------------------------------------
+
 
 def test_launch_pool_defers_orchestrator_to_run_pool_async(main_window, monkeypatch):
     """on_launch must not run rpc.launch_pool inline on the UI thread -- it must
@@ -119,14 +138,20 @@ def test_launch_pool_defers_orchestrator_to_run_pool_async(main_window, monkeypa
     monkeypatch.setattr(ctl, "_validate_or_warn", lambda: True)
 
     import llama_launcher.services.rpc as rpc
+
     ran = {"launch": False}
     monkeypatch.setattr(
-        rpc, "launch_pool",
-        lambda p, base, **k: (ran.__setitem__("launch", True), rpc.PoolResult(True))[1])
+        rpc,
+        "launch_pool",
+        lambda p, base, **k: (ran.__setitem__("launch", True), rpc.PoolResult(True))[1],
+    )
 
     captured = {}
-    monkeypatch.setattr(ctl, "_run_pool_async",
-                        lambda work, on_done: captured.update(work=work, on_done=on_done))
+    monkeypatch.setattr(
+        ctl,
+        "_run_pool_async",
+        lambda work, on_done: captured.update(work=work, on_done=on_done),
+    )
 
     ctl.on_launch()
 
@@ -157,49 +182,67 @@ def test_launch_pool_reentrant_guard_blocks_second_dispatch(main_window, monkeyp
     ctl = main_window._launch
     main_window._configure_panel.load_profile(_rpc_profile())
     monkeypatch.setattr(ctl, "_validate_or_warn", lambda: True)
-    monkeypatch.setattr(_runtime, "container_state",
-                        lambda name, binary, connection="": "stopped")
+    monkeypatch.setattr(
+        _runtime, "container_state", lambda name, binary, connection="": "stopped"
+    )
     _sync_seam(ctl, monkeypatch)
     ctl._pool_inflight = True
 
     import llama_launcher.services.rpc as rpc
+
     called = {}
-    monkeypatch.setattr(rpc, "launch_pool", lambda p, base, **k: called.setdefault("x", True))
+    monkeypatch.setattr(
+        rpc, "launch_pool", lambda p, base, **k: called.setdefault("x", True)
+    )
 
     ctl.on_launch()
 
     assert "x" not in called, "in-flight guard must block a second orchestrator run"
 
 
-def test_on_pool_result_success_updates_status_and_clears_inflight(main_window, monkeypatch):
+def test_on_pool_result_success_updates_status_and_clears_inflight(
+    main_window, monkeypatch
+):
     ctl = main_window._launch
     ctl._pool_inflight = True
     updated = {}
-    monkeypatch.setattr(main_window._monitor, "update_status",
-                        lambda: updated.setdefault("x", True))
+    monkeypatch.setattr(
+        main_window._monitor, "update_status", lambda: updated.setdefault("x", True)
+    )
 
     import llama_launcher.services.rpc as rpc
+
     ctl._on_pool_result(rpc.PoolResult(True))
 
     assert updated.get("x")
     assert ctl._pool_inflight is False
 
 
-def test_on_pool_result_failure_reports_error_and_clears_inflight(main_window, monkeypatch):
+def test_on_pool_result_failure_reports_error_and_clears_inflight(
+    main_window, monkeypatch
+):
     ctl = main_window._launch
     ctl._pool_inflight = True
     reported = {}
     monkeypatch.setattr(
-        ctl, "_report_launch_error",
-        lambda text=None, *, show_dialog=False: reported.setdefault("t", (text, show_dialog)))
-    monkeypatch.setattr(main_window._monitor, "update_status",
-                        lambda: reported.setdefault("upd", True))
+        ctl,
+        "_report_launch_error",
+        lambda text=None, *, show_dialog=False: reported.setdefault(
+            "t", (text, show_dialog)
+        ),
+    )
+    monkeypatch.setattr(
+        main_window._monitor, "update_status", lambda: reported.setdefault("upd", True)
+    )
 
     import llama_launcher.services.rpc as rpc
+
     ctl._on_pool_result(rpc.PoolResult(False, "boom"))
 
     assert reported["t"] == ("boom", True)
-    assert "upd" not in reported, "a failed launch must not report success via update_status"
+    assert "upd" not in reported, (
+        "a failed launch must not report success via update_status"
+    )
     assert ctl._pool_inflight is False
 
 
@@ -208,12 +251,17 @@ def test_on_stop_rpc_defers_to_run_pool_async(main_window, monkeypatch):
     main_window._configure_panel.load_profile(_rpc_profile())
 
     import llama_launcher.services.rpc as rpc
+
     ran = {"stop": False}
-    monkeypatch.setattr(rpc, "stop_pool",
-                        lambda p, base, **k: ran.__setitem__("stop", True))
+    monkeypatch.setattr(
+        rpc, "stop_pool", lambda p, base, **k: ran.__setitem__("stop", True)
+    )
     captured = {}
-    monkeypatch.setattr(ctl, "_run_pool_async",
-                        lambda work, on_done: captured.update(work=work, on_done=on_done))
+    monkeypatch.setattr(
+        ctl,
+        "_run_pool_async",
+        lambda work, on_done: captured.update(work=work, on_done=on_done),
+    )
 
     ctl.on_stop()
 
@@ -238,8 +286,9 @@ def test_on_pool_stopped_updates_status_and_clears_inflight(main_window, monkeyp
     ctl = main_window._launch
     ctl._pool_inflight = True
     updated = {}
-    monkeypatch.setattr(main_window._monitor, "update_status",
-                        lambda: updated.setdefault("x", True))
+    monkeypatch.setattr(
+        main_window._monitor, "update_status", lambda: updated.setdefault("x", True)
+    )
 
     ctl._on_pool_stopped(None)
 
@@ -330,11 +379,16 @@ def test_drain_awaits_inflight_pool_worker(main_window):
     assert ran["done"] is True, "drain() must wait for the in-flight pool worker"
 
 
-def test_stop_pool_async_defers_to_run_pool_async_and_sets_inflight(main_window, monkeypatch):
+def test_stop_pool_async_defers_to_run_pool_async_and_sets_inflight(
+    main_window, monkeypatch
+):
     ctl = main_window._launch
     captured = {}
-    monkeypatch.setattr(ctl, "_run_pool_async",
-                        lambda work, on_done: captured.update(work=work, on_done=on_done))
+    monkeypatch.setattr(
+        ctl,
+        "_run_pool_async",
+        lambda work, on_done: captured.update(work=work, on_done=on_done),
+    )
     ok = ctl.stop_pool_async(_rpc_profile())
     assert ok is True
     assert "work" in captured, "stop must dispatch through _run_pool_async (off-thread)"
@@ -345,7 +399,8 @@ def test_stop_pool_async_reentrant_guard(main_window, monkeypatch):
     ctl = main_window._launch
     ctl._pool_inflight = True
     called = {}
-    monkeypatch.setattr(ctl, "_run_pool_async",
-                        lambda work, on_done: called.setdefault("ok", True))
+    monkeypatch.setattr(
+        ctl, "_run_pool_async", lambda work, on_done: called.setdefault("ok", True)
+    )
     assert ctl.stop_pool_async(_rpc_profile()) is False
     assert "ok" not in called

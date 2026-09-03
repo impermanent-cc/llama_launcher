@@ -1,7 +1,6 @@
 """draft_model picker wiring in the GUI."""
 
-import pytest
-from llama_launcher.core.spec import Profile, Mount, Runtime
+from llama_launcher.core.spec import Mount, Profile, Runtime
 from llama_launcher.ui.main_window import MainWindow
 
 
@@ -46,7 +45,10 @@ def test_draft_model_edit_widget_exists(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
     from PySide6.QtWidgets import QLineEdit
-    assert hasattr(w._configure_panel, "draft_model_edit"), "draft_model_edit attribute missing"
+
+    assert hasattr(w._configure_panel, "draft_model_edit"), (
+        "draft_model_edit attribute missing"
+    )
     assert isinstance(w._configure_panel.draft_model_edit, QLineEdit)
 
 

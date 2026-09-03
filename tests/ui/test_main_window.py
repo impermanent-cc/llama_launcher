@@ -1,10 +1,11 @@
-from llama_launcher.core.spec import Profile, Mount, Runtime, LoraRef
+from llama_launcher.core.spec import LoraRef, Mount, Profile, Runtime
 from llama_launcher.ui.main_window import MainWindow
 
 
 def _profile():
     return Profile(
-        name="UI Test", image="img:tag",
+        name="UI Test",
+        image="img:tag",
         runtime=Runtime(binary="podman", gpu_mode="cdi"),
         mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
         model="/models/m.gguf",
@@ -25,12 +26,13 @@ def test_name_field_drives_profile_name_and_container(qtbot):
 def test_load_profile_populates_name_field(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w._configure_panel.load_profile(_profile())          # name="UI Test"
+    w._configure_panel.load_profile(_profile())  # name="UI Test"
     assert w._configure_panel.name_edit.text() == "UI Test"
 
 
 def test_window_constructs(qtbot):
     from llama_launcher.core.settings_catalog import CATALOG
+
     w = MainWindow()
     qtbot.addWidget(w)
     # the settings grid built a widget for every catalog entry
@@ -116,9 +118,13 @@ def test_engine_roundtrips_through_profile(qtbot):
 def test_ik_flags_hidden_on_llama_cpp_engine(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w._configure_panel.load_profile(Profile(name="m", runtime=Runtime(engine="llama.cpp")))
+    w._configure_panel.load_profile(
+        Profile(name="m", runtime=Runtime(engine="llama.cpp"))
+    )
     assert "run-time-repack" not in w._configure_panel.active_catalog()
-    w._configure_panel.load_profile(Profile(name="ik", runtime=Runtime(engine="ik_llama.cpp")))
+    w._configure_panel.load_profile(
+        Profile(name="ik", runtime=Runtime(engine="ik_llama.cpp"))
+    )
     assert "run-time-repack" in w._configure_panel.active_catalog()
 
 
@@ -126,22 +132,31 @@ def test_switch_to_ik_seeds_default_image_when_empty(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
     w._configure_panel.image_edit.setText("")
-    w._configure_panel.engine_combo.setCurrentIndex(w._configure_panel.engine_combo.findData("ik_llama.cpp"))
-    assert w._configure_panel.image_edit.text() == "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
+    w._configure_panel.engine_combo.setCurrentIndex(
+        w._configure_panel.engine_combo.findData("ik_llama.cpp")
+    )
+    assert (
+        w._configure_panel.image_edit.text()
+        == "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
+    )
 
 
 def test_switch_engine_does_not_clobber_user_image(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
     w._configure_panel.image_edit.setText("myregistry.local/custom:tag")
-    w._configure_panel.engine_combo.setCurrentIndex(w._configure_panel.engine_combo.findData("ik_llama.cpp"))
+    w._configure_panel.engine_combo.setCurrentIndex(
+        w._configure_panel.engine_combo.findData("ik_llama.cpp")
+    )
     assert w._configure_panel.image_edit.text() == "myregistry.local/custom:tag"
 
 
 def test_ik_cache_type_enum_gains_extras(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w._configure_panel.engine_combo.setCurrentIndex(w._configure_panel.engine_combo.findData("ik_llama.cpp"))
+    w._configure_panel.engine_combo.setCurrentIndex(
+        w._configure_panel.engine_combo.findData("ik_llama.cpp")
+    )
     ctk = w._configure_panel._widgets["cache-type-k"]
     ctk.set_value("q6_0")
     assert ctk.value() == "q6_0"
@@ -150,8 +165,10 @@ def test_ik_cache_type_enum_gains_extras(qtbot):
 def test_launch_mode_round_trips_through_profile(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    p = Profile(name="n", runtime=Runtime(launch_mode="native",
-                native_binary="/opt/bin/llama-server"))
+    p = Profile(
+        name="n",
+        runtime=Runtime(launch_mode="native", native_binary="/opt/bin/llama-server"),
+    )
     w._configure_panel.load_profile(p)
     assert w._configure_panel.launch_mode_combo.currentData() == "native"
     assert w._configure_panel.native_binary_edit.text() == "/opt/bin/llama-server"
@@ -163,24 +180,26 @@ def test_launch_mode_round_trips_through_profile(qtbot):
 def test_native_mode_hides_container_fields(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w._configure_panel.load_profile(Profile(name="n",
-        runtime=Runtime(launch_mode="native", native_binary="/x")))
+    w._configure_panel.load_profile(
+        Profile(name="n", runtime=Runtime(launch_mode="native", native_binary="/x"))
+    )
     cp = w._configure_panel
     assert cp.native_binary_edit.isVisibleTo(cp)
-    assert not cp.image_edit.isVisibleTo(cp)          # Image hidden
+    assert not cp.image_edit.isVisibleTo(cp)  # Image hidden
     # detached_check is reparented into MainWindow's button row, so isVisibleTo(cp)
     # is trivially False; assert against its real parent so this checks the actual
     # setVisible() state set by _update_detached_visibility (always-managed-bg native).
     assert not cp.detached_check.isVisibleTo(cp.detached_check.parentWidget())
-    assert not cp.extra_args_edit.isVisibleTo(cp)     # "Extra podman args" hidden
-    assert not cp.selinux_check.isVisibleTo(cp)       # SELinux checkbox hidden
+    assert not cp.extra_args_edit.isVisibleTo(cp)  # "Extra podman args" hidden
+    assert not cp.selinux_check.isVisibleTo(cp)  # SELinux checkbox hidden
 
 
 def test_container_mode_shows_container_fields(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)
-    w._configure_panel.load_profile(Profile(name="c", image="img",
-        runtime=Runtime(launch_mode="container")))
+    w._configure_panel.load_profile(
+        Profile(name="c", image="img", runtime=Runtime(launch_mode="container"))
+    )
     cp = w._configure_panel
     assert cp.image_edit.isVisibleTo(cp)
     assert not cp.native_binary_edit.isVisibleTo(cp)

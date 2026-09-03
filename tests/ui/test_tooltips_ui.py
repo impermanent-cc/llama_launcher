@@ -1,9 +1,9 @@
 import pytest
 
 from llama_launcher.ui.main_window import MainWindow
-from llama_launcher.ui.panels.mounts_panel import MountsPanel
-from llama_launcher.ui.panels.monitor_panel import MonitorPanel
 from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
+from llama_launcher.ui.panels.monitor_panel import MonitorPanel
+from llama_launcher.ui.panels.mounts_panel import MountsPanel
 from llama_launcher.ui.widgets.info_button import InfoButton
 
 
@@ -16,32 +16,48 @@ def win(qtbot, tmp_path, monkeypatch):
 
 
 def test_environment_fields_have_tooltips(win):
-    for attr in ("image_edit", "model_edit", "binary_combo", "gpu_combo",
-                 "mode_combo", "bind_host_combo", "mmproj_edit", "draft_model_edit",
-                 "raw_edit", "extra_args_edit", "selinux_check"):
+    for attr in (
+        "image_edit",
+        "model_edit",
+        "binary_combo",
+        "gpu_combo",
+        "mode_combo",
+        "bind_host_combo",
+        "mmproj_edit",
+        "draft_model_edit",
+        "raw_edit",
+        "extra_args_edit",
+        "selinux_check",
+    ):
         w = getattr(win._configure_panel, attr)
         assert w.toolTip().strip(), f"{attr} is missing a tooltip"
 
 
 def test_router_member_headers_have_tooltips(win):
-    hdrs = [win._configure_panel.members_list.horizontalHeaderItem(c)
-            for c in range(win._configure_panel.members_list.columnCount())]
+    hdrs = [
+        win._configure_panel.members_list.horizontalHeaderItem(c)
+        for c in range(win._configure_panel.members_list.columnCount())
+    ]
     assert all(h is not None and h.toolTip().strip() for h in hdrs)
 
 
 def test_folders_headers_have_tooltips(qtbot):
-    panel = MountsPanel(); qtbot.addWidget(panel)
-    hdrs = [panel.table.horizontalHeaderItem(c)
-            for c in range(panel.table.columnCount())]
+    panel = MountsPanel()
+    qtbot.addWidget(panel)
+    hdrs = [
+        panel.table.horizontalHeaderItem(c) for c in range(panel.table.columnCount())
+    ]
     assert all(h is not None and h.toolTip().strip() for h in hdrs)
 
 
 def test_monitor_legend_is_behind_info_button(qtbot):
     p = MonitorPanel()
     qtbot.addWidget(p)
-    assert not hasattr(p, "stats_legend")               # no always-on legend label
+    assert not hasattr(p, "stats_legend")  # no always-on legend label
     btn = p.findChild(InfoButton)
-    assert btn is not None and "gen" in btn.info_text    # legend text lives in the popover
+    assert (
+        btn is not None and "gen" in btn.info_text
+    )  # legend text lives in the popover
     # The summary bar spans the whole width, so a tooltip on it fires on hover
     # anywhere along the bar -- duplicating the info button. Keep the legend
     # ONLY on the compact info button, not on the summary label.

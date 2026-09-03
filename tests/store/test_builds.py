@@ -1,15 +1,27 @@
 from llama_launcher.core.build_spec import BuildConfig, BuildOutput
 from llama_launcher.store.builds import (
-    save_build_config, list_build_configs, delete_build_config,
-    load_outputs, add_output, remove_output, write_containerfile,
+    add_output,
+    delete_build_config,
+    list_build_configs,
+    load_outputs,
     new_output_id,
+    remove_output,
+    save_build_config,
+    write_containerfile,
 )
 
 
 def _out(oid="a1", ident="llama-custom:x-20260828"):
-    return BuildOutput(id=oid, kind="tag", identifier=ident, config_name="x",
-                       engine="llama.cpp", git_ref="master", options={},
-                       created="2026-08-28")
+    return BuildOutput(
+        id=oid,
+        kind="tag",
+        identifier=ident,
+        config_name="x",
+        engine="llama.cpp",
+        git_ref="master",
+        options={},
+        created="2026-08-28",
+    )
 
 
 def test_config_save_list_delete(tmp_path):
@@ -61,7 +73,8 @@ def test_save_refuses_reserved_outputs_slug(tmp_path):
     # A config named "outputs" would slug to the registry's own filename and
     # overwrite it; the save must refuse instead of destroying the registry.
     import pytest
+
     add_output(_out(), tmp_path)
     with pytest.raises(ValueError):
         save_build_config(BuildConfig(name="Outputs"), tmp_path)
-    assert len(load_outputs(tmp_path)) == 1     # registry untouched
+    assert len(load_outputs(tmp_path)) == 1  # registry untouched

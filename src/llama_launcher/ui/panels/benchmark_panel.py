@@ -1,9 +1,16 @@
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QFont
+from PySide6.QtGui import QBrush, QColor
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
-    QLineEdit, QSpinBox, QTableWidget, QTableWidgetItem,
     QAbstractItemView,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QSpinBox,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from llama_launcher.ui.widgets.info_button import InfoButton
@@ -17,17 +24,21 @@ _BENCH_HEADER_TIPS = {
     "size": "Target prompt length in tokens (a filler prompt is padded to this).",
     "prompt_n": "Actual number of prompt tokens sent to the server for this row.",
     "pp t/s": "Prefill (prompt-processing) throughput: tokens/sec the model "
-              "ingests the prompt.",
+    "ingests the prompt.",
     "gen t/s": "Generation throughput: tokens/sec the model produces in the reply.",
     "total s": "Total wall-clock seconds for this prompt size (prefill + generation).",
 }
 
-_BENCH_INTRO = ("Benchmark the running server: POSTs filler prompts and reads "
-                 "llama.cpp timings for prompt-eval / generation tok/s. History is "
-                 "kept per profile so you can A/B a flag or model change.")
+_BENCH_INTRO = (
+    "Benchmark the running server: POSTs filler prompts and reads "
+    "llama.cpp timings for prompt-eval / generation tok/s. History is "
+    "kept per profile so you can A/B a flag or model change."
+)
 
-_BENCH_LEGEND = ("pp t/s = prefill (prompt-processing) throughput  ·  "
-                 "gen t/s = generation throughput  ·  total s = wall-clock per size")
+_BENCH_LEGEND = (
+    "pp t/s = prefill (prompt-processing) throughput  \u00b7  "
+    "gen t/s = generation throughput  \u00b7  total s = wall-clock per size"
+)
 
 
 class BenchmarkPanel(QWidget):
@@ -38,6 +49,7 @@ class BenchmarkPanel(QWidget):
     their model for A/B comparison (up to the store's cap). Clear wipes the
     on-disk history for the current profile.
     """
+
     benchmark_run_requested = Signal(dict)
     benchmark_cancel_requested = Signal()
     benchmark_clear_requested = Signal()
@@ -71,7 +83,9 @@ class BenchmarkPanel(QWidget):
         self.bench_run_btn.clicked.connect(self._on_bench_run_clicked)
         bench_config.addWidget(self.bench_run_btn)
         self.bench_clear_btn = QPushButton("Clear")
-        self.bench_clear_btn.setToolTip("Delete the saved benchmark history for this profile.")
+        self.bench_clear_btn.setToolTip(
+            "Delete the saved benchmark history for this profile."
+        )
         self.bench_clear_btn.clicked.connect(self.benchmark_clear_requested)
         bench_config.addWidget(self.bench_clear_btn)
         layout.addLayout(bench_config)
@@ -85,7 +99,9 @@ class BenchmarkPanel(QWidget):
         self.bench_table = QTableWidget(0, len(_BENCH_TABLE_HEADERS))
         self.bench_table.setHorizontalHeaderLabels(_BENCH_TABLE_HEADERS)
         for c, name in enumerate(_BENCH_TABLE_HEADERS):
-            self.bench_table.horizontalHeaderItem(c).setToolTip(_BENCH_HEADER_TIPS[name])
+            self.bench_table.horizontalHeaderItem(c).setToolTip(
+                _BENCH_HEADER_TIPS[name]
+            )
         self.bench_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         layout.addWidget(self.bench_table, 1)
 
@@ -99,12 +115,14 @@ class BenchmarkPanel(QWidget):
             sizes = [int(s) for s in self.bench_sizes.text().split(",") if s.strip()]
         except ValueError:
             return
-        self.benchmark_run_requested.emit({
-            "sizes": sizes,
-            "n_predict": self.bench_npredict.value(),
-            "warmup": self.bench_warmup.value(),
-            "repeats": self.bench_repeats.value(),
-        })
+        self.benchmark_run_requested.emit(
+            {
+                "sizes": sizes,
+                "n_predict": self.bench_npredict.value(),
+                "warmup": self.bench_warmup.value(),
+                "repeats": self.bench_repeats.value(),
+            }
+        )
 
     @staticmethod
     def _snapshot_label(snapshot: dict) -> str:
@@ -125,7 +143,12 @@ class BenchmarkPanel(QWidget):
     def set_benchmark_running(self, running: bool) -> None:
         self._bench_running = running
         self.bench_run_btn.setText("Cancel" if running else "Run")
-        for w in (self.bench_sizes, self.bench_npredict, self.bench_warmup, self.bench_repeats):
+        for w in (
+            self.bench_sizes,
+            self.bench_npredict,
+            self.bench_warmup,
+            self.bench_repeats,
+        ):
             w.setEnabled(not running)
 
     def set_benchmark_progress(self, text: str) -> None:
@@ -152,7 +175,7 @@ class BenchmarkPanel(QWidget):
                 bits.append(f"gen {gen:+.0f}%")
             if bits:
                 parts.append(f"{entry.get('size')}: " + " ".join(bits))
-        summary = "Δ " + " · ".join(parts) if parts else "Δ"
+        summary = "\u0394 " + " \u00b7 ".join(parts) if parts else "\u0394"
         if delta.get("sizes_differ"):
             summary += " (sizes differ)"
         current = self.bench_progress.text()
@@ -164,13 +187,13 @@ class BenchmarkPanel(QWidget):
         self.bench_table.insertRow(row)
         label = self._snapshot_label(run.get("snapshot") or {})
         ts = run.get("timestamp", "")
-        text = f"{ts}  ·  {label}" if label else str(ts)
+        text = f"{ts}  \u00b7  {label}" if label else str(ts)
         item = QTableWidgetItem(text)
         font = item.font()
         font.setBold(True)
         item.setFont(font)
         item.setBackground(QBrush(QColor(0, 0, 0, 30)))
-        item.setFlags(Qt.ItemFlag.ItemIsEnabled)     # not selectable/editable
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)  # not selectable/editable
         self.bench_table.setItem(row, 0, item)
         self.bench_table.setSpan(row, 0, 1, len(_BENCH_TABLE_HEADERS))
 
@@ -178,10 +201,17 @@ class BenchmarkPanel(QWidget):
         for row in run.get("rows", []):
             r = self.bench_table.rowCount()
             self.bench_table.insertRow(r)
-            values = [row.get("target_size"), row.get("prompt_n"), row.get("pp_tok_s"),
-                      row.get("gen_tok_s"), row.get("total_s")]
+            values = [
+                row.get("target_size"),
+                row.get("prompt_n"),
+                row.get("pp_tok_s"),
+                row.get("gen_tok_s"),
+                row.get("total_s"),
+            ]
             for c, val in enumerate(values):
-                self.bench_table.setItem(r, c, QTableWidgetItem("" if val is None else str(val)))
+                self.bench_table.setItem(
+                    r, c, QTableWidgetItem("" if val is None else str(val))
+                )
 
     def set_benchmark_history(self, runs: list) -> None:
         """Repaint the table as one labelled group per stored run, newest first."""

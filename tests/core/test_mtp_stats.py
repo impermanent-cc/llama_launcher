@@ -1,7 +1,15 @@
-from llama_launcher.core.mtp_stats import parse_draft_stats, DraftStats, sparkline
+from llama_launcher.core.mtp_stats import (
+    SpecCounters,
+    parse_draft_stats,
+    sparkline,
+    spec_counters,
+    spec_delta,
+)
 
-REAL = ("draft acceptance = 0.62008 ( 1797 accepted /  2898 generated), "
-        "mean acceptance length =  2.24, acceptance rate per position = (0.727, 0.513)")
+REAL = (
+    "draft acceptance = 0.62008 ( 1797 accepted /  2898 generated), "
+    "mean acceptance length =  2.24, acceptance rate per position = (0.727, 0.513)"
+)
 
 
 def test_parses_real_line():
@@ -14,8 +22,10 @@ def test_parses_real_line():
 
 
 def test_three_positions():
-    line = ("draft acceptance = 0.5 ( 3 accepted / 6 generated), "
-            "mean acceptance length = 1.5, acceptance rate per position = (0.8, 0.5, 0.2)")
+    line = (
+        "draft acceptance = 0.5 ( 3 accepted / 6 generated), "
+        "mean acceptance length = 1.5, acceptance rate per position = (0.8, 0.5, 0.2)"
+    )
     assert parse_draft_stats(line).per_position == (0.8, 0.5, 0.2)
 
 
@@ -39,26 +49,26 @@ def test_sparkline_empty():
 
 
 def test_sparkline_single_value():
-    assert sparkline([5.0]) == "▁"
+    assert sparkline([5.0]) == "\u2581"
 
 
 def test_sparkline_flat_series_all_low():
-    assert sparkline([5, 5, 5]) == "▁▁▁"
+    assert sparkline([5, 5, 5]) == "\u2581\u2581\u2581"
 
 
 def test_sparkline_ascending_ramp():
     s = sparkline([1, 2, 3, 4, 5, 6, 7, 8])
     assert len(s) == 8
-    assert s[0] == "▁" and s[-1] == "█"
+    assert s[0] == "\u2581" and s[-1] == "\u2588"
     # monotonically non-decreasing block heights
-    assert list(s) == sorted(s, key="▁▂▃▄▅▆▇█".index)
+    assert list(s) == sorted(
+        s, key="\u2581\u2582\u2583\u2584\u2585\u2586\u2587\u2588".index
+    )
 
 
 def test_sparkline_width_keeps_last_n():
-    assert sparkline([1, 2, 3, 4, 5], width=2) == "▁█"
+    assert sparkline([1, 2, 3, 4, 5], width=2) == "\u2581\u2588"
 
-
-from llama_launcher.core.mtp_stats import SpecCounters, spec_counters, spec_delta
 
 METRICS = """
 llamacpp:spec_decode_num_draft_tokens_total 1000
@@ -82,8 +92,12 @@ def test_spec_counters_reads_all_three_totals():
 
 
 def test_spec_delta_derives_acceptance_and_mean_length():
-    prev = SpecCounters(draft_tokens=1000, accepted=600, drafts=300, per_position=(250.0,))
-    cur = SpecCounters(draft_tokens=2000, accepted=1400, drafts=700, per_position=(600.0,))
+    prev = SpecCounters(
+        draft_tokens=1000, accepted=600, drafts=300, per_position=(250.0,)
+    )
+    cur = SpecCounters(
+        draft_tokens=2000, accepted=1400, drafts=700, per_position=(600.0,)
+    )
     stats = spec_delta(prev, cur)
     # 800 accepted of 1000 drafted since the last poll
     assert stats.acceptance == 0.8

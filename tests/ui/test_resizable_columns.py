@@ -3,14 +3,16 @@
 Stretch and ResizeToContents both lock the column against dragging; only
 fixed-size button/checkbox columns may keep ResizeToContents.
 """
+
 from PySide6.QtWidgets import QHeaderView
 
 
 def _assert_interactive(table, cols):
     hdr = table.horizontalHeader()
     for c in cols:
-        assert hdr.sectionResizeMode(c) == QHeaderView.Interactive, \
+        assert hdr.sectionResizeMode(c) == QHeaderView.Interactive, (
             f"column {c} not user-resizable"
+        )
 
 
 def test_mounts_columns_resizable(main_window):

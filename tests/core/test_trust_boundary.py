@@ -2,18 +2,23 @@
 escalate to host code execution or silently expose an unauthenticated server
 on one Launch click. validate() screens the dangerous constructs.
 """
-from llama_launcher.core.spec import Profile, Mount, Runtime, RouterMember
-from llama_launcher.core.validation import validate
+
 from llama_launcher.core.command_builder import dangerous_run_args, run_args_expose
+from llama_launcher.core.spec import Mount, Profile, RouterMember, Runtime
+from llama_launcher.core.validation import validate
 
 
 def _server(**rt):
     base = dict(binary="podman", bind_host="127.0.0.1")
     base.update(rt)
-    return Profile(name="p", image="img",
-                   runtime=Runtime(**base),
-                   mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
-                   model="/models/m.gguf", settings={"port": 8080})
+    return Profile(
+        name="p",
+        image="img",
+        runtime=Runtime(**base),
+        mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
+        model="/models/m.gguf",
+        settings={"port": 8080},
+    )
 
 
 def _errs(p, **kw):
@@ -25,6 +30,7 @@ def _warns(p, **kw):
 
 
 # -- screening helpers --------------------------------------------------------
+
 
 def test_dangerous_run_args_flags_escalations():
     assert dangerous_run_args("--privileged")
@@ -42,7 +48,9 @@ def test_dangerous_run_args_flags_escalations():
 def test_dangerous_run_args_allows_benign():
     assert dangerous_run_args("--shm-size=1g") == []
     assert dangerous_run_args("-v /home/me/models:/models:ro") == []
-    assert dangerous_run_args("--device nvidia.com/gpu=all") == []   # the launcher's own CDI form
+    assert (
+        dangerous_run_args("--device nvidia.com/gpu=all") == []
+    )  # the launcher's own CDI form
     assert dangerous_run_args("") == []
 
 
@@ -82,11 +90,14 @@ def test_run_args_expose_detects_host_net_and_publish():
 
 # -- validate() integration ---------------------------------------------------
 
+
 def test_validate_errors_on_privileged_extra_args():
     p = _server(extra_run_args="--privileged -v /:/hostfs:rw")
     errs = _errs(p)
-    assert any("extra" in e.lower() and "podman" in e.lower() or "run arg" in e.lower()
-               for e in errs)
+    assert any(
+        ("extra" in e.lower() and "podman" in e.lower()) or "run arg" in e.lower()
+        for e in errs
+    )
 
 
 def test_validate_network_host_requires_key_even_on_loopback_bind():
@@ -100,7 +111,7 @@ def test_validate_network_host_requires_key_even_on_loopback_bind():
 
 def test_validate_blank_api_key_does_not_satisfy_exposure_guard():
     p = _server(bind_host="0.0.0.0")
-    p.settings["api-key"] = "   "          # whitespace: dropped from argv, so no real auth
+    p.settings["api-key"] = "   "  # whitespace: dropped from argv, so no real auth
     assert any("unauthenticated" in e for e in _errs(p))
 
 
@@ -112,8 +123,10 @@ def test_validate_rejects_non_ip_bind_host():
 def test_validate_accepts_ip_and_loopback_and_wildcard_bind_hosts():
     for h in ("127.0.0.1", "0.0.0.0", "::1", "[::1]", "localhost", "192.168.1.5", "::"):
         p = _server(bind_host=h)
-        p.settings["api-key"] = "secret"   # silence the exposure error for non-loopback
-        assert not any("bind" in e.lower() and "address" in e.lower() for e in _errs(p)), h
+        p.settings["api-key"] = "secret"  # silence the exposure error for non-loopback
+        assert not any(
+            "bind" in e.lower() and "address" in e.lower() for e in _errs(p)
+        ), h
 
 
 def test_validate_warns_on_sensitive_mount_source():
@@ -123,12 +136,17 @@ def test_validate_warns_on_sensitive_mount_source():
 
 
 def test_validate_router_rejects_model_id_with_newline():
-    router = Profile(name="r", image="img", runtime=Runtime(binary="podman", bind_host="127.0.0.1"),
-                     mode="router",
-                     mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
-                     settings={"port": 8080})
+    router = Profile(
+        name="r",
+        image="img",
+        runtime=Runtime(binary="podman", bind_host="127.0.0.1"),
+        mode="router",
+        mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
+        settings={"port": 8080},
+    )
     member = RouterMember(profile="m", model_id="bad\n[evil]\nkey = x")
-    mp = Profile(name="m", image="img", runtime=Runtime(binary="podman"),
-                 model="/models/m.gguf")
+    mp = Profile(
+        name="m", image="img", runtime=Runtime(binary="podman"), model="/models/m.gguf"
+    )
     errs = _errs(router, members=((member, mp),))
     assert any("model id" in e.lower() or "invalid" in e.lower() for e in errs)

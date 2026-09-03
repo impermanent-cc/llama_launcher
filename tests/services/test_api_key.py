@@ -1,5 +1,8 @@
 import stat
 
+import pytest
+
+from llama_launcher.core.spec import Profile, Runtime
 from llama_launcher.services import api_key
 
 
@@ -67,9 +70,6 @@ def test_key_file_is_never_world_readable_even_briefly(tmp_path, monkeypatch):
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
 
 
-import pytest
-
-
 def test_normalize_strips_surrounding_whitespace():
     assert api_key.normalize_key("  sk-abc \n") == "sk-abc"
 
@@ -96,7 +96,7 @@ def test_write_global_key_tightens_a_preexisting_wider_router_dir(tmp_path):
     # router_dir() as an intermediate parent (e.g. a per-profile key written
     # first) creates base_dir/router 0700 via mkdir -p, but exist_ok=True on a
     # later mkdir call would not re-tighten it if something else widened it.
-    d = api_key.router_dir(tmp_path, "R")   # creates base_dir/router along the way
+    d = api_key.router_dir(tmp_path, "R")  # creates base_dir/router along the way
     (tmp_path / "router").chmod(0o755)
     api_key.write_global_key(tmp_path, "sk-global")
     mode = stat.S_IMODE((tmp_path / "router").stat().st_mode)
@@ -112,15 +112,12 @@ def test_set_profile_key_overwrites_and_reads_back(tmp_path):
 
 
 # -- resolver + launch-time materializer -------------------------------------
-from llama_launcher.core.spec import Profile, Runtime
-
-
 def _profile(name, mode):
     return Profile(name=name, image="img", runtime=Runtime(router_key_mode=mode))
 
 
 def test_resolve_global_prefers_global_key(tmp_path):
-    api_key.ensure_api_key(tmp_path, "R")            # a per-profile key exists
+    api_key.ensure_api_key(tmp_path, "R")  # a per-profile key exists
     api_key.write_global_key(tmp_path, "sk-shared")
     assert api_key.resolve_api_key(tmp_path, _profile("R", "global")) == "sk-shared"
 

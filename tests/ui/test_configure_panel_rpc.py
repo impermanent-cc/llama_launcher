@@ -1,4 +1,4 @@
-from llama_launcher.core.spec import Profile, Runtime, RpcWorker
+from llama_launcher.core.spec import Profile, RpcWorker, Runtime
 from llama_launcher.core.validation import Issue
 from llama_launcher.ui.panels import configure_panel as cp
 
@@ -7,8 +7,8 @@ def test_rpc_mode_disables_node_and_shows_workers(main_window):
     p = main_window._configure_panel
     idx = p.launch_mode_combo.findData("rpc")
     p.launch_mode_combo.setCurrentIndex(idx)
-    assert not p.node_combo.isEnabled()          # head forced local
-    assert p._rpc_workers_row_visible()          # helper the panel exposes
+    assert not p.node_combo.isEnabled()  # head forced local
+    assert p._rpc_workers_row_visible()  # helper the panel exposes
 
 
 def test_container_mode_keeps_node_enabled_and_hides_workers(main_window):
@@ -43,9 +43,10 @@ def test_build_profile_forces_local_node_and_captures_workers(main_window):
 def test_load_profile_round_trips_rpc_workers(main_window):
     p = main_window._configure_panel
     workers = [RpcWorker(node="local", device="CPU", mem_mb=16000, port=50053)]
-    profile = Profile(name="rpc-test",
-                      runtime=Runtime(launch_mode="rpc", node="local",
-                                      rpc_workers=workers))
+    profile = Profile(
+        name="rpc-test",
+        runtime=Runtime(launch_mode="rpc", node="local", rpc_workers=workers),
+    )
     p.load_profile(profile)
     assert p.launch_mode_combo.currentData() == "rpc"
     assert not p.node_combo.isEnabled()
@@ -69,19 +70,30 @@ def test_gather_check_fit_wires_probes_into_validate(monkeypatch, tmp_path):
     """The Check-fit gather passes the probed worker_image_present /
     worker_free_mb dicts into validate(...) so the RPC warnings surface, and
     returns validate's issues alongside the headline string."""
-    profile = Profile(name="pool", image="img", runtime=Runtime(
-        launch_mode="rpc",
-        rpc_workers=[RpcWorker(node="local", device="CUDA0", mem_mb=0)]))
+    profile = Profile(
+        name="pool",
+        image="img",
+        runtime=Runtime(
+            launch_mode="rpc",
+            rpc_workers=[RpcWorker(node="local", device="CUDA0", mem_mb=0)],
+        ),
+    )
 
-    monkeypatch.setattr(cp.pool_preflight, "default_gpus_reader",
-                        lambda base: (lambda n: 10 * 1024 ** 3))
-    monkeypatch.setattr(cp.pool_preflight, "default_ram_reader",
-                        lambda base: (lambda n: 0))
-    monkeypatch.setattr(cp.pool_preflight, "gather_donations",
-                        lambda profile, base, gpus, ram: [("vram", 10 * 1024 ** 3)])
+    monkeypatch.setattr(
+        cp.pool_preflight, "default_gpus_reader", lambda base: lambda n: 10 * 1024**3
+    )
+    monkeypatch.setattr(
+        cp.pool_preflight, "default_ram_reader", lambda base: lambda n: 0
+    )
+    monkeypatch.setattr(
+        cp.pool_preflight,
+        "gather_donations",
+        lambda profile, base, gpus, ram: [("vram", 10 * 1024**3)],
+    )
     monkeypatch.setattr(cp.pool_preflight, "headline", lambda est, dons: "HEADLINE")
-    monkeypatch.setattr(cp.runtime, "image_exists",
-                        lambda image, binary, connection="": False)
+    monkeypatch.setattr(
+        cp.runtime, "image_exists", lambda image, binary, connection="": False
+    )
     monkeypatch.setattr(cp.runtime, "binary_available", lambda binary: True)
     monkeypatch.setattr(cp.native, "native_binary_ok_for", lambda p: True)
 
@@ -90,9 +102,10 @@ def test_gather_check_fit_wires_probes_into_validate(monkeypatch, tmp_path):
     def fake_validate(profile, **kw):
         captured.update(kw)
         return [Issue("error", "boom")]
+
     monkeypatch.setattr(cp, "validate", fake_validate)
 
-    text, issues = cp._gather_check_fit(profile, tmp_path, 5 * 1024 ** 3)
+    text, issues = cp._gather_check_fit(profile, tmp_path, 5 * 1024**3)
 
     assert text == "HEADLINE"
     assert [i.message for i in issues] == ["boom"]
@@ -104,11 +117,17 @@ def test_check_fit_click_renders_headline_and_issues(main_window, monkeypatch, q
     p = main_window._configure_panel
     p.launch_mode_combo.setCurrentIndex(p.launch_mode_combo.findData("rpc"))
     p.rpc_workers_table.set_workers(
-        [RpcWorker(node="local", device="CUDA0", mem_mb=0, port=50052)])
+        [RpcWorker(node="local", device="CUDA0", mem_mb=0, port=50052)]
+    )
     p.model_edit.setText("/models/x.gguf")
-    monkeypatch.setattr(cp, "_gather_check_fit",
-                        lambda profile, base_dir, estimate: (
-                            "HEADLINE TEXT", [Issue("warning", "watch out")]))
+    monkeypatch.setattr(
+        cp,
+        "_gather_check_fit",
+        lambda profile, base_dir, estimate: (
+            "HEADLINE TEXT",
+            [Issue("warning", "watch out")],
+        ),
+    )
 
     p._on_check_fit()
     qtbot.waitUntil(lambda: not p._check_fit_inflight, timeout=3000)

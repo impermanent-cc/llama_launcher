@@ -3,11 +3,12 @@ import shutil
 import subprocess
 from dataclasses import dataclass
 
+_DEFAULT_TIMEOUT = 10  # seconds; bounds a hung container binary
 
-_DEFAULT_TIMEOUT = 10        # seconds; bounds a hung container binary
 
-
-def _run(args: list[str], timeout: float = _DEFAULT_TIMEOUT) -> subprocess.CompletedProcess:
+def _run(
+    args: list[str], timeout: float = _DEFAULT_TIMEOUT
+) -> subprocess.CompletedProcess:
     """Run a container-binary command, capturing output.
 
     A timeout is always passed: these run on the UI thread from update_status,
@@ -16,12 +17,17 @@ def _run(args: list[str], timeout: float = _DEFAULT_TIMEOUT) -> subprocess.Compl
     returned -- every caller already treats returncode != 0 as "absent/none".
     """
     try:
-        return subprocess.run(args, capture_output=True, text=True, check=False,
-                             timeout=timeout)
+        return subprocess.run(
+            args, capture_output=True, text=True, check=False, timeout=timeout
+        )
     except subprocess.TimeoutExpired as exc:
-        return subprocess.CompletedProcess(args, returncode=124, stdout="", stderr=str(exc))
+        return subprocess.CompletedProcess(
+            args, returncode=124, stdout="", stderr=str(exc)
+        )
     except OSError as exc:
-        return subprocess.CompletedProcess(args, returncode=127, stdout="", stderr=str(exc))
+        return subprocess.CompletedProcess(
+            args, returncode=127, stdout="", stderr=str(exc)
+        )
 
 
 def _base(binary: str, connection: str = "") -> list[str]:
@@ -43,15 +49,23 @@ def is_rootless(binary: str) -> bool:
     # "name=rootless" among SecurityOptions, so the probe is per runtime, like
     # _base/node_reachable.
     if binary == "docker":
-        res = _run([binary, "info", "--format",
-                    "{{range .SecurityOptions}}{{println .}}{{end}}"])
+        res = _run(
+            [
+                binary,
+                "info",
+                "--format",
+                "{{range .SecurityOptions}}{{println .}}{{end}}",
+            ]
+        )
         return "rootless" in res.stdout
     res = _run([binary, "info", "--format", "{{.Host.Security.Rootless}}"])
     return res.stdout.strip() == "true"
 
 
 def container_state(name: str, binary: str, connection: str = "") -> str:
-    res = _run([*_base(binary, connection), "inspect", "-f", "{{.State.Running}}", name])
+    res = _run(
+        [*_base(binary, connection), "inspect", "-f", "{{.State.Running}}", name]
+    )
     if res.returncode != 0:
         return "absent"
     return "running" if res.stdout.strip() == "true" else "stopped"
@@ -61,7 +75,9 @@ def stop(name: str, binary: str) -> None:
     _run([binary, "stop", name])
 
 
-def stop_argv(name: str, binary: str, timeout: int = 10, connection: str = "") -> list[str]:
+def stop_argv(
+    name: str, binary: str, timeout: int = 10, connection: str = ""
+) -> list[str]:
     """Argv to stop a container with an explicit grace period (for async/QProcess
     use so the UI thread never blocks on podman's stop timeout)."""
     return [*_base(binary, connection), "stop", "-t", str(timeout), name]
@@ -75,13 +91,19 @@ def container_exists(name: str, binary: str, connection: str = "") -> bool:
     # `container exists` is a podman-only convenience subcommand (docker has no
     # equivalent -> always False, breaking stale-container cleanup on docker).
     # `inspect --type container` returns 0/1 identically on both runtimes.
-    return _run([*_base(binary, connection), "inspect", "--type", "container",
-                 name]).returncode == 0
+    return (
+        _run(
+            [*_base(binary, connection), "inspect", "--type", "container", name]
+        ).returncode
+        == 0
+    )
 
 
 def started_at(name: str, binary: str, connection: str = "") -> str | None:
     """Return the container's StartedAt timestamp (ISO 8601) or None on failure."""
-    res = _run([*_base(binary, connection), "inspect", "-f", "{{.State.StartedAt}}", name])
+    res = _run(
+        [*_base(binary, connection), "inspect", "-f", "{{.State.StartedAt}}", name]
+    )
     if res.returncode != 0:
         return None
     val = res.stdout.strip()
@@ -89,20 +111,28 @@ def started_at(name: str, binary: str, connection: str = "") -> str | None:
 
 
 def stats(name: str, binary: str, connection: str = "") -> dict | None:
-    res = _run([*_base(binary, connection), "stats", "--no-stream", "--format", "json", name])
+    res = _run(
+        [*_base(binary, connection), "stats", "--no-stream", "--format", "json", name]
+    )
     if res.returncode != 0 or not res.stdout.strip():
         return None
     try:
         data = json.loads(res.stdout)
     except json.JSONDecodeError:
         return None
-    row = data[0] if isinstance(data, list) and data else (data if isinstance(data, dict) else None)
+    row = (
+        data[0]
+        if isinstance(data, list) and data
+        else (data if isinstance(data, dict) else None)
+    )
     if not row:
         return None
     # podman and docker name the same fields differently: podman uses
     # cpu_percent/mem_usage, docker uses CPUPerc/MemUsage; read both.
-    return {"cpu_perc": row.get("cpu_percent") or row.get("CPUPerc", ""),
-            "mem_usage": row.get("mem_usage") or row.get("MemUsage", "")}
+    return {
+        "cpu_perc": row.get("cpu_percent") or row.get("CPUPerc", ""),
+        "mem_usage": row.get("mem_usage") or row.get("MemUsage", ""),
+    }
 
 
 _ENGINE_IMAGE_MATCH = {
@@ -127,9 +157,13 @@ def parse_images(output: str, engine: str = "llama.cpp") -> list[str]:
     return out
 
 
-def list_local_images(binary: str, engine: str = "llama.cpp", connection: str = "") -> list[str]:
+def list_local_images(
+    binary: str, engine: str = "llama.cpp", connection: str = ""
+) -> list[str]:
     """Locally-pulled images for `engine` (`<binary> images`), [] on error."""
-    res = _run([*_base(binary, connection), "images", "--format", "{{.Repository}}:{{.Tag}}"])
+    res = _run(
+        [*_base(binary, connection), "images", "--format", "{{.Repository}}:{{.Tag}}"]
+    )
     if res.returncode != 0:
         return []
     return parse_images(res.stdout, engine)
@@ -138,6 +172,7 @@ def list_local_images(binary: str, engine: str = "llama.cpp", connection: str = 
 @dataclass
 class ImageInfo:
     """Image metadata: tag, size, and creation time."""
+
     tag: str
     size: str
     created: str
@@ -164,8 +199,14 @@ def parse_images_detailed(output: str) -> dict[str, ImageInfo]:
 
 def list_images_detailed(binary: str, connection: str = "") -> dict[str, ImageInfo]:
     """Locally-pulled images with metadata (`<binary> images`), {} on error."""
-    res = _run([*_base(binary, connection), "images", "--format",
-                "{{.Repository}}:{{.Tag}}|{{.Size}}|{{.CreatedAt}}"])
+    res = _run(
+        [
+            *_base(binary, connection),
+            "images",
+            "--format",
+            "{{.Repository}}:{{.Tag}}|{{.Size}}|{{.CreatedAt}}",
+        ]
+    )
     if res.returncode != 0:
         return {}
     return parse_images_detailed(res.stdout)
@@ -256,22 +297,33 @@ def parse_ps_json(output: str) -> list[dict]:
         if not profile:
             if not name.startswith("llama-"):
                 continue
-            profile = name[len("llama-"):]
+            profile = name[len("llama-") :]
             mode = mode or "server"
 
-        rows.append({
-            "name": name,
-            "running": str(item.get("State", "")).lower() == "running",
-            "profile": profile,
-            "mode": mode or "server",
-        })
+        rows.append(
+            {
+                "name": name,
+                "running": str(item.get("State", "")).lower() == "running",
+                "profile": profile,
+                "mode": mode or "server",
+            }
+        )
     return rows
 
 
 def list_launcher_containers(binary: str, connection: str = "") -> list[dict]:
     """Every container this launcher created, running or not."""
-    res = _run([*_base(binary, connection), "ps", "-a", "--filter",
-                f"label={_PROFILE_LABEL}", "--format", "json"])
+    res = _run(
+        [
+            *_base(binary, connection),
+            "ps",
+            "-a",
+            "--filter",
+            f"label={_PROFILE_LABEL}",
+            "--format",
+            "json",
+        ]
+    )
     if res.returncode != 0:
         return []
     return parse_ps_json(res.stdout)
@@ -291,11 +343,20 @@ def pull_argv(image: str, binary: str, connection: str = "") -> list[str]:
     return [*_base(binary, connection), "pull", image]
 
 
-def connection_add_argv(name: str, ssh_target: str, binary: str = "podman") -> list[str]:
+def connection_add_argv(
+    name: str, ssh_target: str, binary: str = "podman"
+) -> list[str]:
     # podman registers a remote host as a named connection; docker registers it
     # as a named context over the same ssh transport.
     if binary == "docker":
-        return [binary, "context", "create", name, "--docker", f"host=ssh://{ssh_target}"]
+        return [
+            binary,
+            "context",
+            "create",
+            name,
+            "--docker",
+            f"host=ssh://{ssh_target}",
+        ]
     return [binary, "system", "connection", "add", name, f"ssh://{ssh_target}"]
 
 

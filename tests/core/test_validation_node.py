@@ -3,8 +3,12 @@ from llama_launcher.core.validation import validate
 
 
 def _p():
-    return Profile(name="p", image="img:tag", runtime=Runtime(node="box-b"),
-                   settings={"port": 8080})
+    return Profile(
+        name="p",
+        image="img:tag",
+        runtime=Runtime(node="box-b"),
+        settings={"port": 8080},
+    )
 
 
 def test_missing_image_on_node_is_a_warning():

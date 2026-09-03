@@ -91,8 +91,9 @@ def render_defines(cfg: BuildConfig) -> list[str]:
         out.append(f"-D{setting.flag}={rendered}")
     raw = parse_raw_defines(cfg.raw_defines)
     raw_names = {m.group(1) for d in raw if (m := _DEFINE_NAME.match(d))}
-    out = [d for d in out
-           if (m := _DEFINE_NAME.match(d)) and m.group(1) not in raw_names]
+    out = [
+        d for d in out if (m := _DEFINE_NAME.match(d)) and m.group(1) not in raw_names
+    ]
     return out + raw
 
 
@@ -145,10 +146,14 @@ ENTRYPOINT ["/usr/local/bin/llama-server"]
 
 def default_images(cfg: BuildConfig) -> tuple:
     if cfg.options.get("cuda"):
-        return ("docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04",
-                "docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04")
-    return ("docker.io/library/debian:bookworm",
-            "docker.io/library/debian:bookworm-slim")
+        return (
+            "docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04",
+            "docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04",
+        )
+    return (
+        "docker.io/library/debian:bookworm",
+        "docker.io/library/debian:bookworm-slim",
+    )
 
 
 def default_image_pool() -> tuple[set, set]:
@@ -165,9 +170,9 @@ def default_image_pool() -> tuple[set, set]:
     return builders, runtimes
 
 
-def render_container(cfg: BuildConfig, tag: str,
-                     containerfile_path: str,
-                     binary: str = "podman") -> ContainerBuild:
+def render_container(
+    cfg: BuildConfig, tag: str, containerfile_path: str, binary: str = "podman"
+) -> ContainerBuild:
     defines = render_defines(cfg)
     targets = "llama-server"
     if _rpc_enabled(defines):
@@ -186,5 +191,6 @@ def render_container(cfg: BuildConfig, tag: str,
     # an unrelated CWD as build context is both wrong and wasteful.
     context_dir = posixpath.dirname(containerfile_path) or "."
     build_cmd = shlex.join(
-        [binary, "build", "-t", tag, "-f", containerfile_path, context_dir])
+        [binary, "build", "-t", tag, "-f", containerfile_path, context_dir]
+    )
     return ContainerBuild(cf, build_cmd)

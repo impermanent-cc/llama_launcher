@@ -9,3 +9,7 @@ __pycache__/
 # Spec/plan docs kept out of commits per current preference
 docs/
 .superpowers/
+
+# Workflow (added by the stamp skill): superpowers scratch is a build artifact
+# wiped at cycle start; everything else at the repo root is tracked.
+.superpowers/

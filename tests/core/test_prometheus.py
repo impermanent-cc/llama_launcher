@@ -1,4 +1,4 @@
-from llama_launcher.core.prometheus import parse_metrics
+from llama_launcher.core.prometheus import parse_labeled_metric, parse_metrics
 
 SAMPLE = """# HELP llamacpp:predicted_tokens_seconds Average generation throughput in tokens/s.
 # TYPE llamacpp:predicted_tokens_seconds gauge
@@ -15,11 +15,9 @@ def test_parse_metrics():
     m = parse_metrics(SAMPLE)
     assert m["llamacpp:predicted_tokens_seconds"] == 42.5
     assert m["llamacpp:requests_processing"] == 1.0
-    assert m["llamacpp:prompt_tokens_total"] == 1234.0   # labels stripped
-    assert "llamacpp:bad" not in m                        # non-numeric skipped
+    assert m["llamacpp:prompt_tokens_total"] == 1234.0  # labels stripped
+    assert "llamacpp:bad" not in m  # non-numeric skipped
 
-
-from llama_launcher.core.prometheus import parse_labeled_metric
 
 LABELED = """
 # HELP llamacpp:spec_decode_num_accepted_tokens_per_pos_total Accepted per position
@@ -30,9 +28,9 @@ llamacpp:other_metric 5
 
 
 def test_parse_labeled_metric_returns_label_to_value():
-    got = parse_labeled_metric(LABELED,
-                               "llamacpp:spec_decode_num_accepted_tokens_per_pos_total",
-                               "position")
+    got = parse_labeled_metric(
+        LABELED, "llamacpp:spec_decode_num_accepted_tokens_per_pos_total", "position"
+    )
     assert got == {"0": 727.0, "1": 513.0}
 
 

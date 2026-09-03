@@ -1,18 +1,43 @@
 import struct
 from pathlib import Path
-from llama_launcher.services.model_info import read_gguf_meta, file_size, sibling_ggufs, inspect_model
+
 from llama_launcher.core.spec import Mount
+from llama_launcher.services.model_info import (
+    file_size,
+    inspect_model,
+    read_gguf_meta,
+    sibling_ggufs,
+)
 
 
 def _write_gguf(path):
     def kv_str(k, v):
         kb, vb = k.encode(), v.encode()
-        return struct.pack("<Q", len(kb)) + kb + struct.pack("<I", 8) + struct.pack("<Q", len(vb)) + vb
+        return (
+            struct.pack("<Q", len(kb))
+            + kb
+            + struct.pack("<I", 8)
+            + struct.pack("<Q", len(vb))
+            + vb
+        )
+
     def kv_u32(k, v):
         kb = k.encode()
-        return struct.pack("<Q", len(kb)) + kb + struct.pack("<I", 4) + struct.pack("<I", v)
+        return (
+            struct.pack("<Q", len(kb))
+            + kb
+            + struct.pack("<I", 4)
+            + struct.pack("<I", v)
+        )
+
     kvs = [kv_str("general.architecture", "llama"), kv_u32("llama.block_count", 32)]
-    blob = b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0) + struct.pack("<Q", len(kvs)) + b"".join(kvs)
+    blob = (
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", 0)
+        + struct.pack("<Q", len(kvs))
+        + b"".join(kvs)
+    )
     Path(path).write_bytes(blob)
 
 
@@ -41,18 +66,20 @@ def test_file_size(tmp_path):
 
 
 def test_sibling_ggufs_dir_and_parent(tmp_path):
-    sub = tmp_path / "mtp"; sub.mkdir()
-    model = sub / "model.gguf"; model.write_bytes(b"x")
-    (sub / "other.gguf").write_bytes(b"x")          # same dir
+    sub = tmp_path / "mtp"
+    sub.mkdir()
+    model = sub / "model.gguf"
+    model.write_bytes(b"x")
+    (sub / "other.gguf").write_bytes(b"x")  # same dir
     (tmp_path / "mmproj-F16.gguf").write_bytes(b"x")  # parent dir
     names = sibling_ggufs(model)
     assert "other.gguf" in names
     assert "mmproj-F16.gguf" in names
-    assert "model.gguf" not in names                 # excludes the model itself
+    assert "model.gguf" not in names  # excludes the model itself
 
 
 def test_inspect_model_resolves_host(tmp_path):
-    _write_gguf(tmp_path / "m.gguf")                 # arch=llama in helper
+    _write_gguf(tmp_path / "m.gguf")  # arch=llama in helper
     mounts = [Mount(host=str(tmp_path), container="/models")]
     meta, size, caps = inspect_model("/models/m.gguf", mounts)
     assert meta is not None and meta.arch == "llama"
@@ -61,5 +88,7 @@ def test_inspect_model_resolves_host(tmp_path):
 
 
 def test_inspect_model_not_under_mount(tmp_path):
-    meta, size, caps = inspect_model("/elsewhere/m.gguf", [Mount(host=str(tmp_path), container="/models")])
+    meta, size, caps = inspect_model(
+        "/elsewhere/m.gguf", [Mount(host=str(tmp_path), container="/models")]
+    )
     assert (meta, size, caps) == (None, None, None)

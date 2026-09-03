@@ -12,15 +12,26 @@ import shlex
 from dataclasses import dataclass, field
 
 from .settings_catalog import (
-    CATALOG, ROUTER_ONLY_KEYS, SKIP, engine_value,
+    CATALOG,
+    ROUTER_ONLY_KEYS,
+    SKIP,
+    engine_value,
 )
-from .spec import Profile, RouterMember, member_model_id
+from .spec import Profile, member_model_id
 
 # Keys the router owns. llama.cpp strips or overwrites these when it launches a
 # child instance, so emitting them is at best noise and at worst confusing.
-EXCLUDED_PRESET_KEYS: frozenset = frozenset({
-    "port", "host", "api-key", "alias",
-}) | ROUTER_ONLY_KEYS
+EXCLUDED_PRESET_KEYS: frozenset = (
+    frozenset(
+        {
+            "port",
+            "host",
+            "api-key",
+            "alias",
+        }
+    )
+    | ROUTER_ONLY_KEYS
+)
 
 # A flag starts with one or two dashes followed by a LETTER. "-1" and "-1.5" are
 # values, not flags; llama.cpp uses negative sentinels all over its interface
@@ -92,11 +103,17 @@ def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
     # Parity with command_builder: suppress the legacy pair only when load-mode
     # will actually emit (a value at its default is skipped as an enum sentinel).
     _lm_default = CATALOG["load-mode"].default
-    suppress = ({"no-mmap", "mlock"}
-                if profile.settings.get("load-mode", _lm_default) != _lm_default
-                else set())
+    suppress = (
+        {"no-mmap", "mlock"}
+        if profile.settings.get("load-mode", _lm_default) != _lm_default
+        else set()
+    )
     for key, setting in catalog.items():
-        if key in EXCLUDED_PRESET_KEYS or key in suppress or key not in profile.settings:
+        if (
+            key in EXCLUDED_PRESET_KEYS
+            or key in suppress
+            or key not in profile.settings
+        ):
             continue
         if setting.engine != "any" and setting.engine != engine:
             continue
@@ -111,7 +128,7 @@ def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
                 continue
             out.append((ini_key, "true"))
         else:
-            if not str(value).strip():          # blank -> emit nothing
+            if not str(value).strip():  # blank -> emit nothing
                 continue
             out.append((ini_key, str(value)))
     return out
@@ -130,20 +147,24 @@ def render_preset(pairs: list, catalog: dict = CATALOG) -> PresetResult:
     warnings: list[str] = []
 
     for member, profile in pairs:
-        def emit(key: str, value) -> bool:
+
+        def emit(key: str, value, profile=profile) -> bool:
             """Append `key = value`, dropping (with a warning) any value that
             carries a newline so it cannot inject preset keys/sections."""
             if not _ini_safe(str(value)):
                 warnings.append(
                     f"{profile.name}: {key!r} value contains a newline and was "
-                    f"dropped (it would inject router preset keys).")
+                    f"dropped (it would inject router preset keys)."
+                )
                 return False
             lines.append(f"{key} = {value}")
             return True
 
         model_id = member_model_id(member)
         if not _ini_safe(model_id):
-            warnings.append(f"{profile.name}: model id contains a newline; member skipped.")
+            warnings.append(
+                f"{profile.name}: model id contains a newline; member skipped."
+            )
             continue
         lines.append(f"[{model_id}]")
 
@@ -157,7 +178,7 @@ def render_preset(pairs: list, catalog: dict = CATALOG) -> PresetResult:
         if profile.loras:
             emit("lora", profile.loras[0].path)
             if len(profile.loras) > 1:
-                dropped = ", ".join(l.path for l in profile.loras[1:])
+                dropped = ", ".join(item.path for item in profile.loras[1:])
                 warnings.append(
                     f"{profile.name}: more than one LoRA cannot be expressed in a "
                     f"preset (INI keys are unique); dropped: {dropped}"
@@ -177,14 +198,17 @@ def render_preset(pairs: list, catalog: dict = CATALOG) -> PresetResult:
             if key in emitted:
                 problems.append(
                     f"raw arg {key!r} duplicates a value already set in the form; "
-                    f"the form value is kept")
+                    f"the form value is kept"
+                )
                 continue
             if emit(key, value):
                 emitted.add(key)
         for problem in problems:
             warnings.append(f"{profile.name}: {problem}")
 
-        lines.append(f"load-on-startup = {'true' if member.load_on_startup else 'false'}")
+        lines.append(
+            f"load-on-startup = {'true' if member.load_on_startup else 'false'}"
+        )
         lines.append(f"stop-timeout = {member.stop_timeout}")
         lines.append("")
 

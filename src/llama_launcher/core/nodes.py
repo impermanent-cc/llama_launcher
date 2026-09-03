@@ -1,25 +1,33 @@
 """Registered machines the launcher can drive. Pure module (no I/O)."""
+
 import re
 from dataclasses import dataclass
 
 # host is a name/IPv4 charset OR a bracketed IPv6 literal ([2001:db8::1]).
 _SSH_TARGET_RE = re.compile(
-    r"^(?:[A-Za-z0-9._-]+@)?(?:[A-Za-z0-9._-]+|\[[0-9A-Fa-f:]+\])(?::[0-9]+)?$")
+    r"^(?:[A-Za-z0-9._-]+@)?(?:[A-Za-z0-9._-]+|\[[0-9A-Fa-f:]+\])(?::[0-9]+)?$"
+)
 
 # Options every launcher ssh probe passes so a first contact can't hang the UI
 # on an interactive prompt: fail instead of prompting (BatchMode), bound the
 # connect, and trust-on-first-use a new host key rather than blocking on it.
-SSH_OPTS = ["-o", "BatchMode=yes", "-o", "ConnectTimeout=5",
-            "-o", "StrictHostKeyChecking=accept-new"]
+SSH_OPTS = [
+    "-o",
+    "BatchMode=yes",
+    "-o",
+    "ConnectTimeout=5",
+    "-o",
+    "StrictHostKeyChecking=accept-new",
+]
 
 
 @dataclass(frozen=True)
 class Node:
     name: str
-    kind: str = "local"        # "local" | "remote"
-    connection: str = ""       # podman connection name (remote only)
-    ssh_target: str = ""       # user@host[:port] (remote only)
-    binary: str = "podman"     # "podman" | "docker"
+    kind: str = "local"  # "local" | "remote"
+    connection: str = ""  # podman connection name (remote only)
+    ssh_target: str = ""  # user@host[:port] (remote only)
+    binary: str = "podman"  # "podman" | "docker"
     enabled: bool = True
 
 
@@ -30,7 +38,11 @@ def valid_ssh_target(target: str) -> bool:
     """True if `target` is a safe ssh destination (`user@host[:port]` or `host`).
     Rejects empty, a leading '-', and anything outside the charset, so it can
     never be smuggled to ssh as an option flag (argv-flag injection)."""
-    return bool(target) and not target.startswith("-") and bool(_SSH_TARGET_RE.match(target))
+    return (
+        bool(target)
+        and not target.startswith("-")
+        and bool(_SSH_TARGET_RE.match(target))
+    )
 
 
 def connection_for(node: Node) -> str:

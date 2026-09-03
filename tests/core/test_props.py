@@ -1,6 +1,5 @@
 from llama_launcher.core.props import PropsInfo, parse_props
 
-
 _FULL = {
     "build_info": "b9755-0ef6f06d5",
     "total_slots": 2,
@@ -31,13 +30,14 @@ def test_top_level_n_ctx_wins():
 
 def test_empty_props_is_all_none():
     info = parse_props({})
-    assert info == PropsInfo(build=None, n_ctx=None, model_alias=None,
-                             total_slots=None, modalities={})
+    assert info == PropsInfo(
+        build=None, n_ctx=None, model_alias=None, total_slots=None, modalities={}
+    )
 
 
 def test_non_dict_is_safe():
-    assert parse_props([]).n_ctx is None          # type: ignore[arg-type]
-    assert parse_props(None).modalities == {}     # type: ignore[arg-type]
+    assert parse_props([]).n_ctx is None  # type: ignore[arg-type]
+    assert parse_props(None).modalities == {}  # type: ignore[arg-type]
 
 
 def test_modalities_keeps_only_booleans():

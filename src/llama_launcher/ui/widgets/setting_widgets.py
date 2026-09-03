@@ -1,16 +1,24 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QGridLayout, QCheckBox, QLabel, QLineEdit, QToolButton
+    QCheckBox,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QToolButton,
+    QWidget,
 )
 
 from llama_launcher.core.settings_catalog import Setting
 from llama_launcher.ui.widgets.no_wheel import (
-    NoWheelComboBox, NoWheelSpinBox, NoWheelDoubleSpinBox,
+    NoWheelComboBox,
+    NoWheelDoubleSpinBox,
+    NoWheelSpinBox,
 )
 
 
 class SuggestionDot(QToolButton):
-    """Inline per-setting indicator: filled ● = suggested, hollow ○ = N/A.
+    """Inline per-setting indicator: filled \u25cf = suggested, hollow \u25cb = N/A.
 
     When a concrete value suggestion exists, the dot is clickable and applies
     it (on_apply); otherwise it is a passive indicator. Hover explains why.
@@ -27,11 +35,13 @@ class SuggestionDot(QToolButton):
         self._on_apply = on_apply
         self.setToolTip(reason)
         if state == "suggested":
-            self.setText("●")
-            self.setStyleSheet("QToolButton { color: palette(highlight); border: none; }")
+            self.setText("\u25cf")
+            self.setStyleSheet(
+                "QToolButton { color: palette(highlight); border: none; }"
+            )
             self.setVisible(True)
         elif state == "muted":
-            self.setText("○")
+            self.setText("\u25cb")
             self.setStyleSheet("QToolButton { color: palette(mid); border: none; }")
             self.setVisible(True)
         else:  # none
@@ -59,7 +69,7 @@ class SettingWidget(QWidget):
 
         tooltip = setting.tooltip
         if setting.danger:
-            tooltip = "⚠ DANGER: " + tooltip
+            tooltip = "\u26a0 DANGER: " + tooltip
             self.setObjectName("dangerSetting")
 
         if t == "bool":
@@ -84,16 +94,20 @@ class SettingWidget(QWidget):
             self._editor.currentTextChanged.connect(lambda: self.changed.emit())
         elif t == "int":
             self._editor = NoWheelSpinBox()
-            self._editor.setRange(int(setting.minimum if setting.minimum is not None else -2**31),
-                                  int(setting.maximum if setting.maximum is not None else 2**31 - 1))
+            self._editor.setRange(
+                int(setting.minimum if setting.minimum is not None else -(2**31)),
+                int(setting.maximum if setting.maximum is not None else 2**31 - 1),
+            )
             self._editor.setSingleStep(int(setting.step or 1))
             self._editor.setValue(int(setting.default))
             self._editor.valueChanged.connect(lambda: self.changed.emit())
         elif t == "float":
             self._editor = NoWheelDoubleSpinBox()
             self._editor.setDecimals(3)
-            self._editor.setRange(float(setting.minimum if setting.minimum is not None else -1e9),
-                                  float(setting.maximum if setting.maximum is not None else 1e9))
+            self._editor.setRange(
+                float(setting.minimum if setting.minimum is not None else -1e9),
+                float(setting.maximum if setting.maximum is not None else 1e9),
+            )
             self._editor.setSingleStep(float(setting.step or 0.01))
             self._editor.setValue(float(setting.default))
             self._editor.valueChanged.connect(lambda: self.changed.emit())
@@ -111,13 +125,13 @@ class SettingWidget(QWidget):
             grid.setVerticalSpacing(2)
             help_map = dict(setting.option_help)
             self._all_check = QCheckBox("all")
-            self._all_check.setToolTip(tooltip)   # overall (danger) note on "all"
+            self._all_check.setToolTip(tooltip)  # overall (danger) note on "all"
             self._all_check.toggled.connect(self._on_all_toggled)
             self._all_check.toggled.connect(lambda: self.changed.emit())
             boxes = [self._all_check]
             for opt in setting.enum:
                 cb = QCheckBox(opt)
-                cb.setToolTip(help_map.get(opt, tooltip))   # per-option description
+                cb.setToolTip(help_map.get(opt, tooltip))  # per-option description
                 cb.toggled.connect(lambda: self.changed.emit())
                 self._checks[opt] = cb
                 boxes.append(cb)
@@ -140,21 +154,28 @@ class SettingWidget(QWidget):
                 self._editor.setEchoMode(QLineEdit.Password)
                 self._editor.setToolTip((self._editor.toolTip() + "  ").strip())
                 reveal = QToolButton()
-                reveal.setText("👁")
+                reveal.setText("\U0001f441")
                 reveal.setCheckable(True)
                 reveal.setToolTip("Show / hide")
                 reveal.toggled.connect(
                     lambda on: self._editor.setEchoMode(
-                        QLineEdit.Normal if on else QLineEdit.Password))
+                        QLineEdit.Normal if on else QLineEdit.Password
+                    )
+                )
                 self._reveal_btn = reveal
             self._editor.textChanged.connect(lambda: self.changed.emit())
 
         # Cap editor widths so dropdowns/inputs don't stretch the whole panel,
         # and left-align them with a trailing stretch.
-        _max_width = {"enum": 150, "int_or_token": 150, "int": 120,
-                      "float": 120, "string": 240}.get(t)
+        _max_width = {
+            "enum": 150,
+            "int_or_token": 150,
+            "int": 120,
+            "float": 120,
+            "string": 240,
+        }.get(t)
         if t == "int" and setting.suggestions:
-            _max_width = 150   # editable preset combo needs room for 6-digit values
+            _max_width = 150  # editable preset combo needs room for 6-digit values
         if _max_width:
             self._editor.setMaximumWidth(_max_width)
         layout.addWidget(self._editor)

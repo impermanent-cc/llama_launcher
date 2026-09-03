@@ -16,7 +16,7 @@ builds produce.
 ## Requirements
 
 - **Python ≥ 3.12.** Developed and CI-tested on 3.12 and 3.13; the code itself only
-  needs 3.10+, but 3.10/3.11 are untested. On Ubuntu you may also need
+  needs 3.11+ (`enum.StrEnum`, `datetime.UTC`), but 3.11 is untested. On Ubuntu you may also need
   `sudo apt install python3-venv` before creating a virtualenv.
 - `podman` (or `docker`) on `PATH`. See [podman vs docker](#podman-vs-docker) below.
   Local single-server launches work with either; remote multi-node currently requires podman.

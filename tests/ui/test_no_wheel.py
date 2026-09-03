@@ -1,16 +1,24 @@
-from PySide6.QtCore import Qt, QPoint, QPointF
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtGui import QWheelEvent
 
 from llama_launcher.ui.widgets.no_wheel import (
-    NoWheelComboBox, NoWheelSpinBox, NoWheelDoubleSpinBox,
+    NoWheelComboBox,
+    NoWheelDoubleSpinBox,
+    NoWheelSpinBox,
 )
 
 
 def _wheel_event():
     pos = QPointF(5.0, 5.0)
     return QWheelEvent(
-        pos, pos, QPoint(0, 0), QPoint(0, -120), Qt.NoButton,
-        Qt.NoModifier, Qt.ScrollUpdate, False,
+        pos,
+        pos,
+        QPoint(0, 0),
+        QPoint(0, -120),
+        Qt.NoButton,
+        Qt.NoModifier,
+        Qt.ScrollUpdate,
+        False,
     )
 
 

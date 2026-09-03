@@ -22,7 +22,7 @@ def parse_sse_event(block: str) -> RouterEvent | None:
     keep-alive never looks like a state change.
     """
     payload_lines = [
-        line[len("data:"):].strip()
+        line[len("data:") :].strip()
         for line in block.splitlines()
         if line.startswith("data:")
     ]

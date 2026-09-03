@@ -1,17 +1,25 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QButtonGroup, QCheckBox, QDialog, QHBoxLayout, QLabel, QLineEdit,
-    QPushButton, QRadioButton, QVBoxLayout, QWidget,
+    QButtonGroup,
+    QCheckBox,
+    QDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QPushButton,
+    QRadioButton,
+    QVBoxLayout,
+    QWidget,
 )
 
-_MASK = "••••••••••••"
+_MASK = "\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022"
 
 
 class ApiKeyBox(QWidget):
     """Router API key: masked value, reveal/copy/edit, and global/own scope."""
 
-    key_scope_changed = Signal(str)     # "global" | "own"
-    key_saved = Signal(str, str)        # scope, value
+    key_scope_changed = Signal(str)  # "global" | "own"
+    key_saved = Signal(str, str)  # scope, value
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -31,7 +39,7 @@ class ApiKeyBox(QWidget):
         self.copy_btn = QPushButton("Copy")
         self.copy_btn.clicked.connect(self._copy_key)
         key_row.addWidget(self.copy_btn)
-        self.edit_btn = QPushButton("Edit…")
+        self.edit_btn = QPushButton("Edit\u2026")
         self.edit_btn.clicked.connect(self._open_edit)
         key_row.addWidget(self.edit_btn)
         root.addLayout(key_row)
@@ -57,10 +65,13 @@ class ApiKeyBox(QWidget):
 
     def reveal_key(self, revealed: bool) -> None:
         self._revealed = bool(revealed)
-        self.key_label.setText(self._api_key if self._revealed and self._api_key else _MASK)
+        self.key_label.setText(
+            self._api_key if self._revealed and self._api_key else _MASK
+        )
 
     def _copy_key(self) -> None:
         from PySide6.QtWidgets import QApplication
+
         if self._api_key:
             QApplication.clipboard().setText(self._api_key)
 
@@ -82,6 +93,7 @@ class ApiKeyBox(QWidget):
     def _save_key(self, value: str) -> bool:
         """Normalize + emit key_saved for the current scope. False if invalid."""
         from llama_launcher.services.api_key import normalize_key
+
         try:
             key = normalize_key(value)
         except ValueError:
@@ -128,16 +140,20 @@ class _ApiKeyEditDialog(QDialog):
 
     def _generate(self) -> None:
         from llama_launcher.services.api_key import generate_key
+
         self.field.setText(generate_key())
 
     def _check_warn(self, text: str) -> None:
         t = text.strip()
         self.warn.setText(
-            "" if not t or t.startswith("sk-")
-            else "Clients expecting OpenAI-style keys may reject a non 'sk-' key.")
+            ""
+            if not t or t.startswith("sk-")
+            else "Clients expecting OpenAI-style keys may reject a non 'sk-' key."
+        )
 
     def _save(self) -> None:
         from llama_launcher.services.api_key import normalize_key
+
         try:
             self._value = normalize_key(self.field.text())
         except ValueError:

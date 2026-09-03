@@ -3,30 +3,43 @@ remote), gate on readiness, then launch the local head with the resolved
 `--rpc` endpoints. Mirrors services.native's synchronous, dependency-injected
 style so the whole orchestrator is unit-testable without real subprocess/
 socket I/O."""
+
 import socket
 import subprocess
 import time
 from dataclasses import dataclass
 
 from llama_launcher.core.command_builder import (
-    build_command, build_rpc_endpoints, build_worker_command,
+    build_command,
+    build_rpc_endpoints,
+    build_worker_command,
 )
 from llama_launcher.core.nodes import (
-    LOCAL_NODE, Node, connection_for, valid_ssh_target,
+    LOCAL_NODE,
+    connection_for,
+    valid_ssh_target,
 )
 from llama_launcher.core.spec import slugify
 from llama_launcher.services import runtime as rt_svc
 from llama_launcher.store.nodes import get_node
 
-_TUNNELS: dict = {}     # pool name -> list of Popen handles
+_TUNNELS: dict = {}  # pool name -> list of Popen handles
 
 
 def tunnel_argv(ssh_target, lport, wport) -> list:
     if not valid_ssh_target(ssh_target):
         raise ValueError(f"unsafe ssh target: {ssh_target!r}")
-    return ["ssh", "-N", "-o", "ExitOnForwardFailure=yes",
-            "-o", "ServerAliveInterval=15",
-            "-L", f"127.0.0.1:{lport}:127.0.0.1:{wport}", ssh_target]
+    return [
+        "ssh",
+        "-N",
+        "-o",
+        "ExitOnForwardFailure=yes",
+        "-o",
+        "ServerAliveInterval=15",
+        "-L",
+        f"127.0.0.1:{lport}:127.0.0.1:{wport}",
+        ssh_target,
+    ]
 
 
 def alloc_local_port() -> int:
@@ -64,8 +77,9 @@ def _default_connect(addr):
     return socket.create_connection(addr, timeout=1.0)
 
 
-def launch_pool(profile, base_dir, *, run=None, popen=None, connect=None,
-                alloc_port=None) -> PoolResult:
+def launch_pool(
+    profile, base_dir, *, run=None, popen=None, connect=None, alloc_port=None
+) -> PoolResult:
     run = run or (lambda argv: rt_svc._run(argv).returncode)
     popen = popen or (lambda argv: subprocess.Popen(argv))
     connect = connect or _default_connect
@@ -81,7 +95,7 @@ def launch_pool(profile, base_dir, *, run=None, popen=None, connect=None,
 
     workers = profile.runtime.rpc_workers
     tunnels = []
-    resolved = {}                       # id(worker) -> head-facing port
+    resolved = {}  # id(worker) -> head-facing port
     for i, w in enumerate(workers):
         node = get_node(base_dir, w.node) or LOCAL_NODE
         conn = connection_for(node)
@@ -93,7 +107,7 @@ def launch_pool(profile, base_dir, *, run=None, popen=None, connect=None,
             try:
                 tunnel = popen(tunnel_argv(node.ssh_target, lport, w.port))
             except ValueError as exc:
-                _teardown(profile, base_dir, workers[:i + 1], tunnels, run)
+                _teardown(profile, base_dir, workers[: i + 1], tunnels, run)
                 return PoolResult(False, f"worker {i} on '{w.node}': {exc}")
             tunnels.append(tunnel)
             head_port = lport
@@ -101,7 +115,7 @@ def launch_pool(profile, base_dir, *, run=None, popen=None, connect=None,
             head_port = w.port
         resolved[id(w)] = head_port
         if not wait_ready(head_port, connect):
-            _teardown(profile, base_dir, workers[:i + 1], tunnels, run)
+            _teardown(profile, base_dir, workers[: i + 1], tunnels, run)
             return PoolResult(False, f"worker {i} on '{w.node}' never became ready")
     _TUNNELS[profile.name] = tunnels
     endpoints = build_rpc_endpoints(workers, lambda w: resolved[id(w)])
@@ -117,9 +131,14 @@ def _teardown(profile, base_dir, workers, tunnels, run):
     to = profile.runtime.stop_timeout
     for i, w in enumerate(workers):
         node = get_node(base_dir, w.node) or LOCAL_NODE
-        run(rt_svc.stop_argv(f"llama-{slugify(profile.name)}-rpc{i}",
-                             profile.runtime.binary, timeout=to,
-                             connection=connection_for(node)))
+        run(
+            rt_svc.stop_argv(
+                f"llama-{slugify(profile.name)}-rpc{i}",
+                profile.runtime.binary,
+                timeout=to,
+                connection=connection_for(node),
+            )
+        )
     for t in tunnels:
         try:
             t.terminate()
@@ -130,13 +149,24 @@ def _teardown(profile, base_dir, workers, tunnels, run):
 def stop_pool(profile, base_dir, *, run=None) -> None:
     run = run or (lambda argv: rt_svc._run(argv).returncode)
     to = profile.runtime.stop_timeout
-    run(rt_svc.stop_argv(f"llama-{slugify(profile.name)}", profile.runtime.binary,
-                         timeout=to, connection=""))
+    run(
+        rt_svc.stop_argv(
+            f"llama-{slugify(profile.name)}",
+            profile.runtime.binary,
+            timeout=to,
+            connection="",
+        )
+    )
     for i, w in enumerate(profile.runtime.rpc_workers):
         node = get_node(base_dir, w.node) or LOCAL_NODE
-        run(rt_svc.stop_argv(f"llama-{slugify(profile.name)}-rpc{i}",
-                             profile.runtime.binary, timeout=to,
-                             connection=connection_for(node)))
+        run(
+            rt_svc.stop_argv(
+                f"llama-{slugify(profile.name)}-rpc{i}",
+                profile.runtime.binary,
+                timeout=to,
+                connection=connection_for(node),
+            )
+        )
     for t in _TUNNELS.pop(profile.name, []):
         try:
             t.terminate()

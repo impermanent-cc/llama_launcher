@@ -24,4 +24,6 @@ def test_window_can_shrink_below_the_old_floor(win, qtbot):
     win.show()
     win.resize(1000, 700)
     qtbot.wait(10)
-    assert win.height() <= 760, "window should hold a short height, not spring back to ~959"
+    assert win.height() <= 760, (
+        "window should hold a short height, not spring back to ~959"
+    )

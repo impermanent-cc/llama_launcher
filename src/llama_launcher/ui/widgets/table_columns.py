@@ -5,6 +5,7 @@ ResizeToContents both lock a column against dragging. Only fixed-size
 button/checkbox columns may keep ResizeToContents. Centralized so the next
 policy change (or the next new table) touches one place.
 """
+
 from PySide6.QtWidgets import QHeaderView
 
 

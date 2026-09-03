@@ -1,5 +1,5 @@
-from llama_launcher.core.spec import Profile, Mount, Runtime
 from llama_launcher.core.command_builder import build_command
+from llama_launcher.core.spec import Mount, Profile, Runtime
 
 
 def _base_profile():
@@ -7,8 +7,14 @@ def _base_profile():
         name="My Model",
         image="ghcr.io/ggml-org/llama.cpp:server-cuda12-b9628",
         runtime=Runtime(binary="podman", gpu_mode="cdi"),
-        mounts=[Mount(host="/mnt/storage/AI/Models", container="/models",
-                      role="model", mode="ro")],
+        mounts=[
+            Mount(
+                host="/mnt/storage/AI/Models",
+                container="/models",
+                role="model",
+                mode="ro",
+            )
+        ],
         model="/models/m.gguf",
         settings={"port": 8080},
     )
@@ -50,8 +56,16 @@ def test_gpu_none_mode():
 
 def test_workspace_workdir_and_rw_and_selinux_opt():
     p = _base_profile()
-    p.mounts.append(Mount(host="/home/me/ws", container="/workspace",
-                          role="workspace", mode="rw", selinux="z", workdir=True))
+    p.mounts.append(
+        Mount(
+            host="/home/me/ws",
+            container="/workspace",
+            role="workspace",
+            mode="rw",
+            selinux="z",
+            workdir=True,
+        )
+    )
     argv = build_command(p)
     assert "/home/me/ws:/workspace:rw,z" in argv
     assert "-w" in argv and "/workspace" in argv
@@ -81,13 +95,14 @@ def test_server_detach_true_uses_detached_run():
 
 
 def test_server_default_uses_rm_run():
-    argv = build_command(_base_profile())          # detach defaults False
+    argv = build_command(_base_profile())  # detach defaults False
     assert "--rm" in argv
     assert "-d" not in argv
 
 
 def test_router_run_mode_ignores_detach():
     from llama_launcher.core.spec import RouterMember
+
     p = _base_profile()
     p.mode = "router"
     p.members = [RouterMember(profile="m1")]

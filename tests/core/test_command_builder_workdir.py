@@ -1,17 +1,24 @@
-from llama_launcher.core.spec import Profile, Mount, Runtime
 from llama_launcher.core.command_builder import build_command
+from llama_launcher.core.spec import Mount, Profile, Runtime
 
 
 def _profile(workdir):
     return Profile(
-        name="p", image="img:tag",
+        name="p",
+        image="img:tag",
         runtime=Runtime(binary="podman", gpu_mode="cdi"),
         mounts=[
             Mount(host="/h/models", container="/models", role="model", mode="ro"),
-            Mount(host="/h/ws", container="/workspace", role="workspace",
-                  mode="rw", workdir=workdir),
+            Mount(
+                host="/h/ws",
+                container="/workspace",
+                role="workspace",
+                mode="rw",
+                workdir=workdir,
+            ),
         ],
-        model="/models/m.gguf", settings={"port": 8080},
+        model="/models/m.gguf",
+        settings={"port": 8080},
     )
 
 

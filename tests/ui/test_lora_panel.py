@@ -1,12 +1,16 @@
+from llama_launcher.core.lora_state import LoraAdapter
 from llama_launcher.core.spec import LoraRef
+from llama_launcher.services import lora_api
 from llama_launcher.ui.panels.lora_panel import LoraPanel
 
 
 def test_lora_panel_roundtrip(qtbot):
     panel = LoraPanel()
     qtbot.addWidget(panel)
-    loras = [LoraRef(path="/loras/a.gguf", scale=1.0),
-             LoraRef(path="/loras/b.gguf", scale=0.5)]
+    loras = [
+        LoraRef(path="/loras/a.gguf", scale=1.0),
+        LoraRef(path="/loras/b.gguf", scale=0.5),
+    ]
     panel.set_loras(loras)
     out = panel.loras()
     assert len(out) == 2
@@ -17,8 +21,9 @@ def test_lora_panel_roundtrip(qtbot):
 def test_lora_panel_skips_empty_path_rows(qtbot):
     panel = LoraPanel()
     qtbot.addWidget(panel)
-    panel.set_loras([LoraRef(path="", scale=0.7),
-                     LoraRef(path="/loras/c.gguf", scale=0.3)])
+    panel.set_loras(
+        [LoraRef(path="", scale=0.7), LoraRef(path="/loras/c.gguf", scale=0.3)]
+    )
     out = panel.loras()
     assert len(out) == 1
     assert out[0].path == "/loras/c.gguf" and abs(out[0].scale - 0.3) < 1e-6
@@ -57,9 +62,6 @@ def test_scale_change_emits_zero_arg_changed(qtbot):
 
 # -- live scale control ------------------------------------------------------
 
-from llama_launcher.core.lora_state import LoraAdapter
-from llama_launcher.services import lora_api
-
 
 def _panel_with_target(qtbot, target=("127.0.0.1", 8080, None)):
     panel = LoraPanel()
@@ -91,12 +93,17 @@ def test_a_raising_resolver_does_not_break_the_form(qtbot):
 
 def test_sync_loads_server_scales_into_matching_rows(qtbot, monkeypatch):
     panel = _panel_with_target(qtbot)
-    panel.set_loras([LoraRef(path="/l/a.gguf", scale=1.0),
-                     LoraRef(path="/l/b.gguf", scale=1.0)])
-    monkeypatch.setattr(lora_api, "list_adapters", lambda *a, **kw: [
-        LoraAdapter(id=0, path="/l/a.gguf", scale=0.25),
-        LoraAdapter(id=1, path="/l/b.gguf", scale=0.0),
-    ])
+    panel.set_loras(
+        [LoraRef(path="/l/a.gguf", scale=1.0), LoraRef(path="/l/b.gguf", scale=1.0)]
+    )
+    monkeypatch.setattr(
+        lora_api,
+        "list_adapters",
+        lambda *a, **kw: [
+            LoraAdapter(id=0, path="/l/a.gguf", scale=0.25),
+            LoraAdapter(id=1, path="/l/b.gguf", scale=0.0),
+        ],
+    )
     panel.sync_from_server()
     qtbot.waitUntil(lambda: "matched" in panel.live_status.text(), timeout=3000)
     assert abs(panel.loras()[0].scale - 0.25) < 1e-6
@@ -118,16 +125,22 @@ def test_sync_explains_a_server_launched_without_adapters(qtbot, monkeypatch):
     panel = _panel_with_target(qtbot)
     monkeypatch.setattr(lora_api, "list_adapters", lambda *a, **kw: [])
     panel.sync_from_server()
-    qtbot.waitUntil(lambda: "no LoRA adapters" in panel.live_status.text(), timeout=3000)
+    qtbot.waitUntil(
+        lambda: "no LoRA adapters" in panel.live_status.text(), timeout=3000
+    )
 
 
 def test_apply_sends_every_loaded_adapter_keyed_by_live_id(qtbot, monkeypatch):
     panel = _panel_with_target(qtbot)
     panel.set_loras([LoraRef(path="/l/b.gguf", scale=0.75)])
-    monkeypatch.setattr(lora_api, "list_adapters", lambda *a, **kw: [
-        LoraAdapter(id=4, path="/l/a.gguf", scale=0.9),
-        LoraAdapter(id=7, path="/l/b.gguf", scale=0.0),
-    ])
+    monkeypatch.setattr(
+        lora_api,
+        "list_adapters",
+        lambda *a, **kw: [
+            LoraAdapter(id=4, path="/l/a.gguf", scale=0.9),
+            LoraAdapter(id=7, path="/l/b.gguf", scale=0.0),
+        ],
+    )
     seen = {}
 
     def fake_set(host, port, key, scales, timeout=None):
@@ -147,8 +160,11 @@ def test_apply_sends_every_loaded_adapter_keyed_by_live_id(qtbot, monkeypatch):
 def test_apply_reports_a_rejected_change(qtbot, monkeypatch):
     panel = _panel_with_target(qtbot)
     panel.set_loras([LoraRef(path="/l/a.gguf", scale=0.5)])
-    monkeypatch.setattr(lora_api, "list_adapters", lambda *a, **kw: [
-        LoraAdapter(id=0, path="/l/a.gguf", scale=0.0)])
+    monkeypatch.setattr(
+        lora_api,
+        "list_adapters",
+        lambda *a, **kw: [LoraAdapter(id=0, path="/l/a.gguf", scale=0.0)],
+    )
     monkeypatch.setattr(lora_api, "set_scales", lambda *a, **kw: False)
     panel.apply_to_server()
     qtbot.waitUntil(lambda: "rejected" in panel.live_status.text(), timeout=3000)
@@ -157,8 +173,11 @@ def test_apply_reports_a_rejected_change(qtbot, monkeypatch):
 def test_apply_with_no_rows_does_not_call_the_server(qtbot, monkeypatch):
     panel = _panel_with_target(qtbot)
     called = {"n": 0}
-    monkeypatch.setattr(lora_api, "list_adapters",
-                        lambda *a, **kw: called.__setitem__("n", called["n"] + 1))
+    monkeypatch.setattr(
+        lora_api,
+        "list_adapters",
+        lambda *a, **kw: called.__setitem__("n", called["n"] + 1),
+    )
     panel.apply_to_server()
     assert called["n"] == 0
     assert "no adapter rows" in panel.live_status.text()

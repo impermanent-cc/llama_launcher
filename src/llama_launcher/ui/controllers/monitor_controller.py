@@ -3,17 +3,28 @@ import time
 
 from PySide6.QtCore import QRunnable, QThread, QThreadPool, QTimer, Signal
 
-from llama_launcher.core.spec import (DEFAULT_PORT, DEFAULT_STOP_TIMEOUT, Profile,
-                                       Runtime, profile_port)
 from llama_launcher.core.instances import build_instances, worker_card_title
 from llama_launcher.core.mtp_stats import spec_counters, spec_delta
 from llama_launcher.core.nodes import connection_for, host_of
+from llama_launcher.core.spec import (
+    DEFAULT_PORT,
+    DEFAULT_STOP_TIMEOUT,
+    Profile,
+    Runtime,
+    profile_port,
+)
 from llama_launcher.core.validation import dial_host
-from llama_launcher.store.nodes import load_nodes, get_node
-from llama_launcher.store.profiles import list_profiles, load_config, save_config
-from llama_launcher.services import runtime, health, metrics, gpu, native, rpc
 from llama_launcher.services import api_key as api_key_store
-from llama_launcher.services import router_api
+from llama_launcher.services import (
+    gpu,
+    health,
+    metrics,
+    native,
+    router_api,
+    runtime,
+)
+from llama_launcher.store.nodes import get_node, load_nodes
+from llama_launcher.store.profiles import list_profiles, load_config, save_config
 
 
 def _sigkill_if_alive(pid: int) -> None:
@@ -23,10 +34,12 @@ def _sigkill_if_alive(pid: int) -> None:
     running native process is never pruned, so if the entry is gone the process
     is already dead and no kill is needed)."""
     import signal as _signal
+
     from llama_launcher.ui.main_window import base_dir
 
-    entry = next((e for e in native.read_entries(base_dir())
-                  if e.get("pid") == pid), None)
+    entry = next(
+        (e for e in native.read_entries(base_dir()) if e.get("pid") == pid), None
+    )
     if entry is not None and native.is_alive(pid, entry.get("binary", "")):
         native.stop_native(pid, _signal.SIGKILL)
 
@@ -36,6 +49,7 @@ def _schedule_sigkill(pid: int, delay: int) -> None:
     analog of `podman stop -t`. SIGTERM was already sent; give it the grace
     period, then force (guarded against a recycled pid, see _sigkill_if_alive)."""
     from PySide6.QtCore import QTimer
+
     QTimer.singleShot(max(0, delay) * 1000, lambda: _sigkill_if_alive(pid))
 
 
@@ -45,7 +59,7 @@ def _fmt_uptime(started_at: str | None) -> str:
         return ""
     try:
         dt = datetime.datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-        now = datetime.datetime.now(tz=datetime.timezone.utc)
+        now = datetime.datetime.now(tz=datetime.UTC)
         elapsed = int((now - dt).total_seconds())
         if elapsed < 60:
             return f"{elapsed}s"
@@ -61,6 +75,7 @@ def _fmt_uptime(started_at: str | None) -> str:
 def focused_gpu_ssh(node_name: str, base_dir) -> str:
     """SSH target for the node a monitored instance runs on ('' for local/missing)."""
     from llama_launcher.store.nodes import gpu_ssh_target
+
     return gpu_ssh_target(base_dir, node_name)
 
 
@@ -77,15 +92,25 @@ def build_monitor_data(target: dict) -> dict | None:
     if not target.get("running"):
         return None
     from llama_launcher.services.metrics import (
-        kv_ratio, decode_rate, counter_rate, prompt_progress,
+        counter_rate,
+        decode_rate,
+        kv_ratio,
+        prompt_progress,
     )
+
     port, host, key = target["port"], target["host"], target["key"]
     model_scope, poll = target["model_scope"], target["poll"]
     name, binary = target["name"], target["binary"]
-    m = (metrics.fetch_metrics(port, model=model_scope, api_key=key, host=host)
-         if target["metrics_on"] and poll else {})
-    slots = (metrics.fetch_slots(port, model=model_scope, api_key=key, host=host)
-             if poll else [])
+    m = (
+        metrics.fetch_metrics(port, model=model_scope, api_key=key, host=host)
+        if target["metrics_on"] and poll
+        else {}
+    )
+    slots = (
+        metrics.fetch_slots(port, model=model_scope, api_key=key, host=host)
+        if poll
+        else []
+    )
     # Live generation tok/s from the n_decode_total counter delta -- the
     # predicted_tokens_seconds gauge only updates at request completion, so it
     # reads 0 during an in-flight generation. decode_now is handed back so the
@@ -101,7 +126,7 @@ def build_monitor_data(target: dict) -> dict | None:
     prompt_tok_s_live = counter_rate(target.get("prompt_prev"), prompt_now)
     if target.get("kind") == "native" and target.get("pid"):
         st = native.proc_stats(target["pid"]) or {}
-        uptime = ""     # native uptime is not tracked
+        uptime = ""  # native uptime is not tracked
     else:
         mon_conn = target.get("mon_conn", "")
         st = runtime.stats(name, binary, connection=mon_conn) or {}
@@ -134,8 +159,9 @@ def _instance_api_key_from(inst, by_name: dict, router_base_dir: str) -> str | N
     return (stored.settings.get("api-key") or None) if stored else None
 
 
-def _instance_summary_data(inst, by_name: dict, router_base_dir: str,
-                           decode_prev: tuple | None = None) -> dict:
+def _instance_summary_data(
+    inst, by_name: dict, router_base_dir: str, decode_prev: tuple | None = None
+) -> dict:
     """Per-row health + headline stat + structured tok_s/kv_pct for one instance
     (pure; blocking I/O). An embedding/rerank server has no tok/s (headline "ready");
     a generation server reports live n_decode_total-delta tok/s (falling back to
@@ -159,8 +185,13 @@ def _instance_summary_data(inst, by_name: dict, router_base_dir: str,
     tok = live if live is not None else m.get("llamacpp:predicted_tokens_seconds")
     kv = metrics.kv_ratio(m, slots)
     stat = f"{tok:.0f} tok/s" if tok else ("ready" if hstatus == "ready" else "")
-    return {"health": hstatus, "stat": stat, "tok_s": tok, "kv_pct": kv,
-            "decode_now": decode_now}
+    return {
+        "health": hstatus,
+        "stat": stat,
+        "tok_s": tok,
+        "kv_pct": kv,
+        "decode_now": decode_now,
+    }
 
 
 def build_instances_data(target: dict) -> dict:
@@ -182,10 +213,17 @@ def build_instances_data(target: dict) -> dict:
     profiles = list_profiles(target["base_dir"])
     by_name = {p.name: p for p in profiles}
     nodes = target.get("nodes")
-    legacy_target = nodes is None      # single-node target with no "nodes" key
+    legacy_target = nodes is None  # single-node target with no "nodes" key
     if legacy_target:
-        nodes = [{"name": "local", "connection": "", "host": "",
-                  "binary": target["binary"], "enabled": True}]
+        nodes = [
+            {
+                "name": "local",
+                "connection": "",
+                "host": "",
+                "binary": target["binary"],
+                "enabled": True,
+            }
+        ]
     instances = []
     for nd in nodes:
         if not nd.get("enabled", True):
@@ -198,14 +236,25 @@ def build_instances_data(target: dict) -> dict:
                 # A local-only target calls without the `connection` kwarg.
                 container_rows = runtime.list_launcher_containers(binary)
             else:
-                container_rows = runtime.list_launcher_containers(binary, connection=conn)
+                container_rows = runtime.list_launcher_containers(
+                    binary, connection=conn
+                )
         except OSError:
             container_rows = []
-        native_rows = (native.list_native_instances(target["base_dir"])
-                       if node_name == "local" else [])
-        instances.extend(build_instances(
-            container_rows + native_rows, profiles, binary,
-            node=node_name, node_host=nd.get("host", "")))
+        native_rows = (
+            native.list_native_instances(target["base_dir"])
+            if node_name == "local"
+            else []
+        )
+        instances.extend(
+            build_instances(
+                container_rows + native_rows,
+                profiles,
+                binary,
+                node=node_name,
+                node_host=nd.get("host", ""),
+            )
+        )
     instances.sort(key=lambda i: (not i.running, i.node, i.name))
     decode_prev_by_key = target.get("decode_prev_by_key") or {}
     decode_now_by_key = {}
@@ -222,23 +271,45 @@ def build_instances_data(target: dict) -> dict:
         # `inst.port` resolves to the pool head's port, which would make a
         # worker card show the HEAD's tok/s (misleading). Report up/down only.
         if inst.mode == "rpc-worker":
-            summ = {"health": "ready" if inst.running else "down",
-                    "stat": "", "tok_s": None, "kv_pct": None}
+            summ = {
+                "health": "ready" if inst.running else "down",
+                "stat": "",
+                "tok_s": None,
+                "kv_pct": None,
+            }
             profile_disp, port_disp, node_disp = worker_card_title(inst), None, "local"
         else:
             rate_key = f"{inst.node}/{inst.name}"
-            summ = _instance_summary_data(inst, by_name, target["router_base_dir"],
-                                          decode_prev=decode_prev_by_key.get(rate_key))
+            summ = _instance_summary_data(
+                inst,
+                by_name,
+                target["router_base_dir"],
+                decode_prev=decode_prev_by_key.get(rate_key),
+            )
             if summ.get("decode_now") is not None:
                 decode_now_by_key[rate_key] = summ["decode_now"]
             profile_disp, port_disp, node_disp = inst.profile, inst.port, inst.node
-        rows.append({"name": inst.name, "profile": profile_disp, "port": port_disp,
-                     "running": inst.running, "health": summ["health"],
-                     "stat": summ["stat"], "tok_s": summ["tok_s"],
-                     "kv_pct": summ["kv_pct"], "embeddings": inst.embeddings,
-                     "reranking": inst.reranking, "mode": inst.mode, "node": node_disp})
-    return {"instances": instances, "rows": rows,
-            "decode_now_by_key": decode_now_by_key}
+        rows.append(
+            {
+                "name": inst.name,
+                "profile": profile_disp,
+                "port": port_disp,
+                "running": inst.running,
+                "health": summ["health"],
+                "stat": summ["stat"],
+                "tok_s": summ["tok_s"],
+                "kv_pct": summ["kv_pct"],
+                "embeddings": inst.embeddings,
+                "reranking": inst.reranking,
+                "mode": inst.mode,
+                "node": node_disp,
+            }
+        )
+    return {
+        "instances": instances,
+        "rows": rows,
+        "decode_now_by_key": decode_now_by_key,
+    }
 
 
 class _MonitorGather(QRunnable):
@@ -252,6 +323,7 @@ class _MonitorGather(QRunnable):
     persistent QThread worker risks when a MainWindow is torn down (notably
     across tests).
     """
+
     def __init__(self, owner, target):
         super().__init__()
         self._owner = owner
@@ -260,7 +332,7 @@ class _MonitorGather(QRunnable):
     def run(self):
         try:
             data = build_monitor_data(self._target)
-        except Exception:            # noqa: BLE001 - worker must never raise
+        except Exception:  # worker must never raise
             data = None
         self._owner._monitor_result = data
         self._owner._monitor_inflight = False
@@ -277,6 +349,7 @@ class _InstancesGather(QRunnable):
     Note a `podman ps` failure is NOT a raise -- it returns [] -- so an empty
     result still overwrites; _render_instances guards the auto-clear against that.
     """
+
     def __init__(self, owner, target):
         super().__init__()
         self._owner = owner
@@ -285,7 +358,7 @@ class _InstancesGather(QRunnable):
     def run(self):
         try:
             data = build_instances_data(self._target)
-        except Exception:            # noqa: BLE001 - worker must never raise
+        except Exception:  # worker must never raise
             data = None
         if data is not None:
             self._owner._instances_result = data
@@ -298,7 +371,8 @@ class StatsWorker(QThread):
     The builder is injected (so it's testable without Qt); the worker owns only
     the loop + stop flag. Sleeps in small slices so stop() is responsive.
     """
-    sampled = Signal(object)      # StatsSnapshot
+
+    sampled = Signal(object)  # StatsSnapshot
 
     def __init__(self, builder, interval_ms: int = 1000, parent=None):
         super().__init__(parent)
@@ -339,16 +413,20 @@ class MonitorController:
 
         # -- router / props / spec-decode caches (cleared on profile load) --
         self._router_statuses: dict = {}
-        self._spec_prev = None      # previous /metrics spec-decode counter read
-        self._decode_prev = None    # previous (n_decode_total, monotonic) for live tok/s
-        self._prompt_prev = None    # previous (prompt_progress, monotonic) for live prefill tok/s
-        self._cards_decode_prev = {}   # per-card "node/name" -> (n_decode_total, monotonic)
-        self._props = None          # cached /props for the current model load
-        self._props_model = None    # router-polled model id the cache is keyed on
+        self._spec_prev = None  # previous /metrics spec-decode counter read
+        self._decode_prev = None  # previous (n_decode_total, monotonic) for live tok/s
+        self._prompt_prev = (
+            None  # previous (prompt_progress, monotonic) for live prefill tok/s
+        )
+        self._cards_decode_prev = {}  # per-card "node/name" -> (n_decode_total, monotonic)
+        self._props = None  # cached /props for the current model load
+        self._props_model = None  # router-polled model id the cache is keyed on
 
         # -- instances / active-instance override --
-        self._instances = []              # last-built Instance list (for selection lookup)
-        self._active_instance = None      # Instance being monitored, or None -> current profile
+        self._instances = []  # last-built Instance list (for selection lookup)
+        self._active_instance = (
+            None  # Instance being monitored, or None -> current profile
+        )
 
         # -- the blocking Monitor summary (podman stats, nvidia-smi, /metrics,
         # /slots) is gathered off the UI thread by a short-lived _MonitorGather
@@ -377,7 +455,7 @@ class MonitorController:
         # loop free for user input.
         self._log_pending: list[str] = []
         self._log_flush_timer = QTimer(self.window)
-        self._log_flush_timer.setInterval(100)     # 10 Hz -> ~1 widget write / 100 ms
+        self._log_flush_timer.setInterval(100)  # 10 Hz -> ~1 widget write / 100 ms
         self._log_flush_timer.timeout.connect(self._flush_log)
 
         # -- stats dock worker --
@@ -410,14 +488,17 @@ class MonitorController:
     def _refresh_stats_target(self) -> None:
         # Read GUI/profile state on the UI thread only; the worker reads the
         # resulting plain tuple (safe under the GIL), never the widgets.
-        self._stats_target = (self._monitored_container_name(),
-                              self.window._configure_panel.current_profile().runtime.binary)
+        self._stats_target = (
+            self._monitored_container_name(),
+            self.window._configure_panel.current_profile().runtime.binary,
+        )
 
     def _start_stats_worker(self) -> None:
         if self._stats_worker is not None and self._stats_worker.isRunning():
             return
         from llama_launcher.services import stats as stats_svc
         from llama_launcher.services.sysstat import CpuSampler
+
         self._cpu_sampler = CpuSampler()
         self._refresh_stats_target()
 
@@ -435,7 +516,8 @@ class MonitorController:
             return
         w.stop()
         from PySide6.QtCore import QCoreApplication
-        for _ in range(100):            # ~2s ceiling, pump events between waits
+
+        for _ in range(100):  # ~2s ceiling, pump events between waits
             if w.wait(20):
                 break
             QCoreApplication.processEvents()
@@ -449,9 +531,12 @@ class MonitorController:
 
     def _save_stats_config(self) -> None:
         from llama_launcher.ui.main_window import base_dir
+
         cfg = load_config(base_dir())
         cfg["stats_open"] = self.window.stats_dock.isVisibleTo(self.window)
-        cfg["stats_width"] = self.window.stats_dock.width() or cfg.get("stats_width", 320)
+        cfg["stats_width"] = self.window.stats_dock.width() or cfg.get(
+            "stats_width", 320
+        )
         save_config(cfg, base_dir())
 
     # -- spec-decode / props / router polling --------------------------------
@@ -469,15 +554,18 @@ class MonitorController:
         if p.mode == "router" and model_scope is None:
             return
         text = metrics.fetch_metrics_text(
-            profile_port(p), model=model_scope,
+            profile_port(p),
+            model=model_scope,
             api_key=self._poll_api_key(p),
-            host=dial_host(p.runtime.bind_host))
+            host=dial_host(p.runtime.bind_host),
+        )
         cur = spec_counters(text) if text else None
         if cur is None:
             return
         if self._spec_prev is not None:
-            self.window.monitor_panel.set_draft_stats(spec_delta(self._spec_prev, cur),
-                                                       source="counters")
+            self.window.monitor_panel.set_draft_stats(
+                spec_delta(self._spec_prev, cur), source="counters"
+            )
         self._spec_prev = cur
 
     def _poll_api_key(self, p: Profile) -> str | None:
@@ -515,7 +603,7 @@ class MonitorController:
             return model_key
         info = metrics.fetch_props(port, api_key=key, host=host)
         if info is None:
-            return model_key           # leave cache empty; retry next ready poll
+            return model_key  # leave cache empty; retry next ready poll
         self._props = info
         self._props_model = model_key
         self.window.monitor_panel.set_props(info)
@@ -533,7 +621,7 @@ class MonitorController:
         port = profile_port(p)
         key = api_key_store.read_api_key(self.window.router_base_dir(), p.name)
         models = router_api.list_models(host, port, key)
-        if models is None:            # unreachable, as opposed to serving nothing
+        if models is None:  # unreachable, as opposed to serving nothing
             self._router_statuses = {}
             self.window.router_models_table.set_models([])
             self.window._set_router_connected(False)
@@ -555,8 +643,7 @@ class MonitorController:
     def _on_router_load(self, model_id: str) -> None:
         p = self.window._configure_panel.current_profile()
         key = api_key_store.read_api_key(self.window.router_base_dir(), p.name)
-        ok = router_api.load_model(self._router_host(p), profile_port(p),
-                                   key, model_id)
+        ok = router_api.load_model(self._router_host(p), profile_port(p), key, model_id)
         self.refresh_router_models()
         if not ok:
             # Without the banner a failed load looks identical to a slow one:
@@ -566,8 +653,9 @@ class MonitorController:
     def _on_router_unload(self, model_id: str) -> None:
         p = self.window._configure_panel.current_profile()
         key = api_key_store.read_api_key(self.window.router_base_dir(), p.name)
-        ok = router_api.unload_model(self._router_host(p), profile_port(p),
-                                     key, model_id)
+        ok = router_api.unload_model(
+            self._router_host(p), profile_port(p), key, model_id
+        )
         self.refresh_router_models()
         if not ok:
             self.window._set_router_error(f"unload failed: {model_id}")
@@ -581,7 +669,7 @@ class MonitorController:
             self._refresh_stats_target()
         p = self._monitored_profile()
         if not runtime.binary_available(p.runtime.binary):
-            self.window.status_label.setText("● stopped")
+            self.window.status_label.setText("\u25cf stopped")
             self.window._configure_panel.web_ui_btn.setEnabled(False)
             self.window.benchmark_panel.set_benchmark_available(False)
             self._monitor_target = {"running": False}
@@ -590,18 +678,23 @@ class MonitorController:
             self._prompt_prev = None
             return
         name = self._monitored_container_name()
-        state = runtime.container_state(name, p.runtime.binary,
-                                         connection=self._connection_for_node(p.runtime.node))
+        state = runtime.container_state(
+            name, p.runtime.binary, connection=self._connection_for_node(p.runtime.node)
+        )
         # Default the gather target to "don't poll"; the running branch below
         # overwrites it with the live snapshot. Nothing is gathered off-thread
         # until update_status confirms the container is up. (_monitor_result is
         # left intact here so the running branch can render the last gather;
         # it's cleared below only when nothing is running.)
         self._monitor_target = {"running": False}
-        hstatus = health.probe_health(profile_port(p),
-                                     host=dial_host(p.runtime.bind_host)) \
-            if state == "running" else "down"
-        self.window.status_label.setText("● " + health.derive_status(state, hstatus))
+        hstatus = (
+            health.probe_health(profile_port(p), host=dial_host(p.runtime.bind_host))
+            if state == "running"
+            else "down"
+        )
+        self.window.status_label.setText(
+            "\u25cf " + health.derive_status(state, hstatus)
+        )
         self.window._configure_panel.web_ui_btn.setEnabled(state == "running")
         router_model_key = None
         if state == "running":
@@ -623,11 +716,13 @@ class MonitorController:
                 self._decode_prev = self._monitor_result.get("decode_now")
                 self._prompt_prev = self._monitor_result.get("prompt_now")
             self._monitor_target = self._compute_monitor_target(
-                running=True, model_scope=router_model_key)
+                running=True, model_scope=router_model_key
+            )
             if not self._monitor_inflight:
                 self._monitor_inflight = True
                 QThreadPool.globalInstance().start(
-                    _MonitorGather(self, self._monitor_target))
+                    _MonitorGather(self, self._monitor_target)
+                )
             self._update_spec_stats(p)
         else:
             # Nothing running: drop the last gather so a stale summary isn't
@@ -663,22 +758,32 @@ class MonitorController:
         self._render_instances()
         if not self._instances_inflight:
             self._instances_inflight = True
-            QThreadPool.globalInstance().start(_InstancesGather(self, self._instances_target()))
+            QThreadPool.globalInstance().start(
+                _InstancesGather(self, self._instances_target())
+            )
 
     def _instances_target(self) -> dict:
         """Snapshot the primitives the gather needs (UI thread only), including
         every registered node as plain dicts -- no live Node objects, since the
         gather runs off the UI thread and must not touch shared state."""
         from llama_launcher.ui.main_window import base_dir
-        return {"binary": self.window._configure_panel.current_profile().runtime.binary,
-                "base_dir": base_dir(),
-                "router_base_dir": self.window.router_base_dir(),
-                "decode_prev_by_key": dict(self._cards_decode_prev),
-                "nodes": [
-                    {"name": n.name, "connection": connection_for(n), "host": host_of(n),
-                     "binary": n.binary, "enabled": n.enabled}
-                    for n in load_nodes(base_dir())
-                ]}
+
+        return {
+            "binary": self.window._configure_panel.current_profile().runtime.binary,
+            "base_dir": base_dir(),
+            "router_base_dir": self.window.router_base_dir(),
+            "decode_prev_by_key": dict(self._cards_decode_prev),
+            "nodes": [
+                {
+                    "name": n.name,
+                    "connection": connection_for(n),
+                    "host": host_of(n),
+                    "binary": n.binary,
+                    "enabled": n.enabled,
+                }
+                for n in load_nodes(base_dir())
+            ],
+        }
 
     def _render_instances(self) -> None:
         result = self._instances_result
@@ -697,18 +802,24 @@ class MonitorController:
         # returns [] rather than raising, so an empty list is ambiguous and must
         # not be read as "my instance vanished" -- only a populated list that
         # omits the instance is genuine evidence it was stopped externally.
-        if (self._active_instance is not None and self._instances
-                and self._active_instance.name not in {i.name for i in self._instances}):
+        if (
+            self._active_instance is not None
+            and self._instances
+            and self._active_instance.name not in {i.name for i in self._instances}
+        ):
             self._active_instance = None
             self._start_log_follower()
         self.window.monitor_panel.set_instance_cards(
-            {"rows": result["rows"], "selected_name": self._monitored_container_name()})
+            {"rows": result["rows"], "selected_name": self._monitored_container_name()}
+        )
 
     def _on_instance_selected(self, name: str) -> None:
         inst = next((i for i in self._instances if i.name == name), None)
         # Selecting the form's own container means "monitor the current profile" (fallback).
-        self._active_instance = None if (inst is None or name == self.window._container_name()) else inst
-        self._start_log_follower()          # retarget the follower at the new container
+        self._active_instance = (
+            None if (inst is None or name == self.window._container_name()) else inst
+        )
+        self._start_log_follower()  # retarget the follower at the new container
         self.update_status()
 
     def _rpc_pool_profile_for(self, inst) -> Profile | None:
@@ -720,13 +831,19 @@ class MonitorController:
         says."""
         if inst is not None and inst.mode == "rpc-worker":
             return None
-        name = inst.profile if inst is not None \
+        name = (
+            inst.profile
+            if inst is not None
             else self.window._configure_panel.current_profile().name
-        prof = next((p for p in list_profiles(self.window.base_dir()) if p.name == name), None)
+        )
+        prof = next(
+            (p for p in list_profiles(self.window.base_dir()) if p.name == name), None
+        )
         return prof if prof is not None and prof.runtime.launch_mode == "rpc" else None
 
     def _on_instance_stop(self, name: str) -> None:
         import signal
+
         inst = next((i for i in self._instances if i.name == name), None)
         if inst is not None and inst.kind == "native":
             if inst.pid is not None:
@@ -746,15 +863,22 @@ class MonitorController:
             # completion via _on_pool_stopped.
             self.window._launch.stop_pool_async(pool_profile)
         else:
-            binary = inst.binary if inst is not None \
+            binary = (
+                inst.binary
+                if inst is not None
                 else self.window._configure_panel.current_profile().runtime.binary
+            )
             timeout = inst.stop_timeout if inst is not None else DEFAULT_STOP_TIMEOUT
-            node_name = inst.node if inst is not None \
+            node_name = (
+                inst.node
+                if inst is not None
                 else self.window._configure_panel.current_profile().runtime.node
+            )
             connection = self._connection_for_node(node_name)
             self.window._launch._spawn_async(
                 runtime.stop_argv(name, binary, timeout=timeout, connection=connection),
-                on_done=self.update_status)
+                on_done=self.update_status,
+            )
         if self._active_instance is not None and self._active_instance.name == name:
             self._active_instance = None
 
@@ -762,28 +886,39 @@ class MonitorController:
         # A stopped launcher container lingers in `podman ps -a` with no useful
         # action; remove it so the instances list can be cleared.
         from llama_launcher.ui.main_window import base_dir
+
         inst = next((i for i in self._instances if i.name == name), None)
         if inst is not None and inst.kind == "native":
             native.remove_native(name, base_dir())
             self.update_status()
         else:
-            binary = inst.binary if inst is not None \
+            binary = (
+                inst.binary
+                if inst is not None
                 else self.window._configure_panel.current_profile().runtime.binary
-            node_name = inst.node if inst is not None \
+            )
+            node_name = (
+                inst.node
+                if inst is not None
                 else self.window._configure_panel.current_profile().runtime.node
+            )
             connection = self._connection_for_node(node_name)
             self.window._launch._spawn_async(
-                runtime.rm_argv(name, binary, connection=connection), on_done=self.update_status)
+                runtime.rm_argv(name, binary, connection=connection),
+                on_done=self.update_status,
+            )
         if self._active_instance is not None and self._active_instance.name == name:
             self._active_instance = None
 
     def _monitored_profile(self) -> Profile:
         from llama_launcher.ui.main_window import base_dir
+
         inst = self._active_instance
         if inst is None:
             return self.window._configure_panel.current_profile()
-        stored = next((p for p in list_profiles(base_dir())
-                       if p.name == inst.profile), None)
+        stored = next(
+            (p for p in list_profiles(base_dir()) if p.name == inst.profile), None
+        )
         # Trust the running container's real mode (from its label) over the
         # stored profile: a profile saved as a single server but launched as a
         # router (or one never saved) would otherwise be polled in server mode,
@@ -793,15 +928,23 @@ class MonitorController:
         if stored is not None and stored.mode == inst.mode:
             return stored
         return Profile(
-            name=inst.profile, mode=inst.mode,
+            name=inst.profile,
+            mode=inst.mode,
             runtime=Runtime(bind_host=inst.host, node=inst.node),
-            settings={"port": inst.port or DEFAULT_PORT,
-                      "embeddings": inst.embeddings, "reranking": inst.reranking,
-                      "metrics": bool(stored.settings.get("metrics")) if stored else False},
+            settings={
+                "port": inst.port or DEFAULT_PORT,
+                "embeddings": inst.embeddings,
+                "reranking": inst.reranking,
+                "metrics": bool(stored.settings.get("metrics")) if stored else False,
+            },
         )
 
     def _monitored_container_name(self) -> str:
-        return self._active_instance.name if self._active_instance else self.window._container_name()
+        return (
+            self._active_instance.name
+            if self._active_instance
+            else self.window._container_name()
+        )
 
     def _connection_for_node(self, node_name: str) -> str:
         """The podman --connection name for a node ('' for local/missing)."""
@@ -814,6 +957,7 @@ class MonitorController:
         uses); resolves the profiles snapshot + router key dir on demand. The
         result carries no "running" key: rows read inst.running directly."""
         from llama_launcher.ui.main_window import base_dir
+
         by_name = {p.name: p for p in list_profiles(base_dir())}
         return _instance_summary_data(inst, by_name, self.window.router_base_dir())
 
@@ -833,8 +977,12 @@ class MonitorController:
             return {"running": False}
         p = self._monitored_profile()
         node = get_node(self.window.base_dir(), p.runtime.node)
-        host, key, ms, poll = (dial_host(p.runtime.bind_host),
-                               self._poll_api_key(p), None, True)
+        host, key, ms, poll = (
+            dial_host(p.runtime.bind_host),
+            self._poll_api_key(p),
+            None,
+            True,
+        )
         if p.mode == "router":
             host = self._router_host(p)
             ms = model_scope
@@ -849,20 +997,27 @@ class MonitorController:
         # bind_host is some other address (validation blocks saving one, but a
         # loaded-not-launched profile is still polled) gets an unauthenticated
         # poll rather than leaking the secret.
-        allowed_key_host = (host in ("127.0.0.1", "localhost", "::1", "[::1]")
-                            or (node is not None and node.kind == "remote"
-                                and host == host_of(node)))
+        allowed_key_host = host in ("127.0.0.1", "localhost", "::1", "[::1]") or (
+            node is not None and node.kind == "remote" and host == host_of(node)
+        )
         if not allowed_key_host:
             key = None
         return {
             "running": True,
             "port": profile_port(p),
             "metrics_on": bool(p.settings.get("metrics")),
-            "host": host, "key": key, "model_scope": ms, "poll": poll,
+            "host": host,
+            "key": key,
+            "model_scope": ms,
+            "poll": poll,
             "name": self._monitored_container_name(),
             "binary": p.runtime.binary,
-            "kind": self._active_instance.kind if self._active_instance is not None else "container",
-            "pid": self._active_instance.pid if self._active_instance is not None else None,
+            "kind": self._active_instance.kind
+            if self._active_instance is not None
+            else "container",
+            "pid": self._active_instance.pid
+            if self._active_instance is not None
+            else None,
             "gpu_ssh": focused_gpu_ssh(p.runtime.node, self.window.base_dir()),
             "mon_conn": connection_for(node) if node else "",
             "decode_prev": self._decode_prev,
@@ -875,23 +1030,31 @@ class MonitorController:
         and lets the worker call build_monitor_data() off the UI thread."""
         p = self._monitored_profile()
         ms = self._router_pollable_model() if p.mode == "router" else None
-        return build_monitor_data(
-            self._compute_monitor_target(running=True, model_scope=ms)) or {}
+        return (
+            build_monitor_data(
+                self._compute_monitor_target(running=True, model_scope=ms)
+            )
+            or {}
+        )
 
     # -- log follower ------------------------------------------------------
     def _log_follower_active(self) -> bool:
         from PySide6.QtCore import QProcess
-        return (self._log_proc is not None
-                and self._log_proc.state() != QProcess.NotRunning)
+
+        return (
+            self._log_proc is not None and self._log_proc.state() != QProcess.NotRunning
+        )
 
     def _start_log_follower(self):
         from PySide6.QtCore import QProcess
+
         self._stop_log_follower()
         p = self._monitored_profile()
         name = self._monitored_container_name()
         active = self._active_instance
         if active is not None and active.kind == "native":
             from llama_launcher.ui.main_window import base_dir
+
             logpath = native.native_log_path(base_dir(), active.profile)
             if not logpath.exists():
                 return
@@ -902,13 +1065,18 @@ class MonitorController:
             # Skip until it exists; update_status() retries once it's running and
             # `podman logs` replays from the beginning, so no early output is lost.
             connection = self._connection_for_node(p.runtime.node)
-            if not runtime.container_exists(name, p.runtime.binary, connection=connection):
+            if not runtime.container_exists(
+                name, p.runtime.binary, connection=connection
+            ):
                 return
             argv = runtime.logs_argv(name, p.runtime.binary, connection=connection)
         proc = QProcess(self.window)
         proc.setProcessChannelMode(QProcess.MergedChannels)
         proc.readyReadStandardOutput.connect(
-            lambda: self._enqueue_log(bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")))
+            lambda: self._enqueue_log(
+                bytes(proc.readAllStandardOutput()).decode("utf-8", "replace")
+            )
+        )
         proc.start(argv[0], argv[1:])
         self._log_proc = proc
 

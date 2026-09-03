@@ -19,7 +19,7 @@ def host_to_container(host_path: str, mounts) -> str | None:
             return container
         prefix = host + "/"
         if host_path.startswith(prefix):
-            rel = host_path[len(prefix):]
+            rel = host_path[len(prefix) :]
             return container.rstrip("/") + "/" + rel
     return None
 
@@ -39,5 +39,5 @@ def container_to_host(container_path: str, mounts) -> str | None:
             return host
         prefix = container + "/"
         if container_path.startswith(prefix):
-            return host + "/" + container_path[len(prefix):]
+            return host + "/" + container_path[len(prefix) :]
     return None

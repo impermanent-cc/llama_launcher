@@ -7,13 +7,16 @@ from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.report import redact_secrets
 from llama_launcher.core.spec import profile_port
 from llama_launcher.core.validation import dial_host, validate
-from llama_launcher.services import headless
 from llama_launcher.services import api_key as api_key_store
+from llama_launcher.services import headless
 from llama_launcher.services.native import native_binary_ok_for
 from llama_launcher.services.runtime import binary_available
 from llama_launcher.services.terminal import DEFAULT_TEMPLATE, build_terminal_argv
 from llama_launcher.store.profiles import (
-    default_base_dir, list_profiles, load_config, resolve_member_pairs,
+    default_base_dir,
+    list_profiles,
+    load_config,
+    resolve_member_pairs,
 )
 
 
@@ -25,18 +28,35 @@ def _resolve_and_gate(action, profile_name, base_dir):
     if profile_name is None:
         profile_name = load_config(base_dir).get("last_profile")
         if profile_name is None or profile_name not in profiles:
-            return None, 2, f"Specify --profile NAME. Available: {', '.join(sorted(profiles))}"
+            return (
+                None,
+                2,
+                f"Specify --profile NAME. Available: {', '.join(sorted(profiles))}",
+            )
     if profile_name not in profiles:
-        return None, 2, f"Profile '{profile_name}' not found. Available: {', '.join(sorted(profiles))}"
+        return (
+            None,
+            2,
+            f"Profile '{profile_name}' not found. Available: {', '.join(sorted(profiles))}",
+        )
     p = profiles[profile_name]
     # A launch will create the key if absent, so the exposure guard is satisfied
     # for launch; for stop/health, reflect whether a key actually exists today.
-    api_key_present = (action == "launch") or bool(api_key_store.resolve_api_key(base_dir, p))
+    api_key_present = (action == "launch") or bool(
+        api_key_store.resolve_api_key(base_dir, p)
+    )
     members = resolve_member_pairs(p.members, base_dir)
-    errs = [i for i in validate(p, binary_found=binary_available(p.runtime.binary),
-                                members=members,
-                                api_key_present=api_key_present,
-                                native_binary_ok=native_binary_ok_for(p)) if i.level == "error"]
+    errs = [
+        i
+        for i in validate(
+            p,
+            binary_found=binary_available(p.runtime.binary),
+            members=members,
+            api_key_present=api_key_present,
+            native_binary_ok=native_binary_ok_for(p),
+        )
+        if i.level == "error"
+    ]
     if errs:
         return None, 2, "; ".join(i.message for i in errs)
     return p, None, None
@@ -66,8 +86,11 @@ def dry_run(profile_name: str | None = None, base_dir=None) -> int:
 
     p = profiles[profile_name]
 
-    issues = validate(p, binary_found=binary_available(p.runtime.binary),
-                     native_binary_ok=native_binary_ok_for(p))
+    issues = validate(
+        p,
+        binary_found=binary_available(p.runtime.binary),
+        native_binary_ok=native_binary_ok_for(p),
+    )
 
     inner = build_command(p)
     template = load_config(base_dir).get("terminal", DEFAULT_TEMPLATE)
@@ -90,12 +113,31 @@ def dry_run(profile_name: str | None = None, base_dir=None) -> int:
     return 1 if any(i.level == "error" for i in issues) else 0
 
 
-def _emit(as_json, action, exit_code, *, status=None, name=None, host=None,
-          port=None, warnings=(), error=None, text_out=None, text_err=None):
+def _emit(
+    as_json,
+    action,
+    exit_code,
+    *,
+    status=None,
+    name=None,
+    host=None,
+    port=None,
+    warnings=(),
+    error=None,
+    text_out=None,
+    text_err=None,
+):
     if as_json:
-        obj = {"action": action, "ok": exit_code == 0, "status": status,
-               "name": name, "host": host, "port": port,
-               "warnings": list(warnings), "error": error}
+        obj = {
+            "action": action,
+            "ok": exit_code == 0,
+            "status": status,
+            "name": name,
+            "host": host,
+            "port": port,
+            "warnings": list(warnings),
+            "error": error,
+        }
         print(json.dumps(obj))
     else:
         for w in warnings:
@@ -110,21 +152,53 @@ def _emit(as_json, action, exit_code, *, status=None, name=None, host=None,
 def _do_launch(p, base_dir, wait, as_json=False):
     res = headless.launch(p, base_dir, p.runtime.binary)
     if not res.ok:
-        return _emit(as_json, "launch", 1, name=res.name, host=res.host,
-                     port=res.port, warnings=res.warnings, error=res.error,
-                     text_err=f"'{p.name}' failed to start: {res.error}")
+        return _emit(
+            as_json,
+            "launch",
+            1,
+            name=res.name,
+            host=res.host,
+            port=res.port,
+            warnings=res.warnings,
+            error=res.error,
+            text_err=f"'{p.name}' failed to start: {res.error}",
+        )
     if wait is None:
-        return _emit(as_json, "launch", 0, status="started", name=res.name,
-                     host=res.host, port=res.port, warnings=res.warnings,
-                     text_out=f"'{p.name}' started ({res.name}) on {res.host}:{res.port}")
+        return _emit(
+            as_json,
+            "launch",
+            0,
+            status="started",
+            name=res.name,
+            host=res.host,
+            port=res.port,
+            warnings=res.warnings,
+            text_out=f"'{p.name}' started ({res.name}) on {res.host}:{res.port}",
+        )
     if headless.wait_ready(dial_host(res.host), res.port, timeout=wait):
-        return _emit(as_json, "launch", 0, status="ready", name=res.name,
-                     host=res.host, port=res.port, warnings=res.warnings,
-                     text_out=f"'{p.name}' ready on {res.host}:{res.port}")
-    return _emit(as_json, "launch", 5, status="started", name=res.name,
-                 host=res.host, port=res.port, warnings=res.warnings,
-                 error=f"not ready after {int(wait)}s",
-                 text_err=f"'{p.name}' started but not ready after {int(wait)}s")
+        return _emit(
+            as_json,
+            "launch",
+            0,
+            status="ready",
+            name=res.name,
+            host=res.host,
+            port=res.port,
+            warnings=res.warnings,
+            text_out=f"'{p.name}' ready on {res.host}:{res.port}",
+        )
+    return _emit(
+        as_json,
+        "launch",
+        5,
+        status="started",
+        name=res.name,
+        host=res.host,
+        port=res.port,
+        warnings=res.warnings,
+        error=f"not ready after {int(wait)}s",
+        text_err=f"'{p.name}' started but not ready after {int(wait)}s",
+    )
 
 
 _NATIVE_CLI_MSG = "native launch is GUI-only in this version"
@@ -135,16 +209,37 @@ def _do_stop(p, base_dir, as_json=False):
     host = p.runtime.bind_host
     port = profile_port(p)
     if p.runtime.launch_mode == "native":
-        return _emit(as_json, "stop", 1, name=name, host=host, port=port,
-                     error=_NATIVE_CLI_MSG,
-                     text_err=f"'{p.name}' is a native profile; {_NATIVE_CLI_MSG}")
+        return _emit(
+            as_json,
+            "stop",
+            1,
+            name=name,
+            host=host,
+            port=port,
+            error=_NATIVE_CLI_MSG,
+            text_err=f"'{p.name}' is a native profile; {_NATIVE_CLI_MSG}",
+        )
     if headless.stop_router(p, p.runtime.binary, timeout=p.runtime.stop_timeout):
-        return _emit(as_json, "stop", 0, status="stopped", name=name,
-                     host=host, port=port,
-                     text_out=f"'{p.name}' stopped")
-    return _emit(as_json, "stop", 1, name=name, host=host, port=port,
-                 error="failed to stop",
-                 text_err=f"'{p.name}' failed to stop")
+        return _emit(
+            as_json,
+            "stop",
+            0,
+            status="stopped",
+            name=name,
+            host=host,
+            port=port,
+            text_out=f"'{p.name}' stopped",
+        )
+    return _emit(
+        as_json,
+        "stop",
+        1,
+        name=name,
+        host=host,
+        port=port,
+        error="failed to stop",
+        text_err=f"'{p.name}' failed to stop",
+    )
 
 
 _HEALTH_EXIT = {"running": 0, "loading": 3}
@@ -152,17 +247,29 @@ _HEALTH_EXIT = {"running": 0, "loading": 3}
 
 def _do_health(p, base_dir, as_json=False):
     if p.runtime.launch_mode == "native":
-        return _emit(as_json, "health", 1,
-                     status="unknown", name=headless._container_name(p),
-                     host=p.runtime.bind_host, port=profile_port(p),
-                     error=_NATIVE_CLI_MSG,
-                     text_err=f"'{p.name}' is a native profile; {_NATIVE_CLI_MSG}")
+        return _emit(
+            as_json,
+            "health",
+            1,
+            status="unknown",
+            name=headless._container_name(p),
+            host=p.runtime.bind_host,
+            port=profile_port(p),
+            error=_NATIVE_CLI_MSG,
+            text_err=f"'{p.name}' is a native profile; {_NATIVE_CLI_MSG}",
+        )
     status = headless.router_status(p, p.runtime.binary)
     display = "ready" if status == "running" else status
-    return _emit(as_json, "health", _HEALTH_EXIT.get(status, 4),
-                 status=display, name=headless._container_name(p),
-                 host=p.runtime.bind_host, port=profile_port(p),
-                 text_out=f"health: {display}")
+    return _emit(
+        as_json,
+        "health",
+        _HEALTH_EXIT.get(status, 4),
+        status=display,
+        name=headless._container_name(p),
+        host=p.runtime.bind_host,
+        port=profile_port(p),
+        text_out=f"health: {display}",
+    )
 
 
 def main(argv=None) -> int:
@@ -187,8 +294,9 @@ def main(argv=None) -> int:
         action = "launch" if args.launch else "stop" if args.stop else "health"
         p, code, msg = _resolve_and_gate(action, args.profile, base)
         if code is not None:
-            return _emit(args.json, action, code, name=args.profile,
-                         error=msg, text_err=msg)
+            return _emit(
+                args.json, action, code, name=args.profile, error=msg, text_err=msg
+            )
         if args.launch:
             return _do_launch(p, base, args.wait, args.json)
         if args.stop:
@@ -197,14 +305,15 @@ def main(argv=None) -> int:
 
     # GUI path: only import Qt here so that importing app.py never constructs QApplication.
     from PySide6.QtWidgets import QApplication
-    from llama_launcher.ui.main_window import MainWindow
-    from llama_launcher.ui.icon import app_icon
 
-    app = QApplication([sys.argv[0]] + unknown)
+    from llama_launcher.ui.icon import app_icon
+    from llama_launcher.ui.main_window import MainWindow
+
+    app = QApplication([sys.argv[0], *unknown])
     # Identity so the KDE/Wayland taskbar maps the window to the .desktop entry
     # (correct icon + pin-to-taskbar). Must match the installed .desktop basename.
     # No applicationDisplayName: Qt would append it to every window title with
-    # an em dash ("Latest build — Llama Launcher").
+    # an em dash (U+2014) between the title and "Llama Launcher".
     app.setApplicationName("Llama Launcher")
     app.setDesktopFileName("llama-launcher")
     # Apply our own SVG to every window and the taskbar; the .desktop

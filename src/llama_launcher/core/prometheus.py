@@ -9,7 +9,7 @@ def parse_metrics(text: str) -> dict[str, float]:
             continue
         name = parts[0]
         if "{" in name:
-            name = name[:name.index("{")]
+            name = name[: name.index("{")]
         try:
             out[name] = float(parts[1])
         except ValueError:
@@ -33,7 +33,9 @@ def parse_labeled_metric(text: str, name: str, label: str) -> dict[str, float]:
         parts = line.split()
         if len(parts) < 2:
             continue
-        labels = parts[0][len(name) + 1:parts[0].rfind("}")] if "}" in parts[0] else ""
+        labels = (
+            parts[0][len(name) + 1 : parts[0].rfind("}")] if "}" in parts[0] else ""
+        )
         start = labels.find(needle)
         if start < 0:
             continue

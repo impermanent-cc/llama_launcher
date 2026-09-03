@@ -1,7 +1,7 @@
 import subprocess
 from dataclasses import dataclass
 
-from llama_launcher.core.nodes import valid_ssh_target, SSH_OPTS
+from llama_launcher.core.nodes import SSH_OPTS, valid_ssh_target
 
 
 @dataclass(frozen=True)
@@ -62,6 +62,7 @@ def cpu_percentages(prev: dict, cur: dict) -> tuple:
 
 class CpuSampler:
     """Holds the previous /proc/stat read; each sample() returns the % since it."""
+
     def __init__(self):
         self._prev = None
 
@@ -82,7 +83,7 @@ def parse_meminfo(text: str) -> MemStat:
         key, _, rest = line.partition(":")
         toks = rest.split()
         if toks and toks[0].isdigit():
-            vals[key.strip()] = int(toks[0]) * 1024      # kB -> bytes
+            vals[key.strip()] = int(toks[0]) * 1024  # kB -> bytes
     total = vals.get("MemTotal", 0)
     avail = vals.get("MemAvailable", vals.get("MemFree", 0))
     return MemStat(used_bytes=max(0, total - avail), total_bytes=total)
@@ -129,8 +130,13 @@ def read_remote_meminfo(ssh_target: str) -> MemStat | None:
     (connection error, timeout, bad ssh target, non-zero exit, empty output).
     """
     try:
-        res = subprocess.run(remote_meminfo_argv(ssh_target),
-                             capture_output=True, text=True, check=False, timeout=5)
+        res = subprocess.run(
+            remote_meminfo_argv(ssh_target),
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=5,
+        )
     except (OSError, subprocess.SubprocessError, ValueError):
         return None
     if res.returncode != 0 or not res.stdout.strip():

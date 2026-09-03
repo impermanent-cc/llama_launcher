@@ -30,8 +30,9 @@ def auth_headers(api_key: str | None) -> dict:
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
 
-def list_adapters(host: str, port: int, api_key: str | None,
-                  timeout: float = 1.0) -> list[LoraAdapter] | None:
+def list_adapters(
+    host: str, port: int, api_key: str | None, timeout: float = 1.0
+) -> list[LoraAdapter] | None:
     """Adapters the server loaded, or None when it could not be reached.
 
     None and [] are different and callers must keep them apart: [] means the
@@ -41,8 +42,11 @@ def list_adapters(host: str, port: int, api_key: str | None,
     The timeout matches the other UI-thread pollers.
     """
     try:
-        r = requests.get(f"{base_url(host, port)}/lora-adapters",
-                         headers=auth_headers(api_key), timeout=timeout)
+        r = requests.get(
+            f"{base_url(host, port)}/lora-adapters",
+            headers=auth_headers(api_key),
+            timeout=timeout,
+        )
         if r.status_code != 200:
             return None
         return parse_adapters(r.json())
@@ -50,8 +54,13 @@ def list_adapters(host: str, port: int, api_key: str | None,
         return None
 
 
-def set_scales(host: str, port: int, api_key: str | None,
-               scales: dict[int, float], timeout: float = 10.0) -> bool:
+def set_scales(
+    host: str,
+    port: int,
+    api_key: str | None,
+    scales: dict[int, float],
+    timeout: float = 10.0,
+) -> bool:
     """Apply `scales` ({adapter id: scale}) to the running server.
 
     The caller passes every adapter it knows about; see rule 1 in the module
@@ -61,8 +70,12 @@ def set_scales(host: str, port: int, api_key: str | None,
     """
     body = [{"id": int(i), "scale": float(s)} for i, s in sorted(scales.items())]
     try:
-        r = requests.post(f"{base_url(host, port)}/lora-adapters",
-                          headers=auth_headers(api_key), json=body, timeout=timeout)
+        r = requests.post(
+            f"{base_url(host, port)}/lora-adapters",
+            headers=auth_headers(api_key),
+            json=body,
+            timeout=timeout,
+        )
         return r.status_code == 200
     except requests.RequestException:
         return False

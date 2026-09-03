@@ -31,8 +31,11 @@ def parse_props(data: dict) -> PropsInfo:
     dgs = data.get("default_generation_settings")
     dgs = dgs if isinstance(dgs, dict) else {}
     mod = data.get("modalities")
-    modalities = ({k: v for k, v in mod.items() if isinstance(v, bool)}
-                  if isinstance(mod, dict) else {})
+    modalities = (
+        {k: v for k, v in mod.items() if isinstance(v, bool)}
+        if isinstance(mod, dict)
+        else {}
+    )
     return PropsInfo(
         build=_as(str, data.get("build_info")),
         n_ctx=_as(int, _first(data.get("n_ctx"), dgs.get("n_ctx"))),

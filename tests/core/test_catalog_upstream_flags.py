@@ -21,10 +21,17 @@ import pathlib
 
 import pytest
 
-from llama_launcher.core.settings_catalog import CATALOG, MAINLINE_ONLY_FLAGS, for_engine
+from llama_launcher.core.settings_catalog import (
+    CATALOG,
+    MAINLINE_ONLY_FLAGS,
+    for_engine,
+)
 
-FIXTURE = (pathlib.Path(__file__).resolve().parents[1]
-           / "fixtures" / "llama_server_flags_b10711.txt")
+FIXTURE = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "llama_server_flags_b10711.txt"
+)
 
 # The parametrised cases below select with for_engine(), the exact predicate
 # that decides what reaches each engine's launch, so the tests cannot drift
@@ -35,8 +42,11 @@ IK_KEYS = sorted(for_engine(CATALOG, "ik_llama.cpp"))
 
 @functools.cache
 def _upstream_flags() -> frozenset[str]:
-    return frozenset(ln.strip() for ln in FIXTURE.read_text().splitlines()
-                     if ln.strip() and not ln.startswith("#"))
+    return frozenset(
+        ln.strip()
+        for ln in FIXTURE.read_text().splitlines()
+        if ln.strip() and not ln.startswith("#")
+    )
 
 
 def test_fixture_looks_like_a_real_help_dump():
@@ -59,7 +69,8 @@ def test_mainline_setting_uses_a_flag_upstream_accepts(key):
         f"{key}: llama-server does not accept {setting.flag} (aliases "
         f"{sorted(setting.aliases)} are not emitted, so they cannot save it). "
         "If upstream renamed it, point the Setting at the new spelling and keep "
-        "the key so saved profiles survive.")
+        "the key so saved profiles survive."
+    )
 
 
 def test_engine_gated_settings_are_not_checked_against_mainline():
@@ -77,14 +88,20 @@ def test_engine_gated_settings_are_not_checked_against_mainline():
 # user sets it, and so does a typo or a future ik rename in an ik-only flag, so
 # both the "any" and the "ik_llama.cpp" buckets are under test here.
 
-IK_FIXTURE = (pathlib.Path(__file__).resolve().parents[1]
-              / "fixtures" / "ik_llama_server_flags_cu12.txt")
+IK_FIXTURE = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "ik_llama_server_flags_cu12.txt"
+)
 
 
 @functools.cache
 def _ik_flags() -> frozenset[str]:
-    return frozenset(ln.strip() for ln in IK_FIXTURE.read_text().splitlines()
-                     if ln.strip() and not ln.startswith("#"))
+    return frozenset(
+        ln.strip()
+        for ln in IK_FIXTURE.read_text().splitlines()
+        if ln.strip() and not ln.startswith("#")
+    )
 
 
 def test_ik_fixture_looks_like_a_real_capture():
@@ -103,13 +120,16 @@ def test_ik_fixture_looks_like_a_real_capture():
 def test_setting_reaching_ik_is_accepted_by_ik(key):
     setting = CATALOG[key]
     if setting.engine == "any":
-        hint = ("Add it to MAINLINE_ONLY_FLAGS so it is retagged engine='llama.cpp' "
-                "and dropped from ik launches and forms.")
+        hint = (
+            "Add it to MAINLINE_ONLY_FLAGS so it is retagged engine='llama.cpp' "
+            "and dropped from ik launches and forms."
+        )
     else:
         hint = "It is ik-only, so fix the spelling or drop the setting."
     assert setting.flag in _ik_flags(), (
         f"{key}: engine={setting.engine!r} means this reaches an ik_llama.cpp "
-        f"launch, but ik does not accept {setting.flag}. {hint}")
+        f"launch, but ik does not accept {setting.flag}. {hint}"
+    )
 
 
 def test_parametrised_selections_cover_the_engine_specific_buckets():
@@ -130,7 +150,8 @@ def test_mainline_only_flags_are_actually_absent_from_ik():
     wrongly_excluded = sorted(f for f in MAINLINE_ONLY_FLAGS if f in ik)
     assert wrongly_excluded == [], (
         f"these are accepted by ik and must not be in MAINLINE_ONLY_FLAGS: "
-        f"{wrongly_excluded}")
+        f"{wrongly_excluded}"
+    )
 
 
 def test_every_mainline_only_flag_still_exists_in_the_catalog():

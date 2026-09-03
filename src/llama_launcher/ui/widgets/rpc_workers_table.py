@@ -1,6 +1,10 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
+    QHBoxLayout,
+    QPushButton,
+    QTableWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from llama_launcher.core.spec import RpcWorker
@@ -11,7 +15,7 @@ _DEVICES = ["CPU", "CUDA0", "CUDA1"]
 
 
 class RpcWorkersTable(QWidget):
-    """RPC-pool launch mode: one row per worker (Node · Device · Mem MB · Port).
+    """RPC-pool launch mode: one row per worker (Node \u00b7 Device \u00b7 Mem MB \u00b7 Port).
 
     Cell widgets rather than editable QTableWidgetItems, since every column
     here is an enum/number best picked from a combo/spin box (the same
@@ -26,13 +30,16 @@ class RpcWorkersTable(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         self.table = QTableWidget(0, 4)
-        self.table.setHorizontalHeaderLabels(["Node", "Device", "Contribution MB", "Port"])
+        self.table.setHorizontalHeaderLabels(
+            ["Node", "Device", "Contribution MB", "Port"]
+        )
         # Current llama.cpp `ggml-rpc-server` has no per-worker memory-cap flag,
         # so this value is NOT enforced on the worker; it is only a pledge feeding
         # the "Check fit" preflight (pooled VRAM+RAM vs. model size).
         self.table.horizontalHeaderItem(2).setToolTip(
             "Estimate only: how much memory you expect this worker to donate, "
-            "used by 'Check fit'. Not enforced (rpc-server has no memory cap).")
+            "used by 'Check fit'. Not enforced (rpc-server has no memory cap)."
+        )
         set_resizable_columns(self.table, (140, 90, 130, 70))
         self.table.verticalHeader().setVisible(False)
         layout.addWidget(self.table)
@@ -135,11 +142,13 @@ class RpcWorkersTable(QWidget):
         for r in range(self.table.rowCount()):
             node_w = self.table.cellWidget(r, 0)
             if node_w is None:
-                continue   # row still mid-construction
-            out.append(RpcWorker(
-                node=node_w.currentText(),
-                device=self.table.cellWidget(r, 1).currentText(),
-                mem_mb=self.table.cellWidget(r, 2).value(),
-                port=self.table.cellWidget(r, 3).value(),
-            ))
+                continue  # row still mid-construction
+            out.append(
+                RpcWorker(
+                    node=node_w.currentText(),
+                    device=self.table.cellWidget(r, 1).currentText(),
+                    mem_mb=self.table.cellWidget(r, 2).value(),
+                    port=self.table.cellWidget(r, 3).value(),
+                )
+            )
         return out

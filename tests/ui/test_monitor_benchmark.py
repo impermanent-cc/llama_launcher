@@ -6,9 +6,19 @@ def _run(ts="t0", model="qwen.gguf", size=512, extra=None):
     snap = {"model": model}
     if extra:
         snap.update(extra)
-    return {"timestamp": ts, "snapshot": snap,
-            "rows": [{"target_size": size, "prompt_n": size + 16, "pp_tok_s": 340.0,
-                      "gen_tok_s": 59.0, "total_s": 6.1}]}
+    return {
+        "timestamp": ts,
+        "snapshot": snap,
+        "rows": [
+            {
+                "target_size": size,
+                "prompt_n": size + 16,
+                "pp_tok_s": 340.0,
+                "gen_tok_s": 59.0,
+                "total_s": 6.1,
+            }
+        ],
+    }
 
 
 def test_run_click_emits_config(qtbot):
@@ -40,11 +50,15 @@ def test_history_renders_grouped_rows_with_model(qtbot):
 def test_history_groups_multiple_runs_newest_first(qtbot):
     p = BenchmarkPanel()
     qtbot.addWidget(p)
-    p.set_benchmark_history([_run(ts="t1", model="a.gguf", size=128),
-                             _run(ts="t2", model="b.gguf", size=256)])
+    p.set_benchmark_history(
+        [
+            _run(ts="t1", model="a.gguf", size=128),
+            _run(ts="t2", model="b.gguf", size=256),
+        ]
+    )
     # two headers + two metric rows
     assert p.bench_table.rowCount() == 4
-    assert "b.gguf" in p.bench_table.item(0, 0).text()   # newest (t2) first
+    assert "b.gguf" in p.bench_table.item(0, 0).text()  # newest (t2) first
     assert "a.gguf" in p.bench_table.item(2, 0).text()
 
 
@@ -59,8 +73,10 @@ def test_empty_history_clears_table(qtbot):
 def test_show_run_sets_delta_in_progress(qtbot):
     p = BenchmarkPanel()
     qtbot.addWidget(p)
-    delta = {"shared": [{"size": 512, "pp_pct": 10.0, "gen_pct": -5.0}],
-             "sizes_differ": False}
+    delta = {
+        "shared": [{"size": 512, "pp_pct": 10.0, "gen_pct": -5.0}],
+        "sizes_differ": False,
+    }
     p.show_benchmark_run({"rows": []}, delta)
     t = p.bench_progress.text()
     assert "pp +10%" in t and "gen -5%" in t
@@ -76,10 +92,12 @@ def test_clear_button_emits_signal(qtbot):
 def test_table_headers_have_tooltips(qtbot):
     p = BenchmarkPanel()
     qtbot.addWidget(p)
-    tips = [p.bench_table.horizontalHeaderItem(c).toolTip()
-            for c in range(p.bench_table.columnCount())]
-    assert all(t.strip() for t in tips)                 # every header explained
-    assert any("prefill" in t.lower() for t in tips)    # pp t/s explained
+    tips = [
+        p.bench_table.horizontalHeaderItem(c).toolTip()
+        for c in range(p.bench_table.columnCount())
+    ]
+    assert all(t.strip() for t in tips)  # every header explained
+    assert any("prefill" in t.lower() for t in tips)  # pp t/s explained
 
 
 def test_legend_explains_metrics(qtbot):

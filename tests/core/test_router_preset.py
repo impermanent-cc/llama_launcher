@@ -1,5 +1,6 @@
 from llama_launcher.core.router_preset import (
-    convert_raw_args, render_preset,
+    convert_raw_args,
+    render_preset,
 )
 from llama_launcher.core.spec import LoraRef, Profile, RouterMember
 
@@ -24,8 +25,9 @@ def test_section_name_uses_explicit_model_id():
 
 
 def test_renders_settings_as_dashless_keys():
-    p = Profile(name="Qwen", model="/m.gguf",
-                settings={"ctx-size": 8192, "n-gpu-layers": 99})
+    p = Profile(
+        name="Qwen", model="/m.gguf", settings={"ctx-size": 8192, "n-gpu-layers": 99}
+    )
     text = render_preset([(_member(), p)]).text
     assert "ctx-size = 8192" in text
     assert "n-gpu-layers = 99" in text
@@ -50,8 +52,12 @@ def test_false_bool_settings_emit_nothing():
 
 
 def test_raw_arg_duplicating_a_form_setting_is_reported():
-    p = Profile(name="Q", model="/m.gguf", settings={"ctx-size": 8192},
-                raw_args="--ctx-size 4096")
+    p = Profile(
+        name="Q",
+        model="/m.gguf",
+        settings={"ctx-size": 8192},
+        raw_args="--ctx-size 4096",
+    )
     out = render_preset([(_member(), p)])
     assert out.text.count("ctx-size = ") == 1
     assert "ctx-size = 8192" in out.text
@@ -59,8 +65,11 @@ def test_raw_arg_duplicating_a_form_setting_is_reported():
 
 
 def test_excludes_router_controlled_keys():
-    p = Profile(name="Q", model="/m.gguf",
-                settings={"port": 9090, "api-key": "secret", "ctx-size": 4096})
+    p = Profile(
+        name="Q",
+        model="/m.gguf",
+        settings={"port": 9090, "api-key": "secret", "ctx-size": 4096},
+    )
     text = render_preset([(_member(), p)]).text
     assert "port" not in text
     assert "secret" not in text
@@ -73,8 +82,7 @@ def test_excludes_router_only_keys():
 
 
 def test_emits_mmproj_and_draft_model():
-    p = Profile(name="Q", model="/m.gguf", mmproj="/mm.gguf",
-                draft_model="/d.gguf")
+    p = Profile(name="Q", model="/m.gguf", mmproj="/mm.gguf", draft_model="/d.gguf")
     text = render_preset([(_member(), p)]).text
     assert "mmproj = /mm.gguf" in text
     assert "spec-draft-model = /d.gguf" in text
@@ -93,8 +101,11 @@ def test_single_lora_emitted_multiple_warns():
     assert "lora = /a.gguf" in out1.text
     assert out1.warnings == []
 
-    p2 = Profile(name="Q", model="/m.gguf",
-                 loras=[LoraRef(path="/a.gguf"), LoraRef(path="/b.gguf")])
+    p2 = Profile(
+        name="Q",
+        model="/m.gguf",
+        loras=[LoraRef(path="/a.gguf"), LoraRef(path="/b.gguf")],
+    )
     out2 = render_preset([(_member(), p2)])
     # INI keys are unique, so only the first survives; the user must be told.
     assert "lora = /a.gguf" in out2.text
@@ -173,8 +184,13 @@ def test_preset_omits_engine_gated_flag_for_mainline_member():
     # router's preset (the child llama-server would reject it) -- parity with
     # command_builder._owned_server_pairs.
     from llama_launcher.core.spec import Runtime
-    p = Profile(name="Q", model="/m.gguf", settings={"mla-use": "1"},
-                runtime=Runtime(engine="llama.cpp"))
+
+    p = Profile(
+        name="Q",
+        model="/m.gguf",
+        settings={"mla-use": "1"},
+        runtime=Runtime(engine="llama.cpp"),
+    )
     assert "mla-use" not in render_preset([(_member(), p)]).text
 
 
@@ -187,23 +203,34 @@ def test_preset_omits_enum_value_equal_to_default():
 
 def test_preset_translates_spec_type_for_ik():
     from llama_launcher.core.spec import Runtime
-    p = Profile(name="Q", model="/m.gguf", settings={"spec-type": "draft-mtp"},
-                runtime=Runtime(engine="ik_llama.cpp"))
+
+    p = Profile(
+        name="Q",
+        model="/m.gguf",
+        settings={"spec-type": "draft-mtp"},
+        runtime=Runtime(engine="ik_llama.cpp"),
+    )
     assert "spec-type = mtp" in render_preset([(_member(), p)]).text
 
 
 def test_preset_drops_suffix_spec_type_on_mainline():
     from llama_launcher.core.spec import Runtime
-    p = Profile(name="Q", model="/m.gguf", settings={"spec-type": "suffix"},
-                runtime=Runtime(engine="llama.cpp"))
+
+    p = Profile(
+        name="Q",
+        model="/m.gguf",
+        settings={"spec-type": "suffix"},
+        runtime=Runtime(engine="llama.cpp"),
+    )
     assert "spec-type" not in render_preset([(_member(), p)]).text
 
 
 def test_preset_load_mode_at_default_does_not_suppress_legacy():
     # Parity with command_builder: a leftover load-mode equal to its default
     # emits nothing, so it must not eat the legacy no-mmap/mlock either.
-    p = Profile(name="Q", model="/m.gguf",
-                settings={"load-mode": "auto", "no-mmap": True})
+    p = Profile(
+        name="Q", model="/m.gguf", settings={"load-mode": "auto", "no-mmap": True}
+    )
     text = render_preset([(_member(), p)]).text
     assert "load-mode" not in text
     assert "no-mmap = true" in text

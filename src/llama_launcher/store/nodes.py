@@ -2,7 +2,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from llama_launcher.core.nodes import Node, LOCAL_NODE, valid_ssh_target
+from llama_launcher.core.nodes import LOCAL_NODE, Node, valid_ssh_target
 from llama_launcher.store._io import write_private
 
 _ALLOWED_BINARIES = ("podman", "docker")
@@ -19,7 +19,7 @@ def _remotes(base_dir: Path) -> list[Node]:
     try:
         data = json.loads(path.read_text())
     except (OSError, ValueError):
-        return []                      # corrupt file -> no remotes (local still returned)
+        return []  # corrupt file -> no remotes (local still returned)
     if not isinstance(data, list):
         return []
     out: list[Node] = []
@@ -44,13 +44,16 @@ def _remotes(base_dir: Path) -> list[Node]:
         connection = d.get("connection") or name
         if connection.startswith("-"):
             connection = name
-        out.append(Node(
-            name=name, kind="remote",
-            connection=connection,
-            ssh_target=ssh,
-            binary=binary,
-            enabled=bool(d.get("enabled", True)),
-        ))
+        out.append(
+            Node(
+                name=name,
+                kind="remote",
+                connection=connection,
+                ssh_target=ssh,
+                binary=binary,
+                enabled=bool(d.get("enabled", True)),
+            )
+        )
     return out
 
 
@@ -64,7 +67,7 @@ def save_nodes(nodes: list[Node], base_dir: Path) -> None:
     base_dir.mkdir(parents=True, exist_ok=True)
     remotes = [asdict(n) for n in nodes if n.kind == "remote"]
     for r in remotes:
-        r.pop("kind", None)            # implied "remote" on load
+        r.pop("kind", None)  # implied "remote" on load
     write_private(_nodes_file(base_dir), json.dumps(remotes, indent=2))
 
 

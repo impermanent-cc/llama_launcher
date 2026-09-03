@@ -14,6 +14,9 @@ not on the release page, so the two never drift.
 
 ### Changed
 
+- Lint and format gate: `ruff check` and `ruff format --check` run in CI at a
+  pinned ruff version under the `[tool.ruff]` block in pyproject.toml; the
+  whole tree is reformatted and the findings fixed. No behaviour change.
 - README: new Benchmark and Fetch latest screenshots; refreshed Build, Monitor
   and Router screenshots.
 - Code comments and docstrings now describe only what the code does; history,

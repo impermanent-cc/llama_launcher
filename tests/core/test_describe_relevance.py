@@ -1,12 +1,19 @@
-from llama_launcher.core.gguf import GgufMeta
 from llama_launcher.core.capabilities import (
-    derive_caps, describe_relevance, relevance, Tier,
+    Tier,
+    derive_caps,
+    describe_relevance,
+    relevance,
 )
+from llama_launcher.core.gguf import GgufMeta
 
 
 def test_keys_match_relevance():
-    caps = derive_caps(GgufMeta(arch="qwen35moe", expert_count=256,
-                                nextn_predict_layers=1, ctx_train=4096), [])
+    caps = derive_caps(
+        GgufMeta(
+            arch="qwen35moe", expert_count=256, nextn_predict_layers=1, ctx_train=4096
+        ),
+        [],
+    )
     assert set(describe_relevance(caps)) == set(relevance(caps))
 
 
@@ -18,7 +25,7 @@ def test_moe_reason_is_explained():
 
 
 def test_moe_na_key_has_not_applicable_reason():
-    caps = derive_caps(GgufMeta(), [])   # dense model, no experts
+    caps = derive_caps(GgufMeta(), [])  # dense model, no experts
     tier, reason = describe_relevance(caps)["n-cpu-moe"]
     assert tier == Tier.NA
     assert "not" in reason.lower()
@@ -32,7 +39,7 @@ def test_mtp_reason_is_explained():
 
 
 def test_mtp_na_key_has_not_applicable_reason():
-    caps = derive_caps(GgufMeta(), [])   # no MTP/draft head
+    caps = derive_caps(GgufMeta(), [])  # no MTP/draft head
     tier, reason = describe_relevance(caps)["spec-type"]
     assert tier == Tier.NA
     assert "not" in reason.lower()
