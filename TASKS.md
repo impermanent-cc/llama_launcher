@@ -2,12 +2,20 @@
 
 ## Current phase
 
-Idle: no cycle open. Two branches await the owner's merge, 2026-09-03:
-chore/workflow-stamp (the workflow standard, light touch) and
-chore/ruff-gate on top of it (SPEC.md 3.5: the standard's ruff block, CI
-lint job, autofix and reformat of 194 files, 47 findings fixed by hand,
-the ruff gate green with 1756 tests passing). Merge with --no-ff in that
-order, or merge chore/ruff-gate alone since it contains the stamp.
+Idle: no cycle open. The workflow standard's stamp and its ruff gate
+landed on main 2026-09-03 as merge f37f6a5, a --no-ff merge of
+chore/ruff-gate with chore/workflow-stamp beneath it. Both branches are
+deleted, locally and on origin.
+
+0.1.1 is cut in CHANGELOG.md and pyproject.toml but is not tagged, so the
+changelog's 0.1.1 link and the AGENTS.md "released (v0.1.0)" line resolve
+only once the tag exists. To finish the release:
+
+    git tag -a v0.1.1 -m "llama_launcher v0.1.1"
+    git push origin v0.1.1
+    gh release create v0.1.1 --notes-file <(./scripts/release-notes.sh 0.1.1)
+
+then update the AGENTS.md version line.
 
 ## Open items
 
@@ -66,3 +74,9 @@ order, or merge chore/ruff-gate alone since it contains the stamp.
   Closes CodeQL code scanning alert 1 (actions/missing-workflow-permissions,
   raised on main when default setup first ran), which clears once this
   branch lands.
+- 0.1.1 cut: the accumulated [Unreleased] entries became
+  `## [0.1.1] - 2026-09-03`, a fresh skeleton opened above it, the link
+  references gained a 0.1.1 row, and pyproject.toml reads 0.1.1. The bump
+  is carried by the two user-visible fixes already on main (the dialog
+  title suffix and the Configure form's first-start rows); nothing in the
+  stamp or the ruff gate is user-visible.

@@ -1,6 +1,6 @@
 [project]
 name = "llama-launcher"
-version = "0.1.0"
+version = "0.1.1"
 description = "PySide6 desktop GUI to build and launch llama.cpp llama-server via podman/docker, with remote multi-node and RPC pooling"
 readme = "README.md"
 authors = [{ name = "impermanent-cc", email = "200443016+impermanent-cc@users.noreply.github.com" }]

@@ -14,6 +14,14 @@ not on the release page, so the two never drift.
 
 ### Changed
 
+### Fixed
+
+## [0.1.1] - 2026-09-03
+
+### Added
+
+### Changed
+
 - Lint and format gate: `ruff check` and `ruff format --check` run in CI at a
   pinned ruff version under the `[tool.ruff]` block in pyproject.toml; the
   whole tree is reformatted and the findings fixed. No behaviour change.
@@ -73,5 +81,6 @@ delete and a use-in-profile action.
 Docker and podman paths, single-server plus router modes, and the embedding
 and reranking (RAG) path validated live. Known gap: AMD/ROCm GPUs untested.
 
-[Unreleased]: https://github.com/impermanent-cc/llama_launcher/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/impermanent-cc/llama_launcher/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/impermanent-cc/llama_launcher/releases/tag/v0.1.1
 [0.1.0]: https://github.com/impermanent-cc/llama_launcher/releases/tag/v0.1.0
