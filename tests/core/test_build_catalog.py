@@ -1,5 +1,8 @@
 from llama_launcher.core.build_catalog import (
-    BUILD_CATALOG, REPO_URL, DEFAULT_BRANCH, ENGINE_SHORT,
+    BUILD_CATALOG,
+    DEFAULT_BRANCH,
+    ENGINE_SHORT,
+    REPO_URL,
 )
 from llama_launcher.core.settings_catalog import for_engine
 
@@ -7,13 +10,16 @@ from llama_launcher.core.settings_catalog import for_engine
 def test_keys_match_setting_key_and_no_aliases():
     for key, s in BUILD_CATALOG.items():
         assert s.key == key
-        assert s.aliases == ()          # cmake defines have no alias spellings
-        assert not s.flag.startswith("-")   # bare variable name, -D added at render
+        assert s.aliases == ()  # cmake defines have no alias spellings
+        assert not s.flag.startswith("-")  # bare variable name, -D added at render
 
 
 def test_engine_values_are_valid():
     assert {s.engine for s in BUILD_CATALOG.values()} <= {
-        "any", "llama.cpp", "ik_llama.cpp"}
+        "any",
+        "llama.cpp",
+        "ik_llama.cpp",
+    }
 
 
 def test_for_engine_filters_both_directions():
@@ -56,7 +62,11 @@ def test_sched_max_copies_split_by_engine():
 
 
 def test_repo_constants():
-    assert set(REPO_URL) == set(DEFAULT_BRANCH) == set(ENGINE_SHORT) == {
-        "llama.cpp", "ik_llama.cpp"}
+    assert (
+        set(REPO_URL)
+        == set(DEFAULT_BRANCH)
+        == set(ENGINE_SHORT)
+        == {"llama.cpp", "ik_llama.cpp"}
+    )
     assert DEFAULT_BRANCH["llama.cpp"] == "master"
     assert DEFAULT_BRANCH["ik_llama.cpp"] == "main"

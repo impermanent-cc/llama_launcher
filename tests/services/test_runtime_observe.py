@@ -21,8 +21,11 @@ def test_container_exists_false(monkeypatch):
 
 
 def test_stats_parses_json(monkeypatch):
-    monkeypatch.setattr(rt, "_run",
-        lambda a: Fake(stdout='[{"CPUPerc":"12.5%","MemUsage":"1.2GB / 16GB"}]', rc=0))
+    monkeypatch.setattr(
+        rt,
+        "_run",
+        lambda a: Fake(stdout='[{"CPUPerc":"12.5%","MemUsage":"1.2GB / 16GB"}]', rc=0),
+    )
     s = rt.stats("llama-x", "podman")
     assert s == {"cpu_perc": "12.5%", "mem_usage": "1.2GB / 16GB"}
 

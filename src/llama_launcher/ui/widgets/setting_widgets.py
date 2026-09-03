@@ -1,11 +1,19 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QGridLayout, QCheckBox, QLabel, QLineEdit, QToolButton
+    QCheckBox,
+    QGridLayout,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QToolButton,
+    QWidget,
 )
 
 from llama_launcher.core.settings_catalog import Setting
 from llama_launcher.ui.widgets.no_wheel import (
-    NoWheelComboBox, NoWheelSpinBox, NoWheelDoubleSpinBox,
+    NoWheelComboBox,
+    NoWheelDoubleSpinBox,
+    NoWheelSpinBox,
 )
 
 
@@ -28,7 +36,9 @@ class SuggestionDot(QToolButton):
         self.setToolTip(reason)
         if state == "suggested":
             self.setText("\u25cf")
-            self.setStyleSheet("QToolButton { color: palette(highlight); border: none; }")
+            self.setStyleSheet(
+                "QToolButton { color: palette(highlight); border: none; }"
+            )
             self.setVisible(True)
         elif state == "muted":
             self.setText("\u25cb")
@@ -84,16 +94,20 @@ class SettingWidget(QWidget):
             self._editor.currentTextChanged.connect(lambda: self.changed.emit())
         elif t == "int":
             self._editor = NoWheelSpinBox()
-            self._editor.setRange(int(setting.minimum if setting.minimum is not None else -2**31),
-                                  int(setting.maximum if setting.maximum is not None else 2**31 - 1))
+            self._editor.setRange(
+                int(setting.minimum if setting.minimum is not None else -(2**31)),
+                int(setting.maximum if setting.maximum is not None else 2**31 - 1),
+            )
             self._editor.setSingleStep(int(setting.step or 1))
             self._editor.setValue(int(setting.default))
             self._editor.valueChanged.connect(lambda: self.changed.emit())
         elif t == "float":
             self._editor = NoWheelDoubleSpinBox()
             self._editor.setDecimals(3)
-            self._editor.setRange(float(setting.minimum if setting.minimum is not None else -1e9),
-                                  float(setting.maximum if setting.maximum is not None else 1e9))
+            self._editor.setRange(
+                float(setting.minimum if setting.minimum is not None else -1e9),
+                float(setting.maximum if setting.maximum is not None else 1e9),
+            )
             self._editor.setSingleStep(float(setting.step or 0.01))
             self._editor.setValue(float(setting.default))
             self._editor.valueChanged.connect(lambda: self.changed.emit())
@@ -111,13 +125,13 @@ class SettingWidget(QWidget):
             grid.setVerticalSpacing(2)
             help_map = dict(setting.option_help)
             self._all_check = QCheckBox("all")
-            self._all_check.setToolTip(tooltip)   # overall (danger) note on "all"
+            self._all_check.setToolTip(tooltip)  # overall (danger) note on "all"
             self._all_check.toggled.connect(self._on_all_toggled)
             self._all_check.toggled.connect(lambda: self.changed.emit())
             boxes = [self._all_check]
             for opt in setting.enum:
                 cb = QCheckBox(opt)
-                cb.setToolTip(help_map.get(opt, tooltip))   # per-option description
+                cb.setToolTip(help_map.get(opt, tooltip))  # per-option description
                 cb.toggled.connect(lambda: self.changed.emit())
                 self._checks[opt] = cb
                 boxes.append(cb)
@@ -145,16 +159,23 @@ class SettingWidget(QWidget):
                 reveal.setToolTip("Show / hide")
                 reveal.toggled.connect(
                     lambda on: self._editor.setEchoMode(
-                        QLineEdit.Normal if on else QLineEdit.Password))
+                        QLineEdit.Normal if on else QLineEdit.Password
+                    )
+                )
                 self._reveal_btn = reveal
             self._editor.textChanged.connect(lambda: self.changed.emit())
 
         # Cap editor widths so dropdowns/inputs don't stretch the whole panel,
         # and left-align them with a trailing stretch.
-        _max_width = {"enum": 150, "int_or_token": 150, "int": 120,
-                      "float": 120, "string": 240}.get(t)
+        _max_width = {
+            "enum": 150,
+            "int_or_token": 150,
+            "int": 120,
+            "float": 120,
+            "string": 240,
+        }.get(t)
         if t == "int" and setting.suggestions:
-            _max_width = 150   # editable preset combo needs room for 6-digit values
+            _max_width = 150  # editable preset combo needs room for 6-digit values
         if _max_width:
             self._editor.setMaximumWidth(_max_width)
         layout.addWidget(self._editor)

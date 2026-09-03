@@ -1,17 +1,13 @@
 """Tests for the --dry-run CLI mode in llama_launcher.app."""
-import shlex
-
-import pytest
-
-from llama_launcher.core.spec import Mount, Profile, Runtime
-from llama_launcher.store.profiles import save_config, save_profile
 
 from llama_launcher.app import dry_run, main
-
+from llama_launcher.core.spec import Mount, Profile, Runtime
+from llama_launcher.store.profiles import save_profile
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_profile(name="test-model", port=8080) -> Profile:
     """A profile whose model is under a mount (passes validation)."""
@@ -19,7 +15,9 @@ def _make_profile(name="test-model", port=8080) -> Profile:
         name=name,
         image="ghcr.io/ggml-org/llama.cpp:server",
         runtime=Runtime(binary="podman", gpu_mode="none"),
-        mounts=[Mount(host="/data/models", container="/models", role="model", mode="ro")],
+        mounts=[
+            Mount(host="/data/models", container="/models", role="model", mode="ro")
+        ],
         model="/models/tinyllama.gguf",
         settings={"port": port},
     )
@@ -28,6 +26,7 @@ def _make_profile(name="test-model", port=8080) -> Profile:
 # ---------------------------------------------------------------------------
 # Test 1: dry_run with a valid saved profile returns 0 and prints podman cmd
 # ---------------------------------------------------------------------------
+
 
 def test_dry_run_valid_profile_returns_0_and_prints_commands(
     tmp_path, capsys, monkeypatch
@@ -63,6 +62,7 @@ def test_dry_run_valid_profile_returns_0_and_prints_commands(
 # Test 2: dry_run with an unknown --profile name returns 2 and lists names
 # ---------------------------------------------------------------------------
 
+
 def test_dry_run_unknown_profile_returns_2_and_lists_available(
     tmp_path, capsys, monkeypatch
 ):
@@ -87,6 +87,7 @@ def test_dry_run_unknown_profile_returns_2_and_lists_available(
 # Test 3: dry_run with no profiles in base_dir returns 2
 # ---------------------------------------------------------------------------
 
+
 def test_dry_run_no_profiles_returns_2(tmp_path, capsys):
     """dry_run with an empty profiles directory returns 2 and prints a
     helpful message mentioning the base_dir."""
@@ -101,6 +102,7 @@ def test_dry_run_no_profiles_returns_2(tmp_path, capsys):
 # ---------------------------------------------------------------------------
 # Test 4: dry_run on a profile with no model (validation error) returns 1
 # ---------------------------------------------------------------------------
+
 
 def test_dry_run_validation_error_returns_1_and_prints_error(
     tmp_path, capsys, monkeypatch
@@ -128,6 +130,7 @@ def test_dry_run_validation_error_returns_1_and_prints_error(
 # ---------------------------------------------------------------------------
 # Test 5: main(["--dry-run", "--profile", NAME]) routes to dry_run
 # ---------------------------------------------------------------------------
+
 
 def test_main_dry_run_flag_routes_to_dry_run(tmp_path, capsys, monkeypatch):
     """main() with --dry-run and --profile routes to dry_run() and returns

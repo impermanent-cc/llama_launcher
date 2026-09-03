@@ -5,8 +5,10 @@ from llama_launcher.ui.widgets.rpc_workers_table import RpcWorkersTable
 def test_table_round_trips_workers(qtbot):
     t = RpcWorkersTable(node_names=["local", "box2"])
     qtbot.addWidget(t)
-    ws = [RpcWorker(node="local", device="CUDA0", mem_mb=8000, port=50052),
-          RpcWorker(node="box2", device="CPU", mem_mb=32000, port=50052)]
+    ws = [
+        RpcWorker(node="local", device="CUDA0", mem_mb=8000, port=50052),
+        RpcWorker(node="box2", device="CPU", mem_mb=32000, port=50052),
+    ]
     t.set_workers(ws)
     assert t.workers() == ws
 

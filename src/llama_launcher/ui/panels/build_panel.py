@@ -5,38 +5,64 @@ container target, and records a BuildOutput in the store registry. This tab
 never runs podman/cmake itself -- see core/build_command.py and
 store/builds.py for the renderers and store that do the actual work.
 """
+
 import datetime
 import shutil
 from pathlib import Path
 
-from PySide6.QtCore import QRunnable, QThreadPool, QTimer, Qt, Signal
+from PySide6.QtCore import QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QGroupBox,
-    QScrollArea, QPlainTextEdit, QPushButton, QApplication, QTableWidget,
-    QSplitter, QTabWidget,
-    QTableWidgetItem, QAbstractItemView, QMessageBox, QMenu,
+    QAbstractItemView,
+    QApplication,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QLineEdit,
+    QMenu,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QSplitter,
+    QTableWidget,
+    QTableWidgetItem,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
 from llama_launcher.core.build_catalog import BUILD_CATALOG
 from llama_launcher.core.build_command import (
-    auto_tag, render_native, render_container, default_image_pool,
+    auto_tag,
+    default_image_pool,
     default_images,
+    render_container,
+    render_native,
 )
 from llama_launcher.core.build_outputs import (
-    OutputRow, classify_outputs, extract_build_dir, untracked_custom_tags,
+    OutputRow,
+    classify_outputs,
+    extract_build_dir,
     profiles_using,
+    untracked_custom_tags,
 )
 from llama_launcher.core.build_spec import BuildConfig, BuildOutput
 from llama_launcher.core.settings_catalog import for_engine
 from llama_launcher.services.gpu import query_compute_caps
 from llama_launcher.services.runtime import list_images_detailed, remove_image
 from llama_launcher.store.builds import (
-    containerfile_path, save_build_config, list_build_configs, load_outputs,
-    add_output, remove_output, write_containerfile, new_output_id,
+    add_output,
+    containerfile_path,
+    list_build_configs,
+    load_outputs,
+    new_output_id,
+    remove_output,
+    save_build_config,
+    write_containerfile,
 )
 from llama_launcher.store.profiles import list_profiles, save_profile
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
-from llama_launcher.ui.widgets.setting_widgets import make_widget, make_row_label
+from llama_launcher.ui.widgets.setting_widgets import make_row_label, make_widget
 from llama_launcher.ui.widgets.table_columns import set_resizable_columns
 
 
@@ -50,6 +76,7 @@ class _OutputsGather(QRunnable):
     result is simply dropped). The classify+render work happens back on the
     UI thread in refresh_outputs_sync, called by _poll_outputs.
     """
+
     def __init__(self, binary: str):
         super().__init__()
         self._binary = binary
@@ -59,7 +86,7 @@ class _OutputsGather(QRunnable):
     def run(self):
         try:
             self.images = list_images_detailed(self._binary)
-        except Exception:            # noqa: BLE001 - worker must never raise
+        except Exception:  # worker must never raise
             self.images = {}
         finally:
             self.done = True
@@ -81,7 +108,7 @@ class _WorkGather(QRunnable):
     def run(self):
         try:
             self.ok, self.error = self._fn()
-        except Exception as exc:     # noqa: BLE001 - worker must never raise
+        except Exception as exc:  # worker must never raise
             self.ok, self.error = False, str(exc)
         finally:
             self.done = True
@@ -156,9 +183,11 @@ class BuildPanel(QWidget):
         left = QGroupBox("Build config")
         self._left_form = QFormLayout(left)
         self.name_edit = QLineEdit()
-        self.name_edit.setToolTip("Name for this build config; also the slug "
-                                   "used for the saved-config file and any "
-                                   "Containerfile it writes.")
+        self.name_edit.setToolTip(
+            "Name for this build config; also the slug "
+            "used for the saved-config file and any "
+            "Containerfile it writes."
+        )
         self.name_edit.textChanged.connect(self.refresh_preview)
         self._left_form.addRow("Name", self.name_edit)
 
@@ -187,26 +216,31 @@ class BuildPanel(QWidget):
 
         self.ref_edit = QLineEdit()
         self.ref_edit.setPlaceholderText("(engine default branch)")
-        self.ref_edit.setToolTip("git ref (branch/tag/commit) to check out. "
-                                  "Empty uses the engine's default branch.")
+        self.ref_edit.setToolTip(
+            "git ref (branch/tag/commit) to check out. "
+            "Empty uses the engine's default branch."
+        )
         self.ref_edit.textChanged.connect(self.refresh_preview)
         self._left_form.addRow("Git ref", self.ref_edit)
 
         self.source_dir_edit = QLineEdit()
         self.source_dir_edit.setToolTip(
-            "Host checkout directory the native build runs against.")
+            "Host checkout directory the native build runs against."
+        )
         self.source_dir_edit.textChanged.connect(self.refresh_preview)
         self._left_form.addRow("Source dir", self.source_dir_edit)
 
         self.builder_image_edit = QLineEdit()
         self.builder_image_edit.setToolTip(
-            "Multi-stage build image the Containerfile compiles in.")
+            "Multi-stage build image the Containerfile compiles in."
+        )
         self.builder_image_edit.textChanged.connect(self.refresh_preview)
         self._left_form.addRow("Builder image", self.builder_image_edit)
 
         self.runtime_image_edit = QLineEdit()
         self.runtime_image_edit.setToolTip(
-            "Slim runtime image the built binaries are copied into.")
+            "Slim runtime image the built binaries are copied into."
+        )
         self.runtime_image_edit.textChanged.connect(self.refresh_preview)
         self._left_form.addRow("Runtime image", self.runtime_image_edit)
 
@@ -219,7 +253,8 @@ class BuildPanel(QWidget):
         self.raw_defines_edit = QLineEdit()
         self.raw_defines_edit.setToolTip(
             "Extra -D defines appended verbatim, e.g. -DFOO=bar. "
-            "Duplicates of catalog options are de-duplicated.")
+            "Duplicates of catalog options are de-duplicated."
+        )
         self.raw_defines_edit.textChanged.connect(self.refresh_preview)
         self._left_form.addRow("Raw defines", self.raw_defines_edit)
 
@@ -251,17 +286,25 @@ class BuildPanel(QWidget):
         self.copy_containerfile_btn = QPushButton("Copy Containerfile")
         self.copy_podman_btn = QPushButton("Copy podman build cmd")
         self.copy_configure_btn.clicked.connect(
-            lambda: self._copy(render_native(self.current_build_config()).configure_cmd))
+            lambda: self._copy(render_native(self.current_build_config()).configure_cmd)
+        )
         self.copy_build_btn.clicked.connect(
-            lambda: self._copy(render_native(self.current_build_config()).build_cmd))
+            lambda: self._copy(render_native(self.current_build_config()).build_cmd)
+        )
         self.copy_containerfile_btn.clicked.connect(
-            lambda: self._copy(self._render_container().containerfile))
+            lambda: self._copy(self._render_container().containerfile)
+        )
         self.copy_podman_btn.clicked.connect(
-            lambda: self._copy(self._render_container().build_cmd))
+            lambda: self._copy(self._render_container().build_cmd)
+        )
         self.generate_btn = QPushButton("Generate")
         self.generate_btn.clicked.connect(self.generate)
-        for b in (self.copy_configure_btn, self.copy_build_btn,
-                  self.copy_containerfile_btn, self.copy_podman_btn):
+        for b in (
+            self.copy_configure_btn,
+            self.copy_build_btn,
+            self.copy_containerfile_btn,
+            self.copy_podman_btn,
+        ):
             actions.addWidget(b)
         actions.addStretch(1)
         actions.addWidget(self.generate_btn)
@@ -284,13 +327,20 @@ class BuildPanel(QWidget):
 
         self.outputs_table = QTableWidget(0, 5)
         self.outputs_table.setHorizontalHeaderLabels(
-            ["Identifier", "Status", "Size", "Created", "Config"])
-        self.outputs_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.outputs_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+            ["Identifier", "Status", "Size", "Created", "Config"]
+        )
+        self.outputs_table.setSelectionBehavior(
+            QAbstractItemView.SelectionBehavior.SelectRows
+        )
+        self.outputs_table.setSelectionMode(
+            QAbstractItemView.SelectionMode.SingleSelection
+        )
         self.outputs_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         set_resizable_columns(self.outputs_table, (240, 80, 80, 100, 120))
         self.outputs_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.outputs_table.customContextMenuRequested.connect(self._on_outputs_context_menu)
+        self.outputs_table.customContextMenuRequested.connect(
+            self._on_outputs_context_menu
+        )
         outputs_layout.addWidget(self.outputs_table)
 
         self.bottom_tabs = QTabWidget()
@@ -383,15 +433,19 @@ class BuildPanel(QWidget):
         the result is cached, so later toggles are synchronous."""
         cuda = self._widgets.get("cuda")
         arch = self._widgets.get("cuda-architectures")
-        if (cuda is None or arch is None or not cuda.value()
-                or str(arch.value()).strip()):
+        if (
+            cuda is None
+            or arch is None
+            or not cuda.value()
+            or str(arch.value()).strip()
+        ):
             return
         if self._caps_cache is not None:
             if self._caps_cache:
                 arch.set_value(";".join(self._caps_cache))
             return
         if self._caps_gather is not None:
-            return                       # a fetch is already in flight
+            return  # a fetch is already in flight
         g = _CapsGather(self)
         self._caps_gather = g
         QThreadPool.globalInstance().start(g)
@@ -451,7 +505,7 @@ class BuildPanel(QWidget):
     def _on_save(self) -> None:
         try:
             save_build_config(self.current_build_config(), self.base_dir)
-        except ValueError as e:            # reserved name ("outputs")
+        except ValueError as e:  # reserved name ("outputs")
             self._error(str(e))
             return
         self._reload_config_combo()
@@ -527,8 +581,9 @@ class BuildPanel(QWidget):
         self._outputs_cache = None
 
     @staticmethod
-    def _matching_entry(cfg: BuildConfig, kind: str, identifier: str | None,
-                        outputs: list) -> BuildOutput | None:
+    def _matching_entry(
+        cfg: BuildConfig, kind: str, identifier: str | None, outputs: list
+    ) -> BuildOutput | None:
         """The registry entry that describes the SAME expected build: for tags
         the same config/engine/ref/options snapshot (regenerating without
         changes reuses it instead of stacking phantom rows); for binaries the
@@ -539,8 +594,12 @@ class BuildPanel(QWidget):
             if kind == "binary":
                 if o.identifier == identifier:
                     return o
-            elif (o.config_name == cfg.name and o.engine == cfg.engine
-                  and o.git_ref == cfg.git_ref and o.options == cfg.options):
+            elif (
+                o.config_name == cfg.name
+                and o.engine == cfg.engine
+                and o.git_ref == cfg.git_ref
+                and o.options == cfg.options
+            ):
                 return o
         return None
 
@@ -560,8 +619,12 @@ class BuildPanel(QWidget):
     def _render_container(self, cfg: BuildConfig | None = None, tag: str | None = None):
         cfg = cfg or self.current_build_config()
         tag = tag or self._current_tag(cfg)
-        return render_container(cfg, tag, str(self._containerfile_path(cfg)),
-                                binary=self._binary_provider() or "podman")
+        return render_container(
+            cfg,
+            tag,
+            str(self._containerfile_path(cfg)),
+            binary=self._binary_provider() or "podman",
+        )
 
     def refresh_preview(self) -> None:
         if self._loading:
@@ -574,14 +637,18 @@ class BuildPanel(QWidget):
             text = cb.containerfile + "\n" + cb.build_cmd
         else:
             nb = render_native(cfg)
-            text = (nb.configure_cmd + "\n" + nb.build_cmd
-                    + f"\n# expected binary: {nb.expected_binary}")
+            text = (
+                nb.configure_cmd
+                + "\n"
+                + nb.build_cmd
+                + f"\n# expected binary: {nb.expected_binary}"
+            )
         self.preview.setPlainText(text)
 
     def generate(self) -> None:
         cfg = self.current_build_config()
         today = datetime.date.today()
-        outs = load_outputs(self.base_dir)   # authoritative read for a write
+        outs = load_outputs(self.base_dir)  # authoritative read for a write
         if cfg.target == "container":
             tag = self._current_tag(cfg, outs)
             cb = self._render_container(cfg, tag)
@@ -600,17 +667,27 @@ class BuildPanel(QWidget):
         # would leave stale provenance in the registry forever.
         dup = self._matching_entry(cfg, kind, identifier, outs)
         if dup is not None:
-            if kind == "tag" or (dup.options == cfg.options
-                                 and dup.engine == cfg.engine
-                                 and dup.git_ref == cfg.git_ref):
+            if kind == "tag" or (
+                dup.options == cfg.options
+                and dup.engine == cfg.engine
+                and dup.git_ref == cfg.git_ref
+            ):
                 self.refresh_preview()
                 return
             remove_output(dup.id, self.base_dir)
-        add_output(BuildOutput(
-            id=new_output_id(), kind=kind, identifier=identifier,
-            config_name=cfg.name, engine=cfg.engine, git_ref=cfg.git_ref,
-            options=cfg.options, created=today.isoformat(),
-        ), self.base_dir)
+        add_output(
+            BuildOutput(
+                id=new_output_id(),
+                kind=kind,
+                identifier=identifier,
+                config_name=cfg.name,
+                engine=cfg.engine,
+                git_ref=cfg.git_ref,
+                options=cfg.options,
+                created=today.isoformat(),
+            ),
+            self.base_dir,
+        )
         self._invalidate_outputs_cache()
         self.refresh_preview()
 
@@ -653,7 +730,7 @@ class BuildPanel(QWidget):
     def _poll_outputs(self) -> None:
         g = self._outputs_gather
         if g is None:
-            return                       # a newer poll chain already rendered
+            return  # a newer poll chain already rendered
         if not g.done:
             QTimer.singleShot(150, self._poll_outputs)
             return
@@ -668,7 +745,7 @@ class BuildPanel(QWidget):
         """
         if images is None:
             images = list_images_detailed(self._binary_provider() or "podman")
-        self._invalidate_outputs_cache()   # pick up external registry edits
+        self._invalidate_outputs_cache()  # pick up external registry edits
         outputs = load_outputs(self.base_dir)
         rows = classify_outputs(outputs, images, self._binary_exists)
         untracked = untracked_custom_tags(images, outputs)
@@ -689,11 +766,16 @@ class BuildPanel(QWidget):
                 table.setItem(r, c, item)
 
     def _confirm(self, text: str) -> bool:
-        return QMessageBox.question(
-            self, "Confirm", text,
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) == QMessageBox.StandardButton.Yes
+        return (
+            QMessageBox.question(
+                self,
+                "Confirm",
+                text,
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            == QMessageBox.StandardButton.Yes
+        )
 
     def _error(self, text: str) -> None:
         QMessageBox.critical(self, "Error", text)
@@ -723,7 +805,8 @@ class BuildPanel(QWidget):
         if using:
             self._error(
                 f"{identifier} is in use by profile(s): {', '.join(using)}. "
-                "Repoint or delete those profiles first.")
+                "Repoint or delete those profiles first."
+            )
             return
 
         if row.status == "built":
@@ -758,7 +841,7 @@ class BuildPanel(QWidget):
             # rmtree of a build dir isn't cheap either: run the blocking part
             # off the UI thread and finish in _poll_delete.
             if self._delete_gather is not None:
-                return                     # a delete is already in flight
+                return  # a delete is already in flight
             self.delete_output_btn.setEnabled(False)
             g = _WorkGather(work)
             g.fail_prefix = fail_prefix
@@ -770,7 +853,8 @@ class BuildPanel(QWidget):
 
         if row.status == "missing":
             if output is not None and self._confirm(
-                    f"Remove {identifier} from the build registry?"):
+                f"Remove {identifier} from the build registry?"
+            ):
                 remove_output(output.id, self.base_dir)
                 self._invalidate_outputs_cache()
                 self.refresh_outputs()
@@ -802,8 +886,11 @@ class BuildPanel(QWidget):
         For binary outputs: native-mode profiles (launch_mode == "native")
         """
         want = "container" if kind == "tag" else "native"
-        return [p.name for p in list_profiles(self.base_dir)
-                if p.runtime.launch_mode == want]
+        return [
+            p.name
+            for p in list_profiles(self.base_dir)
+            if p.runtime.launch_mode == want
+        ]
 
     def _on_outputs_context_menu(self, pos) -> None:
         """Show a context menu on the outputs table with "Use in profile" actions."""
@@ -822,7 +909,8 @@ class BuildPanel(QWidget):
         for profile_name in eligible:
             action = menu.addAction(f"Use in profile: {profile_name}")
             action.triggered.connect(
-                lambda checked=False, name=profile_name: self.use_in_profile(name))
+                lambda checked=False, name=profile_name: self.use_in_profile(name)
+            )
 
         menu.exec(self.outputs_table.viewport().mapToGlobal(pos))
 

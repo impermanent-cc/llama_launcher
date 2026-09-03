@@ -1,12 +1,18 @@
-from llama_launcher.core.gguf import GgufMeta
 from llama_launcher.core.capabilities import (
-    derive_caps, Tier, relevance, suggestions,
-    RELEVANCE_CONTRIBUTORS, SUGGESTION_DETECTORS,
+    RELEVANCE_CONTRIBUTORS,
+    SUGGESTION_DETECTORS,
+    Tier,
+    derive_caps,
+    relevance,
+    suggestions,
 )
+from llama_launcher.core.gguf import GgufMeta
 
 
 def test_qwen_mtp_infile():
-    meta = GgufMeta(arch="qwen35moe", expert_count=256, nextn_predict_layers=1, ctx_train=262144)
+    meta = GgufMeta(
+        arch="qwen35moe", expert_count=256, nextn_predict_layers=1, ctx_train=262144
+    )
     caps = derive_caps(meta, [])
     assert caps.is_moe and caps.expert_count == 256
     assert caps.has_mtp_infile and caps.has_mtp
@@ -22,7 +28,9 @@ def test_gemma_companion_siblings():
 
 
 def test_plain_model_has_no_mtp_or_vision():
-    caps = derive_caps(GgufMeta(arch="qwen35moe", expert_count=256, ctx_train=262144), [])
+    caps = derive_caps(
+        GgufMeta(arch="qwen35moe", expert_count=256, ctx_train=262144), []
+    )
     assert caps.is_moe and not caps.has_mtp and not caps.has_vision
 
 
@@ -50,7 +58,7 @@ def test_relevance_vision_and_baseline():
     assert vis["mmproj"] == Tier.RECOMMENDED
     novis = relevance(derive_caps(GgufMeta(), []))
     assert novis["mmproj"] == Tier.NA
-    assert novis["ctx-size"] == Tier.RECOMMENDED      # baseline always
+    assert novis["ctx-size"] == Tier.RECOMMENDED  # baseline always
     assert novis["threads"] == Tier.TUNE
 
 
@@ -101,8 +109,12 @@ def test_generation_model_is_not_embedding():
 
 def test_relevance_and_suggestions_registry_preserve_behavior():
     # MoE + in-file MTP model: exercises several contributors/detectors at once.
-    caps = derive_caps(GgufMeta(arch="qwen35moe", expert_count=256,
-                                nextn_predict_layers=1, ctx_train=4096), [])
+    caps = derive_caps(
+        GgufMeta(
+            arch="qwen35moe", expert_count=256, nextn_predict_layers=1, ctx_train=4096
+        ),
+        [],
+    )
     t = relevance(caps)
     assert t["n-cpu-moe"] == Tier.RECOMMENDED
     assert t["spec-type"] == Tier.RECOMMENDED
@@ -132,13 +144,15 @@ def test_reranker_relevance_promotes_reranking():
 def test_embedding_suggestion_sets_flags():
     caps = derive_caps(GgufMeta(arch="nomic-bert", pooling_type=1), [])
     sgs = suggestions(caps, {})
-    assert any(s.settings.get("embeddings") is True and s.settings.get("pooling") == "mean"
-               for s in sgs)
+    assert any(
+        s.settings.get("embeddings") is True and s.settings.get("pooling") == "mean"
+        for s in sgs
+    )
 
 
 def test_reranker_suggestion_sets_trio():
     caps = derive_caps(GgufMeta(arch="bert", pooling_type=4), [])
-    s = [x for x in suggestions(caps, {}) if x.settings.get("reranking")][0]
+    s = next(x for x in suggestions(caps, {}) if x.settings.get("reranking"))
     assert s.settings == {"reranking": True, "pooling": "rank", "embeddings": True}
 
 

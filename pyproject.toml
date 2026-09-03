@@ -6,9 +6,9 @@ readme = "README.md"
 authors = [{ name = "impermanent-cc", email = "200443016+impermanent-cc@users.noreply.github.com" }]
 license = "MIT"
 license-files = ["LICENSE"]
-# The codebase's true floor is 3.10 (PEP 604 unions), but only 3.12/3.13 are
-# CI-tested; declare the conservative CI-backed floor rather than the
-# theoretical one. See README "Requirements".
+# The codebase's true floor is 3.11 (enum.StrEnum, datetime.UTC), but only
+# 3.12/3.13 are CI-tested; declare the conservative CI-backed floor rather
+# than the theoretical one. See README "Requirements".
 requires-python = ">=3.12"
 keywords = ["llama-cpp", "llama-server", "gui", "desktop", "pyside6",
             "inference", "llm", "container", "podman", "docker", "rpc"]
@@ -48,3 +48,17 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.ruff]
+# The formatter owns line width. E501 is off because ruff format never
+# rewraps comments or strings, so the rule would only report what nothing
+# fixes. Markdown is excluded because ruff 0.16 formats Python fences in
+# .md files by default and prose is the guard tests' business.
+line-length = 88
+extend-exclude = ["*.md"]
+
+[tool.ruff.lint]
+# Named explicitly so a ruff upgrade cannot widen the gate: pycodestyle,
+# pyflakes, import order, pyupgrade, bugbear and ruff's own rules.
+select = ["E", "F", "W", "I", "UP", "B", "RUF"]
+ignore = ["E501"]

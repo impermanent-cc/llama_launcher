@@ -13,7 +13,9 @@ def test_parse_nvidia_smi():
 
 
 def test_parse_handles_na():
-    rows = parse_nvidia_smi("[N/A], 24576, [N/A], [Not Supported], 50, [N/A], [N/A], GPU0\n")
+    rows = parse_nvidia_smi(
+        "[N/A], 24576, [N/A], [Not Supported], 50, [N/A], [N/A], GPU0\n"
+    )
     assert rows[0].mem_used_mib == 0 and rows[0].util_pct == 0
 
 
@@ -31,6 +33,8 @@ def test_parse_nvidia_smi_with_power():
 
 
 def test_parse_nvidia_smi_power_na():
-    r = parse_nvidia_smi("8192, 24576, 16384, 37, 55, [N/A], [Not Supported], GPU0\n")[0]
+    r = parse_nvidia_smi("8192, 24576, 16384, 37, 55, [N/A], [Not Supported], GPU0\n")[
+        0
+    ]
     assert r.power_draw_w is None and r.power_limit_w is None
     assert r.name == "GPU0"

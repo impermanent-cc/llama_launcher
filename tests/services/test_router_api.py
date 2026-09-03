@@ -1,7 +1,5 @@
 import json
 
-import pytest
-
 from llama_launcher.services import router_api
 
 
@@ -16,8 +14,7 @@ class FakeResponse:
         return self._payload
 
     def iter_lines(self, decode_unicode=False):
-        for line in self._lines:
-            yield line
+        yield from self._lines
 
     def __enter__(self):
         return self
@@ -45,7 +42,9 @@ def test_list_models_never_autoloads(monkeypatch):
     def fake_get(url, headers=None, timeout=None, params=None, **kw):
         seen["url"] = url
         seen["params"] = params
-        return FakeResponse(payload={"data": [{"id": "a", "status": {"value": "sleeping"}}]})
+        return FakeResponse(
+            payload={"data": [{"id": "a", "status": {"value": "sleeping"}}]}
+        )
 
     monkeypatch.setattr(router_api.requests, "get", fake_get)
     models = router_api.list_models("127.0.0.1", 8080, "sk-x")
@@ -65,14 +64,16 @@ def test_list_models_returns_none_when_unreachable(monkeypatch):
 
 
 def test_list_models_returns_none_on_non_200(monkeypatch):
-    monkeypatch.setattr(router_api.requests, "get",
-                        lambda *a, **kw: FakeResponse(status_code=401))
+    monkeypatch.setattr(
+        router_api.requests, "get", lambda *a, **kw: FakeResponse(status_code=401)
+    )
     assert router_api.list_models("127.0.0.1", 8080, None) is None
 
 
 def test_list_models_returns_empty_list_for_a_reachable_empty_router(monkeypatch):
-    monkeypatch.setattr(router_api.requests, "get",
-                        lambda *a, **kw: FakeResponse(payload={"data": []}))
+    monkeypatch.setattr(
+        router_api.requests, "get", lambda *a, **kw: FakeResponse(payload={"data": []})
+    )
     assert router_api.list_models("127.0.0.1", 8080, None) == []
 
 
@@ -111,11 +112,13 @@ def test_load_model_false_on_error(monkeypatch):
 
 
 def test_iter_sse_events_yields_parsed_events(monkeypatch):
-    frame = json.dumps({"model": "q", "event": "model_status",
-                        "data": {"status": "loaded"}})
+    frame = json.dumps(
+        {"model": "q", "event": "model_status", "data": {"status": "loaded"}}
+    )
     lines = [f"data: {frame}", "", ": ping", "", f"data: {frame}", ""]
-    monkeypatch.setattr(router_api.requests, "get",
-                        lambda *a, **kw: FakeResponse(lines=lines))
+    monkeypatch.setattr(
+        router_api.requests, "get", lambda *a, **kw: FakeResponse(lines=lines)
+    )
 
     events = list(router_api.iter_sse_events("127.0.0.1", 8080, "sk-x"))
     assert [e.event for e in events] == ["model_status", "model_status"]

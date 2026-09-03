@@ -3,7 +3,6 @@ import requests
 from llama_launcher.core.prometheus import parse_metrics
 from llama_launcher.core.props import PropsInfo, parse_props
 
-
 _NO_AUTOLOAD = {"autoload": "false"}
 
 
@@ -30,12 +29,21 @@ def url_host(host: str) -> str:
     return host
 
 
-def fetch_metrics_text(port, timeout: float = 1.0, model: str | None = None,
-                       api_key: str | None = None, host: str = "127.0.0.1") -> str:
+def fetch_metrics_text(
+    port,
+    timeout: float = 1.0,
+    model: str | None = None,
+    api_key: str | None = None,
+    host: str = "127.0.0.1",
+) -> str:
     """Raw /metrics body (needed for label-aware parsing), '' on any failure."""
     try:
-        r = requests.get(f"http://{url_host(host)}:{port}/metrics", timeout=timeout,
-                         params=_scope(model), headers=_headers(api_key))
+        r = requests.get(
+            f"http://{url_host(host)}:{port}/metrics",
+            timeout=timeout,
+            params=_scope(model),
+            headers=_headers(api_key),
+        )
         if r.status_code != 200:
             return ""
         return r.text
@@ -43,17 +51,31 @@ def fetch_metrics_text(port, timeout: float = 1.0, model: str | None = None,
         return ""
 
 
-def fetch_metrics(port, timeout: float = 1.0, model: str | None = None,
-                  api_key: str | None = None, host: str = "127.0.0.1") -> dict:
+def fetch_metrics(
+    port,
+    timeout: float = 1.0,
+    model: str | None = None,
+    api_key: str | None = None,
+    host: str = "127.0.0.1",
+) -> dict:
     text = fetch_metrics_text(port, timeout, model, api_key, host)
     return parse_metrics(text) if text else {}
 
 
-def fetch_slots(port, timeout: float = 1.0, model: str | None = None,
-                api_key: str | None = None, host: str = "127.0.0.1") -> list:
+def fetch_slots(
+    port,
+    timeout: float = 1.0,
+    model: str | None = None,
+    api_key: str | None = None,
+    host: str = "127.0.0.1",
+) -> list:
     try:
-        r = requests.get(f"http://{url_host(host)}:{port}/slots", timeout=timeout,
-                         params=_scope(model), headers=_headers(api_key))
+        r = requests.get(
+            f"http://{url_host(host)}:{port}/slots",
+            timeout=timeout,
+            params=_scope(model),
+            headers=_headers(api_key),
+        )
         if r.status_code != 200:
             return []
         data = r.json()
@@ -62,16 +84,20 @@ def fetch_slots(port, timeout: float = 1.0, model: str | None = None,
         return []
 
 
-def fetch_props(port, timeout: float = 1.0, api_key: str | None = None,
-                host: str = "127.0.0.1") -> PropsInfo | None:
+def fetch_props(
+    port, timeout: float = 1.0, api_key: str | None = None, host: str = "127.0.0.1"
+) -> PropsInfo | None:
     """Parsed /props, or None on any failure.
 
     /props is server-wide (not model-scoped) and is exempt from auth and the
     idle timer; the key is passed for symmetry and does no harm.
     """
     try:
-        r = requests.get(f"http://{url_host(host)}:{port}/props", timeout=timeout,
-                         headers=_headers(api_key))
+        r = requests.get(
+            f"http://{url_host(host)}:{port}/props",
+            timeout=timeout,
+            headers=_headers(api_key),
+        )
         if r.status_code != 200:
             return None
         return parse_props(r.json())
@@ -105,12 +131,16 @@ def kv_usage_ratio(slots: list) -> float | None:
     Prefers a processing slot (what the user is
     watching) over an idle one holding a stale sequence. None if no slot has ctx.
     """
-    active = [r for s in slots if s.get("is_processing")
-              for r in (_slot_occupancy_ratio(s),) if r is not None]
+    active = [
+        r
+        for s in slots
+        if s.get("is_processing")
+        for r in (_slot_occupancy_ratio(s),)
+        if r is not None
+    ]
     if active:
         return max(active)
-    resident = [r for s in slots
-                for r in (_slot_occupancy_ratio(s),) if r is not None]
+    resident = [r for s in slots for r in (_slot_occupancy_ratio(s),) if r is not None]
     return max(resident) if resident else None
 
 
@@ -146,8 +176,7 @@ def prompt_progress(slots: list) -> int | None:
     request completion. None when nothing is processing (its per-request reset
     would otherwise register as a bogus negative delta).
     """
-    vals = [s.get("n_prompt_tokens_processed") for s in slots
-            if s.get("is_processing")]
+    vals = [s.get("n_prompt_tokens_processed") for s in slots if s.get("is_processing")]
     vals = [v for v in vals if v is not None]
     return max(vals) if vals else None
 

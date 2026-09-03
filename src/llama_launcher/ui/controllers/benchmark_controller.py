@@ -19,11 +19,21 @@ class BenchmarkWorker(QObject):
     the UI-thread slot via a queued connection since this object lives on a
     different thread than MainWindow.
     """
+
     finished = Signal(object)
     failed = Signal(str)
 
-    def __init__(self, client, sizes, n_predict, warmup, repeats, snapshot,
-                 timestamp, parent=None):
+    def __init__(
+        self,
+        client,
+        sizes,
+        n_predict,
+        warmup,
+        repeats,
+        snapshot,
+        timestamp,
+        parent=None,
+    ):
         super().__init__(parent)
         self._client = client
         self._sizes = sizes
@@ -43,9 +53,15 @@ class BenchmarkWorker(QObject):
     def run(self) -> None:
         try:
             run = benchmark.run_benchmark(
-                self._client, self._sizes, self._n_predict, self._warmup,
-                self._repeats, self._snapshot, self._timestamp,
-                should_cancel=self._should_cancel)
+                self._client,
+                self._sizes,
+                self._n_predict,
+                self._warmup,
+                self._repeats,
+                self._snapshot,
+                self._timestamp,
+                should_cancel=self._should_cancel,
+            )
         except benchmark.BenchmarkError as e:
             self.failed.emit(str(e))
             return
@@ -98,8 +114,12 @@ class BenchmarkController:
         ready" condition collect_monitor_data treats as poll=False.
         """
         port = profile_port(p)
-        host, key, model_scope, poll = (dial_host(p.runtime.bind_host),
-                                        self.window._monitor._poll_api_key(p), None, True)
+        host, key, model_scope, poll = (
+            dial_host(p.runtime.bind_host),
+            self.window._monitor._poll_api_key(p),
+            None,
+            True,
+        )
         if p.mode == "router":
             host = self.window._monitor._router_host(p)
             model_scope = self.window._monitor._router_pollable_model()
@@ -126,15 +146,24 @@ class BenchmarkController:
         p = self.window._configure_panel.current_profile()
         prepared = self._prepare_benchmark(p)
         if prepared is None:
-            self.window.benchmark_panel.set_benchmark_progress("No model loaded to benchmark.")
+            self.window.benchmark_panel.set_benchmark_progress(
+                "No model loaded to benchmark."
+            )
             return
         client, snapshot = prepared
         self._benchmark_profile_name = p.name
         self.window.benchmark_panel.set_benchmark_running(True)
         timestamp = datetime.datetime.now().isoformat(timespec="seconds")
         try:
-            run = run_benchmark(client, cfg["sizes"], cfg["n_predict"], cfg["warmup"],
-                                cfg["repeats"], snapshot, timestamp)
+            run = run_benchmark(
+                client,
+                cfg["sizes"],
+                cfg["n_predict"],
+                cfg["warmup"],
+                cfg["repeats"],
+                snapshot,
+                timestamp,
+            )
         except benchmark.BenchmarkError as e:
             self._on_benchmark_failed(str(e))
             return
@@ -145,19 +174,28 @@ class BenchmarkController:
         benchmark.run_benchmark() on a QThread so a slow benchmark never blocks
         the GUI."""
         if self._benchmark_thread is not None:
-            return          # a run is already active; the panel showed Cancel
+            return  # a run is already active; the panel showed Cancel
         p = self.window._configure_panel.current_profile()
         prepared = self._prepare_benchmark(p)
         if prepared is None:
-            self.window.benchmark_panel.set_benchmark_progress("No model loaded to benchmark.")
+            self.window.benchmark_panel.set_benchmark_progress(
+                "No model loaded to benchmark."
+            )
             return
         client, snapshot = prepared
         self._benchmark_profile_name = p.name
         timestamp = datetime.datetime.now().isoformat(timespec="seconds")
 
         thread = QThread(self.window)
-        worker = BenchmarkWorker(client, cfg["sizes"], cfg["n_predict"], cfg["warmup"],
-                                 cfg["repeats"], snapshot, timestamp)
+        worker = BenchmarkWorker(
+            client,
+            cfg["sizes"],
+            cfg["n_predict"],
+            cfg["warmup"],
+            cfg["repeats"],
+            snapshot,
+            timestamp,
+        )
         worker.moveToThread(thread)
         thread.started.connect(worker.run)
         # Queued across threads by Qt automatically -- worker lives on `thread`,
@@ -188,19 +226,28 @@ class BenchmarkController:
 
     def _on_benchmark_clear(self) -> None:
         """Wipe the saved benchmark history for the current profile and the view."""
-        benchmark_store.clear(default_base_dir(), self.window._configure_panel.current_profile().name)
+        benchmark_store.clear(
+            default_base_dir(), self.window._configure_panel.current_profile().name
+        )
         self.window.benchmark_panel.reset()
 
     def _on_benchmark_finished(self, run) -> None:
-        name = self._benchmark_profile_name or self.window._configure_panel.current_profile().name
+        name = (
+            self._benchmark_profile_name
+            or self.window._configure_panel.current_profile().name
+        )
         base = default_base_dir()
         previous_runs = benchmark_store.load(base, name)
         previous = previous_runs[-1] if previous_runs else None
         benchmark_store.append(base, name, run)
         run_dict = dataclasses.asdict(run)
-        delta = benchmark_store.delta(run_dict, previous) if previous is not None else None
+        delta = (
+            benchmark_store.delta(run_dict, previous) if previous is not None else None
+        )
         self.window.benchmark_panel.show_benchmark_run(run_dict, delta)
-        self.window.benchmark_panel.set_benchmark_history(benchmark_store.load(base, name))
+        self.window.benchmark_panel.set_benchmark_history(
+            benchmark_store.load(base, name)
+        )
         self.window.benchmark_panel.set_benchmark_running(False)
 
     def _on_benchmark_failed(self, msg: str) -> None:
@@ -229,7 +276,8 @@ class BenchmarkController:
         if worker is not None:
             worker.cancel()
         from PySide6.QtCore import QCoreApplication
-        for _ in range(100):        # ~2s ceiling
+
+        for _ in range(100):  # ~2s ceiling
             if thread.wait(20):
                 # One more pump so the already-queued finished/failed ->
                 # _on_benchmark_thread_done delivery (which clears

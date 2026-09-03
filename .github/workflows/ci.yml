@@ -4,6 +4,11 @@ on:
   push:
   pull_request:
 
+# Every job only reads the checkout; none writes to the repository or its
+# packages, so the default GITHUB_TOKEN is narrowed to contents: read.
+permissions:
+  contents: read
+
 jobs:
   sanity:
     runs-on: ubuntu-latest
@@ -22,6 +27,21 @@ jobs:
             | grep -zvE '^(README\.md|CHANGELOG\.md|RPC\.md)$' \
             | LC_ALL=C xargs -0 grep -nP '[\x80-\xff]' 2>/dev/null; then
             echo "non-ASCII text found"; exit 1; fi
+
+  # ruff version matches the workflow standard pin.
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.x"
+      - name: Install ruff
+        run: pip install ruff==0.16.5
+      - name: ruff check
+        run: ruff check .
+      - name: ruff format
+        run: ruff format --check .
 
   test:
     runs-on: ubuntu-latest

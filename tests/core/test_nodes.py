@@ -1,4 +1,10 @@
-from llama_launcher.core.nodes import Node, LOCAL_NODE, connection_for, host_of, valid_ssh_target
+from llama_launcher.core.nodes import (
+    LOCAL_NODE,
+    Node,
+    connection_for,
+    host_of,
+    valid_ssh_target,
+)
 
 
 def test_local_node_injects_no_connection():
@@ -8,8 +14,13 @@ def test_local_node_injects_no_connection():
 
 
 def test_remote_node_connection_and_host():
-    n = Node(name="box-b", kind="remote", connection="box-b",
-             ssh_target="me@192.168.1.11:22", binary="podman")
+    n = Node(
+        name="box-b",
+        kind="remote",
+        connection="box-b",
+        ssh_target="me@192.168.1.11:22",
+        binary="podman",
+    )
     assert connection_for(n) == "box-b"
     assert host_of(n) == "192.168.1.11"
 
@@ -64,7 +75,9 @@ def test_host_of_bracketed_ipv6_without_port():
 
 
 def test_host_of_bracketed_ipv6_with_port_and_user():
-    n = Node(name="v6", kind="remote", connection="v6", ssh_target="me@[2001:db8::1]:22")
+    n = Node(
+        name="v6", kind="remote", connection="v6", ssh_target="me@[2001:db8::1]:22"
+    )
     assert host_of(n) == "2001:db8::1"
 
 

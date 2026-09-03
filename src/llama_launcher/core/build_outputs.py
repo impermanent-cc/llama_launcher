@@ -1,10 +1,20 @@
 from dataclasses import dataclass
+from typing import Protocol
+
 from llama_launcher.core.build_spec import BuildOutput
+
+
+class ImageMeta(Protocol):
+    """The two image fields the output rows read."""
+
+    size: str
+    created: str
 
 
 @dataclass
 class OutputRow:
     """Classification of a build output with its usage status."""
+
     output: BuildOutput | None
     identifier: str
     status: str  # "built", "missing", or "untracked"
@@ -17,12 +27,12 @@ def _normalize_tag(tag: str) -> str:
     while the registry stores the unqualified tag the user was told to build.
     Strip that prefix so the two spellings compare equal; podman itself
     resolves either spelling (rmi included)."""
-    return tag[len("localhost/"):] if tag.startswith("localhost/") else tag
+    return tag[len("localhost/") :] if tag.startswith("localhost/") else tag
 
 
 def classify_outputs(
     outputs: list[BuildOutput],
-    images: dict[str, "ImageInfo"],
+    images: dict[str, ImageMeta],
     binary_exists,
 ) -> list[OutputRow]:
     """Classify each BuildOutput as built or missing.
@@ -41,24 +51,28 @@ def classify_outputs(
         if output.kind == "tag":
             # localhost/-insensitive image lookup; only images carry metadata.
             img = by_normalized.get(_normalize_tag(output.identifier))
-            rows.append(OutputRow(
-                output=output,
-                identifier=output.identifier,
-                status="built" if img is not None else "missing",
-                size=img.size if img is not None else "",
-                created=img.created if img is not None else "",
-            ))
+            rows.append(
+                OutputRow(
+                    output=output,
+                    identifier=output.identifier,
+                    status="built" if img is not None else "missing",
+                    size=img.size if img is not None else "",
+                    created=img.created if img is not None else "",
+                )
+            )
         elif output.kind == "binary":
-            rows.append(OutputRow(
-                output=output,
-                identifier=output.identifier,
-                status="built" if binary_exists(output.identifier) else "missing",
-            ))
+            rows.append(
+                OutputRow(
+                    output=output,
+                    identifier=output.identifier,
+                    status="built" if binary_exists(output.identifier) else "missing",
+                )
+            )
     return rows
 
 
 def untracked_custom_tags(
-    images: dict[str, "ImageInfo"],
+    images: dict[str, ImageMeta],
     outputs: list[BuildOutput],
 ) -> list[str]:
     """Find custom-repo tags that no BuildOutput claims.
@@ -133,13 +147,13 @@ def profiles_using(
             continue
         if kind != "binary":
             continue
-        native_binary = getattr(getattr(profile, "runtime", None),
-                                "native_binary", "")
+        native_binary = getattr(getattr(profile, "runtime", None), "native_binary", "")
         if not native_binary:
             continue
         # Direct match, or living inside the identifier's build-<slug> dir.
         if native_binary == identifier or (
-                id_build_dir and extract_build_dir(native_binary) == id_build_dir):
+            id_build_dir and extract_build_dir(native_binary) == id_build_dir
+        ):
             result.append(profile.name)
 
     return result

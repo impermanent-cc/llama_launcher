@@ -2,8 +2,13 @@ from collections import deque
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPlainTextEdit, QPushButton,
+    QHBoxLayout,
+    QLabel,
+    QPlainTextEdit,
+    QPushButton,
     QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
 from llama_launcher.core.mtp_stats import parse_draft_stats, sparkline
@@ -27,7 +32,7 @@ class MonitorPanel(QWidget):
         self._selected_name: str | None = None
         self._cards_row = QHBoxLayout()
         self._cards_row.setSpacing(8)
-        self._cards_row.addStretch(1)                 # keep cards left-packed
+        self._cards_row.addStretch(1)  # keep cards left-packed
         cards_holder = QWidget()
         cards_holder.setLayout(self._cards_row)
         self._cards_scroll = QScrollArea()
@@ -68,9 +73,11 @@ class MonitorPanel(QWidget):
         # so it legitimately reads 0 on an idle server. Kept as a hover tooltip +
         # on-demand InfoButton popover instead of an always-visible label, to
         # avoid cluttering the tab with reminder text.
-        _legend = ("gen = live generation tok/s (0 when idle)  \u00b7  "
-                   "prompt = prefill tok/s of the last request  \u00b7  "
-                   "KV = KV-cache used (approx, from slots)")
+        _legend = (
+            "gen = live generation tok/s (0 when idle)  \u00b7  "
+            "prompt = prefill tok/s of the last request  \u00b7  "
+            "KV = KV-cache used (approx, from slots)"
+        )
         # Deliberately NOT a tooltip on `summary`: the summary spans the whole
         # bar, so a tooltip there fires on hover anywhere along it, duplicating
         # the info button. The legend lives only on the compact info button.
@@ -97,7 +104,7 @@ class MonitorPanel(QWidget):
         self._log_buf = ""
         self.mtp_label = QLabel("")
         self.mtp_label.setVisible(False)
-        layout.insertWidget(1, self.mtp_label)   # right after the summary label
+        layout.insertWidget(1, self.mtp_label)  # right after the summary label
         self._tok_history = deque(maxlen=60)
         self.throughput_label = QLabel("")
         self.throughput_label.setVisible(False)
@@ -139,8 +146,9 @@ class MonitorPanel(QWidget):
         if info.n_ctx is not None:
             parts.append(f"ctx {info.n_ctx}")
         if info.modalities:
-            mods = " ".join(f"{k}{'\u2713' if v else '\u2717'}"
-                            for k, v in info.modalities.items())
+            mods = " ".join(
+                f"{k}{'\u2713' if v else '\u2717'}" for k, v in info.modalities.items()
+            )
             parts.append(mods)
         if info.model_alias:
             parts.append(f"alias {info.model_alias}")
@@ -177,16 +185,22 @@ class MonitorPanel(QWidget):
         if data.get("speculating"):
             parts.append("spec \u25cf")
         for g in data.get("gpus", []):
-            parts.append(f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, GPU {g.util_pct}%, {g.temp_c}\u00b0C")
+            parts.append(
+                f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, GPU {g.util_pct}%, {g.temp_c}\u00b0C"
+            )
         if data.get("cpu") or data.get("mem"):
-            parts.append(f"container CPU {data.get('cpu','')} \u00b7 MEM {data.get('mem','')}")
+            parts.append(
+                f"container CPU {data.get('cpu', '')} \u00b7 MEM {data.get('mem', '')}"
+            )
         if data.get("uptime"):
             parts.append(f"uptime {data['uptime']}")
         self._last = "    ".join(parts)
         self.summary.setText(self._last)
         if metrics_on and gen is not None:
             self._tok_history.append(gen)
-            self.throughput_label.setText(f"gen tok/s  {sparkline(self._tok_history)}  {gen:.0f}")
+            self.throughput_label.setText(
+                f"gen tok/s  {sparkline(self._tok_history)}  {gen:.0f}"
+            )
             self.throughput_label.setVisible(True)
         else:
             self.throughput_label.setVisible(False)
@@ -219,8 +233,10 @@ class MonitorPanel(QWidget):
     @staticmethod
     def _mtp_text(d, source: str = "log") -> str:
         pos = " / ".join(f"{p * 100:.0f}%" for p in d.per_position)
-        return (f"MTP  accept {d.acceptance * 100:.0f}%  \u00b7  len {d.mean_len:.2f}  "
-                f"\u00b7  pos {pos}  ({source})")
+        return (
+            f"MTP  accept {d.acceptance * 100:.0f}%  \u00b7  len {d.mean_len:.2f}  "
+            f"\u00b7  pos {pos}  ({source})"
+        )
 
     def reset(self):
         self._draft = None
@@ -240,7 +256,7 @@ class MonitorPanel(QWidget):
         rows = data.get("rows", [])
         self._selected_name = data.get("selected_name")
         names = [r["name"] for r in rows]
-        if list(self._cards.keys()) != names:      # membership changed -> rebuild
+        if list(self._cards.keys()) != names:  # membership changed -> rebuild
             for card in self._cards.values():
                 card.setParent(None)
                 card.deleteLater()
@@ -251,8 +267,10 @@ class MonitorPanel(QWidget):
                 card.stop_requested.connect(self.instance_stop_requested)
                 card.remove_requested.connect(self.instance_remove_requested)
                 self._cards[name] = card
-                self._cards_row.insertWidget(self._cards_row.count() - 1, card)  # before the stretch
-        for r in rows:                              # update in place every tick
+                self._cards_row.insertWidget(
+                    self._cards_row.count() - 1, card
+                )  # before the stretch
+        for r in rows:  # update in place every tick
             card = self._cards[r["name"]]
             card.update_row(r)
             card.set_selected(r["name"] == self._selected_name)
@@ -270,7 +288,7 @@ class MonitorPanel(QWidget):
         self.layout().addWidget(widget)
 
     def add_status_banner(self, banner) -> None:
-        self.layout().insertWidget(0, banner)   # above the cards row
+        self.layout().insertWidget(0, banner)  # above the cards row
 
     @staticmethod
     def _card_title(inst) -> str:
@@ -280,6 +298,7 @@ class MonitorPanel(QWidget):
         identically to the head's card. Any other instance keeps its profile
         name (StatCard.update_row appends port/node itself)."""
         from llama_launcher.core.instances import worker_card_title
+
         if inst.mode == "rpc-worker":
             return worker_card_title(inst)
         return inst.profile

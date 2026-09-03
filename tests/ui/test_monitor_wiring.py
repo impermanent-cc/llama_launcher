@@ -1,16 +1,21 @@
-import llama_launcher.ui.main_window as mw
 import llama_launcher.ui.controllers.monitor_controller as mc
-from llama_launcher.core.spec import Profile, Mount, Runtime
+import llama_launcher.ui.main_window as mw
 from llama_launcher.core.props import PropsInfo
+from llama_launcher.core.spec import Mount, Profile, Runtime
 from llama_launcher.ui.controllers.launch_controller import LaunchController
 from llama_launcher.ui.controllers.monitor_controller import MonitorController
 from llama_launcher.ui.panels.configure_panel import ConfigurePanel
 
 
 def _profile():
-    return Profile(name="m", image="img", runtime=Runtime(binary="podman"),
-                   mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
-                   model="/models/m.gguf", settings={"port": 8080, "metrics": True})
+    return Profile(
+        name="m",
+        image="img",
+        runtime=Runtime(binary="podman"),
+        mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
+        model="/models/m.gguf",
+        settings={"port": 8080, "metrics": True},
+    )
 
 
 def test_on_stop_clears_log_follower_and_spawns_async_stop(qtbot, monkeypatch):
@@ -22,11 +27,14 @@ def test_on_stop_clears_log_follower_and_spawns_async_stop(qtbot, monkeypatch):
     # class to patch. conftest's autouse _hermetic_ui_boundaries fixture also
     # class-patches LaunchController._spawn_async as a no-op; this setattr
     # runs after fixture setup, so it wins (both undone at teardown).
-    monkeypatch.setattr(LaunchController, "_spawn_async",
-                        lambda self, argv, on_done=None: spawned.setdefault("argv", argv))
+    monkeypatch.setattr(
+        LaunchController,
+        "_spawn_async",
+        lambda self, argv, on_done=None: spawned.setdefault("argv", argv),
+    )
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w._configure_panel.load_profile(_profile())   # profile name "m" -> container llama-m
+    w._configure_panel.load_profile(_profile())  # profile name "m" -> container llama-m
 
     killed = []
 
@@ -45,8 +53,11 @@ def test_on_stop_uses_profile_stop_timeout(qtbot, monkeypatch):
     """The Stop button's `podman stop -t` grace period comes from the profile's
     configurable stop_timeout, not a hardcoded 10s."""
     spawned = {}
-    monkeypatch.setattr(LaunchController, "_spawn_async",
-                        lambda self, argv, on_done=None: spawned.setdefault("argv", argv))
+    monkeypatch.setattr(
+        LaunchController,
+        "_spawn_async",
+        lambda self, argv, on_done=None: spawned.setdefault("argv", argv),
+    )
     w = mw.MainWindow()
     qtbot.addWidget(w)
     p = _profile()
@@ -59,8 +70,11 @@ def test_on_stop_uses_profile_stop_timeout(qtbot, monkeypatch):
 def test_on_restart_uses_profile_stop_timeout(qtbot, monkeypatch):
     """Restart tears down with the same configurable grace period as Stop."""
     spawned = {}
-    monkeypatch.setattr(LaunchController, "_spawn_async",
-                        lambda self, argv, on_done=None: spawned.setdefault("argv", argv))
+    monkeypatch.setattr(
+        LaunchController,
+        "_spawn_async",
+        lambda self, argv, on_done=None: spawned.setdefault("argv", argv),
+    )
     w = mw.MainWindow()
     qtbot.addWidget(w)
     p = _profile()
@@ -71,14 +85,27 @@ def test_on_restart_uses_profile_stop_timeout(qtbot, monkeypatch):
 
 
 def test_collect_monitor_data(qtbot, monkeypatch):
-    monkeypatch.setattr(mw.metrics, "fetch_metrics",
-                        lambda port, timeout=1.0, **kw: {"llamacpp:predicted_tokens_seconds": 50.0,
-                                                         "llamacpp:prompt_tokens_seconds": 200.0})
-    monkeypatch.setattr(mw.metrics, "fetch_slots", lambda port, timeout=1.0, **kw:
-                        [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
+    monkeypatch.setattr(
+        mw.metrics,
+        "fetch_metrics",
+        lambda port, timeout=1.0, **kw: {
+            "llamacpp:predicted_tokens_seconds": 50.0,
+            "llamacpp:prompt_tokens_seconds": 200.0,
+        },
+    )
+    monkeypatch.setattr(
+        mw.metrics,
+        "fetch_slots",
+        lambda port, timeout=1.0, **kw: [
+            {"n_ctx": 100, "n_prompt_tokens_processed": 40}
+        ],
+    )
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
-    monkeypatch.setattr(mw.runtime, "stats",
-                        lambda name, b, connection="": {"cpu_perc": "9%", "mem_usage": "1G / 16G"})
+    monkeypatch.setattr(
+        mw.runtime,
+        "stats",
+        lambda name, b, connection="": {"cpu_perc": "9%", "mem_usage": "1G / 16G"},
+    )
     w = mw.MainWindow()
     qtbot.addWidget(w)
     w._configure_panel.load_profile(_profile())
@@ -91,11 +118,16 @@ def test_collect_monitor_data(qtbot, monkeypatch):
 
 def test_collect_monitor_data_reports_speculating(qtbot, monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
-    monkeypatch.setattr(mw.metrics, "fetch_slots",
-                        lambda *a, **k: [{"speculative": True, "n_ctx": 4096}])
+    monkeypatch.setattr(
+        mw.metrics,
+        "fetch_slots",
+        lambda *a, **k: [{"speculative": True, "n_ctx": 4096}],
+    )
     monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda *a, **k: {})
     monkeypatch.setattr(mw.runtime, "stats", lambda name, binary, connection="": {})
-    monkeypatch.setattr(mw.runtime, "started_at", lambda name, binary, connection="": None)
+    monkeypatch.setattr(
+        mw.runtime, "started_at", lambda name, binary, connection="": None
+    )
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     w = mw.MainWindow()
     qtbot.addWidget(w)
@@ -120,7 +152,7 @@ def test_update_status_advances_decode_prev_from_result(qtbot, monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_props", lambda *a, **k: None)
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w._monitor._monitor_inflight = True     # block a fresh async gather from overwriting
+    w._monitor._monitor_inflight = True  # block a fresh async gather from overwriting
     w._monitor._monitor_result = {"decode_now": (9.0, 2.0), "metrics_on": True}
     w._monitor.update_status()
     assert w._monitor._decode_prev == (9.0, 2.0)
@@ -141,7 +173,9 @@ def test_decode_prev_cleared_when_not_running(qtbot, monkeypatch):
 
 def _ready(monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
-    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary, connection="": "running")
+    monkeypatch.setattr(
+        mw.runtime, "container_state", lambda name, binary, connection="": "running"
+    )
     monkeypatch.setattr(mw.health, "probe_health", lambda port, **kw: "ready")
     monkeypatch.setattr(MonitorController, "_log_follower_active", lambda self: True)
     monkeypatch.setattr(MonitorController, "_update_spec_stats", lambda self, p: None)
@@ -150,13 +184,16 @@ def _ready(monkeypatch):
 def test_props_fetched_once_when_ready(qtbot, monkeypatch):
     _ready(monkeypatch)
     calls = []
-    monkeypatch.setattr(mw.metrics, "fetch_props",
-                        lambda *a, **k: calls.append(1) or PropsInfo("b", 1, "a", 1, {}))
+    monkeypatch.setattr(
+        mw.metrics,
+        "fetch_props",
+        lambda *a, **k: calls.append(1) or PropsInfo("b", 1, "a", 1, {}),
+    )
     w = mw.MainWindow()
     qtbot.addWidget(w)
     w._monitor.update_status()
     w._monitor.update_status()
-    assert len(calls) == 1                 # cached after first success
+    assert len(calls) == 1  # cached after first success
 
 
 def test_props_not_fetched_while_loading(qtbot, monkeypatch):
@@ -167,36 +204,54 @@ def test_props_not_fetched_while_loading(qtbot, monkeypatch):
     w = mw.MainWindow()
     qtbot.addWidget(w)
     w._monitor.update_status()
-    assert calls == []                     # only fetch once the model is ready
+    assert calls == []  # only fetch once the model is ready
 
 
 def test_failed_props_fetch_retries_next_poll(qtbot, monkeypatch):
     _ready(monkeypatch)
     calls = []
-    monkeypatch.setattr(mw.metrics, "fetch_props",
-                        lambda *a, **k: calls.append(1) or None)
+    monkeypatch.setattr(
+        mw.metrics, "fetch_props", lambda *a, **k: calls.append(1) or None
+    )
     w = mw.MainWindow()
     qtbot.addWidget(w)
     w._monitor.update_status()
     w._monitor.update_status()
-    assert len(calls) == 2                 # None result is not cached; retries
+    assert len(calls) == 2  # None result is not cached; retries
 
 
 def test_build_monitor_data_gathers_from_a_plain_target(monkeypatch):
     """build_monitor_data() is a pure function of a primitives-only target so it
     can run off the UI thread: it must gather from those primitives, never from
     live widget/profile state."""
-    monkeypatch.setattr(mw.metrics, "fetch_metrics",
-                        lambda *a, **k: {"llamacpp:predicted_tokens_seconds": 50.0})
-    monkeypatch.setattr(mw.metrics, "fetch_slots",
-                        lambda *a, **k: [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
+    monkeypatch.setattr(
+        mw.metrics,
+        "fetch_metrics",
+        lambda *a, **k: {"llamacpp:predicted_tokens_seconds": 50.0},
+    )
+    monkeypatch.setattr(
+        mw.metrics,
+        "fetch_slots",
+        lambda *a, **k: [{"n_ctx": 100, "n_prompt_tokens_processed": 40}],
+    )
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
-    monkeypatch.setattr(mw.runtime, "stats",
-                        lambda name, b, connection="": {"cpu_perc": "9%", "mem_usage": "1G / 16G"})
+    monkeypatch.setattr(
+        mw.runtime,
+        "stats",
+        lambda name, b, connection="": {"cpu_perc": "9%", "mem_usage": "1G / 16G"},
+    )
     monkeypatch.setattr(mw.runtime, "started_at", lambda name, b, connection="": None)
-    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
-              "key": None, "model_scope": None, "poll": True,
-              "name": "llama-x", "binary": "podman"}
+    target = {
+        "running": True,
+        "port": 8080,
+        "metrics_on": True,
+        "host": "127.0.0.1",
+        "key": None,
+        "model_scope": None,
+        "poll": True,
+        "name": "llama-x",
+        "binary": "podman",
+    }
     d = mw.build_monitor_data(target)
     assert d["tok_s"] == 50.0 and d["cpu"] == "9%"
     assert abs(d["kv_pct"] - 0.40) < 1e-9
@@ -206,36 +261,58 @@ def test_build_monitor_data_computes_live_gen_tok_s_from_decode_delta(monkeypatc
     """gen tok/s must be the live n_decode_total delta rate: llama.cpp's
     predicted_tokens_seconds gauge reads 0 during an in-flight generation, so
     the counter delta between two polls is the only live throughput signal."""
-    monkeypatch.setattr(mw.metrics, "fetch_metrics",
-                        lambda *a, **k: {"llamacpp:n_decode_total": 123.0,
-                                         "llamacpp:predicted_tokens_seconds": 0.0})
+    monkeypatch.setattr(
+        mw.metrics,
+        "fetch_metrics",
+        lambda *a, **k: {
+            "llamacpp:n_decode_total": 123.0,
+            "llamacpp:predicted_tokens_seconds": 0.0,
+        },
+    )
     monkeypatch.setattr(mw.metrics, "fetch_slots", lambda *a, **k: [])
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     monkeypatch.setattr(mw.runtime, "stats", lambda *a, **k: {})
     monkeypatch.setattr(mw.runtime, "started_at", lambda *a, **k: None)
     monkeypatch.setattr(mc.time, "monotonic", lambda: 11.0)
-    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
-              "key": None, "model_scope": None, "poll": True,
-              "name": "llama-x", "binary": "podman",
-              "decode_prev": (100.0, 10.0)}          # 100 decodes at t=10.0
+    target = {
+        "running": True,
+        "port": 8080,
+        "metrics_on": True,
+        "host": "127.0.0.1",
+        "key": None,
+        "model_scope": None,
+        "poll": True,
+        "name": "llama-x",
+        "binary": "podman",
+        "decode_prev": (100.0, 10.0),
+    }  # 100 decodes at t=10.0
     d = mw.build_monitor_data(target)
-    assert abs(d["gen_tok_s_live"] - 23.0) < 1e-9    # (123-100)/(11.0-10.0)
-    assert d["decode_now"] == (123.0, 11.0)          # handed to the next tick as prev
+    assert abs(d["gen_tok_s_live"] - 23.0) < 1e-9  # (123-100)/(11.0-10.0)
+    assert d["decode_now"] == (123.0, 11.0)  # handed to the next tick as prev
 
 
 def test_build_monitor_data_live_gen_none_on_first_poll(monkeypatch):
     """With no prior decode read, there's no rate yet -- but the current read is
     still returned so the NEXT poll can compute one."""
-    monkeypatch.setattr(mw.metrics, "fetch_metrics",
-                        lambda *a, **k: {"llamacpp:n_decode_total": 77.0})
+    monkeypatch.setattr(
+        mw.metrics, "fetch_metrics", lambda *a, **k: {"llamacpp:n_decode_total": 77.0}
+    )
     monkeypatch.setattr(mw.metrics, "fetch_slots", lambda *a, **k: [])
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     monkeypatch.setattr(mw.runtime, "stats", lambda *a, **k: {})
     monkeypatch.setattr(mw.runtime, "started_at", lambda *a, **k: None)
     monkeypatch.setattr(mc.time, "monotonic", lambda: 5.0)
-    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
-              "key": None, "model_scope": None, "poll": True,
-              "name": "llama-x", "binary": "podman"}   # no decode_prev
+    target = {
+        "running": True,
+        "port": 8080,
+        "metrics_on": True,
+        "host": "127.0.0.1",
+        "key": None,
+        "model_scope": None,
+        "poll": True,
+        "name": "llama-x",
+        "binary": "podman",
+    }  # no decode_prev
     d = mw.build_monitor_data(target)
     assert d["gen_tok_s_live"] is None
     assert d["decode_now"] == (77.0, 5.0)
@@ -244,18 +321,32 @@ def test_build_monitor_data_live_gen_none_on_first_poll(monkeypatch):
 def test_build_monitor_data_prefers_kv_cache_metric(monkeypatch):
     """KV% uses llama.cpp's kv_cache_usage_ratio gauge when present, not the
     slots-derived prompt-token estimate (which reads 0 when idle)."""
-    monkeypatch.setattr(mw.metrics, "fetch_metrics",
-                        lambda *a, **k: {"llamacpp:kv_cache_usage_ratio": 0.83})
-    monkeypatch.setattr(mw.metrics, "fetch_slots",
-                        lambda *a, **k: [{"n_ctx": 100, "n_prompt_tokens_processed": 40}])
+    monkeypatch.setattr(
+        mw.metrics,
+        "fetch_metrics",
+        lambda *a, **k: {"llamacpp:kv_cache_usage_ratio": 0.83},
+    )
+    monkeypatch.setattr(
+        mw.metrics,
+        "fetch_slots",
+        lambda *a, **k: [{"n_ctx": 100, "n_prompt_tokens_processed": 40}],
+    )
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     monkeypatch.setattr(mw.runtime, "stats", lambda name, b, connection="": {})
     monkeypatch.setattr(mw.runtime, "started_at", lambda name, b, connection="": None)
-    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
-              "key": None, "model_scope": None, "poll": True,
-              "name": "llama-x", "binary": "podman"}
+    target = {
+        "running": True,
+        "port": 8080,
+        "metrics_on": True,
+        "host": "127.0.0.1",
+        "key": None,
+        "model_scope": None,
+        "poll": True,
+        "name": "llama-x",
+        "binary": "podman",
+    }
     d = mw.build_monitor_data(target)
-    assert d["kv_pct"] == 0.83     # the gauge, not 0.40 from slots
+    assert d["kv_pct"] == 0.83  # the gauge, not 0.40 from slots
 
 
 def test_build_monitor_data_returns_none_when_not_running(monkeypatch):
@@ -278,37 +369,70 @@ def test_build_monitor_data_threads_mon_conn_into_stats_and_started_at(monkeypat
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     stats_calls = []
     started_calls = []
-    monkeypatch.setattr(mw.runtime, "stats",
-                        lambda name, b, connection="": stats_calls.append(connection) or {})
-    monkeypatch.setattr(mw.runtime, "started_at",
-                        lambda name, b, connection="": started_calls.append(connection) or None)
-    target = {"running": True, "port": 8080, "metrics_on": False, "host": "10.0.0.2",
-              "key": None, "model_scope": None, "poll": True,
-              "name": "llama-rem", "binary": "podman", "mon_conn": "box-b"}
+    monkeypatch.setattr(
+        mw.runtime,
+        "stats",
+        lambda name, b, connection="": stats_calls.append(connection) or {},
+    )
+    monkeypatch.setattr(
+        mw.runtime,
+        "started_at",
+        lambda name, b, connection="": started_calls.append(connection) or None,
+    )
+    target = {
+        "running": True,
+        "port": 8080,
+        "metrics_on": False,
+        "host": "10.0.0.2",
+        "key": None,
+        "model_scope": None,
+        "poll": True,
+        "name": "llama-rem",
+        "binary": "podman",
+        "mon_conn": "box-b",
+    }
     mw.build_monitor_data(target)
     assert stats_calls == ["box-b"]
     assert started_calls == ["box-b"]
 
 
-def test_compute_monitor_target_uses_node_host_and_connection_for_remote(qtbot, monkeypatch):
+def test_compute_monitor_target_uses_node_host_and_connection_for_remote(
+    qtbot, monkeypatch
+):
     """A focused REMOTE instance's monitor target must poll the node's real
     host (not 127.0.0.1 from dial_host(0.0.0.0)) and carry the node's
     connection so container_state/stats/started_at hit the right podman."""
     from llama_launcher.core.instances import Instance
     from llama_launcher.core.nodes import Node
     from llama_launcher.store.nodes import add_node
+
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    add_node(Node(name="box-b", kind="remote", connection="box-b",
-                  ssh_target="me@10.0.0.2"), w.base_dir())
-    w._configure_panel.load_profile(Profile(name="Solo", image="img", settings={"port": 8080}))
-    w._monitor._instances = [Instance(
-        name="llama-rem", profile="rem", mode="server", running=True,
-        port=8081, host="0.0.0.0", embeddings=False, reranking=False,
-        stop_timeout=10, binary="podman", node="box-b")]
+    add_node(
+        Node(name="box-b", kind="remote", connection="box-b", ssh_target="me@10.0.0.2"),
+        w.base_dir(),
+    )
+    w._configure_panel.load_profile(
+        Profile(name="Solo", image="img", settings={"port": 8080})
+    )
+    w._monitor._instances = [
+        Instance(
+            name="llama-rem",
+            profile="rem",
+            mode="server",
+            running=True,
+            port=8081,
+            host="0.0.0.0",
+            embeddings=False,
+            reranking=False,
+            stop_timeout=10,
+            binary="podman",
+            node="box-b",
+        )
+    ]
     w._monitor._active_instance = w._monitor._instances[0]
     target = w._monitor._compute_monitor_target(running=True)
-    assert target["host"] == "10.0.0.2"        # node's dial host, not 127.0.0.1
+    assert target["host"] == "10.0.0.2"  # node's dial host, not 127.0.0.1
     assert target["mon_conn"] == "box-b"
 
 
@@ -336,7 +460,9 @@ def test_update_status_populates_monitor_target_off_ui_thread(qtbot, monkeypatch
 
 def test_update_status_marks_target_not_running_when_stopped(qtbot, monkeypatch):
     monkeypatch.setattr(mw.runtime, "binary_available", lambda b: True)
-    monkeypatch.setattr(mw.runtime, "container_state", lambda name, binary, connection="": "stopped")
+    monkeypatch.setattr(
+        mw.runtime, "container_state", lambda name, binary, connection="": "stopped"
+    )
     w = mw.MainWindow()
     qtbot.addWidget(w)
     w._monitor.update_status()
@@ -355,10 +481,11 @@ def test_monitor_summary_gathered_off_thread_is_rendered(qtbot, monkeypatch):
     qtbot.addWidget(w)
     got = []
     w.monitor_panel.update_stats = lambda d: got.append(d)
-    w._monitor.update_status()                       # dispatch; _monitor_result still None
+    w._monitor.update_status()  # dispatch; _monitor_result still None
     from PySide6.QtCore import QThreadPool
+
     QThreadPool.globalInstance().waitForDone(2000)
-    w._monitor.update_status()                       # renders the gathered result
+    w._monitor.update_status()  # renders the gathered result
     assert got, "no monitor summary was rendered"
     assert "gpus" in got[-1] and "uptime" in got[-1]
 
@@ -398,12 +525,14 @@ def test_router_model_switch_refetches(qtbot, monkeypatch):
     # stray fetch_props() calls; a torn-down window's timer is stopped, so it
     # can't fire update_status() into this test.
     _ready(monkeypatch)
-    monkeypatch.setattr(ConfigurePanel, "current_profile",
-                        lambda self: _router_profile())
+    monkeypatch.setattr(
+        ConfigurePanel, "current_profile", lambda self: _router_profile()
+    )
     monkeypatch.setattr(MonitorController, "_router_host", lambda self, p: "127.0.0.1")
     ids = iter(["model-a", "model-a", "model-b"])
-    monkeypatch.setattr(MonitorController, "_router_pollable_model",
-                        lambda self: next(ids))
+    monkeypatch.setattr(
+        MonitorController, "_router_pollable_model", lambda self: next(ids)
+    )
     calls = {"n": 0}
 
     def _fetch(*a, **k):
@@ -413,12 +542,12 @@ def test_router_model_switch_refetches(qtbot, monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_props", _fetch)
     w = mw.MainWindow()
     qtbot.addWidget(w)
-    w._monitor.update_status()   # model-a -> fetch
+    w._monitor.update_status()  # model-a -> fetch
     assert w._monitor._props_model == "model-a"
     assert calls["n"] == 1
-    w._monitor.update_status()   # model-a -> cached, no new fetch
+    w._monitor.update_status()  # model-a -> cached, no new fetch
     assert calls["n"] == 1
-    w._monitor.update_status()   # model-b -> re-fetch
+    w._monitor.update_status()  # model-b -> re-fetch
     assert w._monitor._props_model == "model-b"
     assert calls["n"] == 2
 
@@ -426,16 +555,24 @@ def test_router_model_switch_refetches(qtbot, monkeypatch):
 def test_on_launch_native_spawns_process_not_container(qtbot, monkeypatch):
     from llama_launcher.services import native as native_svc
     from llama_launcher.services.native import NativeResult
+
     calls = {}
-    monkeypatch.setattr(native_svc, "launch_native",
-                        lambda p, base, now_iso: calls.setdefault(
-                            "res", NativeResult(True, "llama-nat", "127.0.0.1", 8080, 4242)))
+    monkeypatch.setattr(
+        native_svc,
+        "launch_native",
+        lambda p, base, now_iso: calls.setdefault(
+            "res", NativeResult(True, "llama-nat", "127.0.0.1", 8080, 4242)
+        ),
+    )
     # No live instance for this profile, so the double-launch guard must let
     # the launch proceed.
     monkeypatch.setattr(native_svc, "list_native_instances", lambda base_dir: [])
     # Fail the test loudly if the container path is taken instead.
-    monkeypatch.setattr(LaunchController, "_spawn_async",
-                        lambda self, *a, **k: calls.setdefault("container", True))
+    monkeypatch.setattr(
+        LaunchController,
+        "_spawn_async",
+        lambda self, *a, **k: calls.setdefault("container", True),
+    )
     w = mw.MainWindow()
     qtbot.addWidget(w)
     p = _profile()
@@ -464,14 +601,25 @@ def test_on_launch_native_refuses_when_already_running(qtbot, monkeypatch):
     p.runtime.native_binary = "/opt/bin/llama-server"
 
     launch_calls = {"n": 0}
-    monkeypatch.setattr(native_svc, "launch_native",
-                        lambda p, base, now_iso: launch_calls.__setitem__(
-                            "n", launch_calls["n"] + 1))
     monkeypatch.setattr(
-        native_svc, "list_native_instances",
-        lambda base_dir: [{"name": native_svc.native_name(p.name),
-                           "running": True, "profile": p.name,
-                           "mode": "server", "pid": 4242, "kind": "native"}])
+        native_svc,
+        "launch_native",
+        lambda p, base, now_iso: launch_calls.__setitem__("n", launch_calls["n"] + 1),
+    )
+    monkeypatch.setattr(
+        native_svc,
+        "list_native_instances",
+        lambda base_dir: [
+            {
+                "name": native_svc.native_name(p.name),
+                "running": True,
+                "profile": p.name,
+                "mode": "server",
+                "pid": 4242,
+                "kind": "native",
+            }
+        ],
+    )
 
     w = mw.MainWindow()
     qtbot.addWidget(w)
@@ -481,8 +629,9 @@ def test_on_launch_native_refuses_when_already_running(qtbot, monkeypatch):
     monkeypatch.setattr(w._launch, "vram_check", lambda: "")
 
     errors = []
-    monkeypatch.setattr(w._launch, "_report_launch_error",
-                        lambda *a, **k: errors.append((a, k)))
+    monkeypatch.setattr(
+        w._launch, "_report_launch_error", lambda *a, **k: errors.append((a, k))
+    )
 
     w._launch.on_launch()
 
@@ -498,6 +647,7 @@ def test_on_launch_foreground_reports_when_no_terminal(qtbot, monkeypatch):
 
     def _raise(*a, **k):
         raise term_mod.NoTerminalError("no terminal emulator found")
+
     monkeypatch.setattr(term_mod, "launch", _raise)
 
     p = _profile()  # container, server, detached=False -> foreground terminal path
@@ -509,8 +659,9 @@ def test_on_launch_foreground_reports_when_no_terminal(qtbot, monkeypatch):
     monkeypatch.setattr(w._launch, "vram_check", lambda: "")
 
     errors = []
-    monkeypatch.setattr(w._launch, "_report_launch_error",
-                        lambda *a, **k: errors.append((a, k)))
+    monkeypatch.setattr(
+        w._launch, "_report_launch_error", lambda *a, **k: errors.append((a, k))
+    )
 
     w._launch.on_launch()  # must not raise
 
@@ -519,6 +670,7 @@ def test_on_launch_foreground_reports_when_no_terminal(qtbot, monkeypatch):
 
 def _router_profile():
     from llama_launcher.core.spec import Profile, Runtime
+
     return Profile(name="r", image="img", mode="router", runtime=Runtime())
 
 
@@ -528,41 +680,64 @@ def test_build_monitor_data_computes_live_prompt_tok_s_from_slot_delta(monkeypat
     but the processing slot's n_prompt_tokens_processed grows batch by batch,
     so its delta between two polls is a live prefill rate."""
     monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda *a, **k: {})
-    monkeypatch.setattr(mw.metrics, "fetch_slots",
-                        lambda *a, **k: [{"is_processing": True, "n_ctx": 32768,
-                                          "n_prompt_tokens_processed": 5000}])
+    monkeypatch.setattr(
+        mw.metrics,
+        "fetch_slots",
+        lambda *a, **k: [
+            {"is_processing": True, "n_ctx": 32768, "n_prompt_tokens_processed": 5000}
+        ],
+    )
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     monkeypatch.setattr(mw.runtime, "stats", lambda *a, **k: {})
     monkeypatch.setattr(mw.runtime, "started_at", lambda *a, **k: None)
     monkeypatch.setattr(mc.time, "monotonic", lambda: 11.0)
-    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
-              "key": None, "model_scope": None, "poll": True,
-              "name": "llama-x", "binary": "podman",
-              "prompt_prev": (1000, 10.0)}
+    target = {
+        "running": True,
+        "port": 8080,
+        "metrics_on": True,
+        "host": "127.0.0.1",
+        "key": None,
+        "model_scope": None,
+        "poll": True,
+        "name": "llama-x",
+        "binary": "podman",
+        "prompt_prev": (1000, 10.0),
+    }
     d = mw.build_monitor_data(target)
-    assert abs(d["prompt_tok_s_live"] - 4000.0) < 1e-9   # (5000-1000)/1.0
+    assert abs(d["prompt_tok_s_live"] - 4000.0) < 1e-9  # (5000-1000)/1.0
     assert d["prompt_now"] == (5000, 11.0)
 
 
 def test_build_monitor_data_prompt_live_none_when_not_prefilling(monkeypatch):
     monkeypatch.setattr(mw.metrics, "fetch_metrics", lambda *a, **k: {})
-    monkeypatch.setattr(mw.metrics, "fetch_slots",
-                        lambda *a, **k: [{"is_processing": False,
-                                          "n_prompt_tokens_processed": 5000}])
+    monkeypatch.setattr(
+        mw.metrics,
+        "fetch_slots",
+        lambda *a, **k: [{"is_processing": False, "n_prompt_tokens_processed": 5000}],
+    )
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
     monkeypatch.setattr(mw.runtime, "stats", lambda *a, **k: {})
     monkeypatch.setattr(mw.runtime, "started_at", lambda *a, **k: None)
-    target = {"running": True, "port": 8080, "metrics_on": True, "host": "127.0.0.1",
-              "key": None, "model_scope": None, "poll": True,
-              "name": "llama-x", "binary": "podman",
-              "prompt_prev": (1000, 10.0)}
+    target = {
+        "running": True,
+        "port": 8080,
+        "metrics_on": True,
+        "host": "127.0.0.1",
+        "key": None,
+        "model_scope": None,
+        "poll": True,
+        "name": "llama-x",
+        "binary": "podman",
+        "prompt_prev": (1000, 10.0),
+    }
     d = mw.build_monitor_data(target)
     assert d["prompt_tok_s_live"] is None
     assert d["prompt_now"] is None
 
 
 def test_compute_monitor_target_carries_prompt_prev(qtbot):
-    w = mw.MainWindow(); qtbot.addWidget(w)
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
     w._monitor._prompt_prev = (1000, 10.0)
     t = w._monitor._compute_monitor_target(running=True)
     assert t["prompt_prev"] == (1000, 10.0)
@@ -572,21 +747,29 @@ def test_monitor_target_drops_key_for_non_loopback_local_bind(qtbot):
     """Defense in depth: a local profile whose bind_host is somehow a non-loopback
     address must NOT get the api key attached to the poll -- the key only goes to
     loopback or the profile's registered remote node, never an arbitrary host."""
-    w = mw.MainWindow(); qtbot.addWidget(w)
-    p = Profile(name="Solo", image="img",
-                runtime=Runtime(binary="podman", bind_host="203.0.113.9"),
-                settings={"port": 8080, "api-key": "secret", "metrics": True})
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    p = Profile(
+        name="Solo",
+        image="img",
+        runtime=Runtime(binary="podman", bind_host="203.0.113.9"),
+        settings={"port": 8080, "api-key": "secret", "metrics": True},
+    )
     w._configure_panel.load_profile(p)
     target = w._monitor._compute_monitor_target(running=True)
     assert target["host"] == "203.0.113.9"
-    assert target["key"] is None          # secret NOT sent to an arbitrary host
+    assert target["key"] is None  # secret NOT sent to an arbitrary host
 
 
 def test_monitor_target_keeps_key_for_loopback(qtbot):
-    w = mw.MainWindow(); qtbot.addWidget(w)
-    p = Profile(name="Solo", image="img",
-                runtime=Runtime(binary="podman", bind_host="127.0.0.1"),
-                settings={"port": 8080, "api-key": "secret", "metrics": True})
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    p = Profile(
+        name="Solo",
+        image="img",
+        runtime=Runtime(binary="podman", bind_host="127.0.0.1"),
+        settings={"port": 8080, "api-key": "secret", "metrics": True},
+    )
     w._configure_panel.load_profile(p)
     target = w._monitor._compute_monitor_target(running=True)
     assert target["key"] == "secret"

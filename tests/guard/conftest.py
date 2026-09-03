@@ -14,7 +14,9 @@ from pathlib import Path
 
 import pytest
 
-REPO_ROOT = Path(os.environ.get("GUARD_REPO_ROOT") or Path(__file__).resolve().parents[2])
+REPO_ROOT = Path(
+    os.environ.get("GUARD_REPO_ROOT") or Path(__file__).resolve().parents[2]
+)
 
 ALLOWLIST: tuple[str, ...] = (
     # User-facing documents kept as released in v0.1.0; their glyphs and
@@ -25,8 +27,24 @@ ALLOWLIST: tuple[str, ...] = (
 )
 
 BINARY_SUFFIXES = {
-    ".png", ".jpg", ".jpeg", ".gif", ".ico", ".svg", ".pdf", ".woff", ".woff2",
-    ".ttf", ".otf", ".onnx", ".wav", ".ogg", ".mp3", ".zip", ".gz", ".pyc",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".gif",
+    ".ico",
+    ".svg",
+    ".pdf",
+    ".woff",
+    ".woff2",
+    ".ttf",
+    ".otf",
+    ".onnx",
+    ".wav",
+    ".ogg",
+    ".mp3",
+    ".zip",
+    ".gz",
+    ".pyc",
 }
 SKIP_NAMES = {"uv.lock", "poetry.lock", "package-lock.json"}
 

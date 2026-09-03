@@ -50,5 +50,6 @@ def test_probe_health_down_on_other_status(monkeypatch):
 def test_probe_health_down_on_connection_error(monkeypatch):
     def boom(*a, **k):
         raise requests.RequestException("refused")
+
     monkeypatch.setattr(health.requests, "get", boom)
     assert probe_health(8080) == "down"

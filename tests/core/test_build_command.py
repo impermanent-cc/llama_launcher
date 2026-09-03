@@ -1,8 +1,12 @@
 import datetime
-from llama_launcher.core.build_spec import BuildConfig
+
 from llama_launcher.core.build_command import (
-    config_slug, auto_tag, render_defines, parse_raw_defines,
+    auto_tag,
+    config_slug,
+    parse_raw_defines,
+    render_defines,
 )
+from llama_launcher.core.build_spec import BuildConfig
 
 D = datetime.date(2026, 8, 28)
 
@@ -35,8 +39,8 @@ def test_render_defines_bool_and_unquoted_tokens():
 
 def test_render_native_quotes_special_tokens_once():
     from llama_launcher.core.build_command import render_native
-    c = BuildConfig(name="w", source_dir="/s",
-                    options={"cuda-architectures": "86;120"})
+
+    c = BuildConfig(name="w", source_dir="/s", options={"cuda-architectures": "86;120"})
     assert "'-DCMAKE_CUDA_ARCHITECTURES=86;120'" in render_native(c).configure_cmd
 
 
@@ -44,18 +48,29 @@ def test_multiword_raw_define_survives_quoted():
     # -DCMAKE_CXX_FLAGS="-O3 -funroll-loops" must stay ONE argument in the
     # copyable command, not split into a broken positional arg.
     from llama_launcher.core.build_command import render_container, render_native
-    c = BuildConfig(name="perf", source_dir="/s",
-                    raw_defines='-DCMAKE_CXX_FLAGS="-O3 -funroll-loops"')
+
+    c = BuildConfig(
+        name="perf",
+        source_dir="/s",
+        raw_defines='-DCMAKE_CXX_FLAGS="-O3 -funroll-loops"',
+    )
     assert "'-DCMAKE_CXX_FLAGS=-O3 -funroll-loops'" in render_native(c).configure_cmd
     cf = render_container(
-        BuildConfig(name="perf", builder_image="b", runtime_image="r",
-                    raw_defines='-DCMAKE_CXX_FLAGS="-O3 -funroll-loops"'),
-        "t:1", "/p/x.containerfile").containerfile
+        BuildConfig(
+            name="perf",
+            builder_image="b",
+            runtime_image="r",
+            raw_defines='-DCMAKE_CXX_FLAGS="-O3 -funroll-loops"',
+        ),
+        "t:1",
+        "/p/x.containerfile",
+    ).containerfile
     assert "'-DCMAKE_CXX_FLAGS=-O3 -funroll-loops'" in cf
 
 
 def test_build_cmd_quotes_path_with_spaces():
     from llama_launcher.core.build_command import render_container
+
     c = BuildConfig(name="x", builder_image="b", runtime_image="r")
     cb = render_container(c, "t:1", "/con fig/x.containerfile")
     assert "-f '/con fig/x.containerfile' '/con fig'" in cb.build_cmd
@@ -71,8 +86,9 @@ def test_parse_raw_defines_two_token_form():
 def test_render_defines_skips_defaults_and_wrong_engine():
     # build-type at its default ("Release") emits nothing; ik-only option on
     # a mainline config emits nothing.
-    c = BuildConfig(engine="llama.cpp",
-                    options={"build-type": "Release", "iqk-fa-all-quants": True})
+    c = BuildConfig(
+        engine="llama.cpp", options={"build-type": "Release", "iqk-fa-all-quants": True}
+    )
     assert render_defines(c) == []
 
 
@@ -90,62 +106,76 @@ def test_parse_raw_defines_filters_non_defines():
 
 def test_render_native_pair():
     from llama_launcher.core.build_command import render_native
-    c = BuildConfig(name="cuda perf", source_dir="/home/u/src/llama.cpp",
-                    options={"cuda": True})
+
+    c = BuildConfig(
+        name="cuda perf", source_dir="/home/u/src/llama.cpp", options={"cuda": True}
+    )
     nb = render_native(c)
-    assert nb.configure_cmd == (
-        "cmake -B build-cuda-perf -DGGML_CUDA=ON")
+    assert nb.configure_cmd == ("cmake -B build-cuda-perf -DGGML_CUDA=ON")
     assert nb.build_cmd == (
-        "cmake --build build-cuda-perf -j$(nproc) --target llama-server")
-    assert nb.expected_binary == \
-        "/home/u/src/llama.cpp/build-cuda-perf/bin/llama-server"
+        "cmake --build build-cuda-perf -j$(nproc) --target llama-server"
+    )
+    assert (
+        nb.expected_binary == "/home/u/src/llama.cpp/build-cuda-perf/bin/llama-server"
+    )
 
 
 def test_render_native_adds_rpc_target():
     from llama_launcher.core.build_command import render_native
+
     c = BuildConfig(name="w", source_dir="/s", options={"rpc": True})
     assert "--target llama-server rpc-server" in render_native(c).build_cmd
 
 
 def test_render_container_structure():
     from llama_launcher.core.build_command import render_container
-    c = BuildConfig(name="srv", engine="ik_llama.cpp", target="container",
-                    options={"cuda": True},
-                    builder_image="docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04",
-                    runtime_image="docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04")
+
+    c = BuildConfig(
+        name="srv",
+        engine="ik_llama.cpp",
+        target="container",
+        options={"cuda": True},
+        builder_image="docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04",
+        runtime_image="docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04",
+    )
     cb = render_container(c, "ik-custom:srv-20260828", "/store/srv.containerfile")
     cf = cb.containerfile
     assert cf.startswith("FROM docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04 AS build")
     assert "git clone https://github.com/ikawrakow/ik_llama.cpp src" in cf
-    assert "git -C src checkout main" in cf          # default branch fallback
+    assert "git -C src checkout main" in cf  # default branch fallback
     assert "-DGGML_CUDA=ON" in cf
     assert "FROM docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04" in cf
     assert 'ENTRYPOINT ["/usr/local/bin/llama-server"]' in cf
     # Build context is the Containerfile's own parent dir, not the caller's
     # CWD: the Containerfile clones its own source, so tarring an unrelated
     # CWD as context is both wrong and wasteful.
-    assert cb.build_cmd == \
-        "podman build -t ik-custom:srv-20260828 -f /store/srv.containerfile /store"
+    assert (
+        cb.build_cmd
+        == "podman build -t ik-custom:srv-20260828 -f /store/srv.containerfile /store"
+    )
 
 
 def test_render_container_pinned_ref():
     from llama_launcher.core.build_command import render_container
-    c = BuildConfig(name="x", git_ref="b6789",
-                    builder_image="b", runtime_image="r")
+
+    c = BuildConfig(name="x", git_ref="b6789", builder_image="b", runtime_image="r")
     cf = render_container(c, "t:1", "/p").containerfile
     assert "git -C src checkout b6789" in cf
 
 
 def test_default_images_cuda_and_cpu():
     from llama_launcher.core.build_command import default_images
+
     cuda = BuildConfig(options={"cuda": True})
     assert default_images(cuda) == (
         "docker.io/nvidia/cuda:12.8.1-devel-ubuntu24.04",
-        "docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04")
+        "docker.io/nvidia/cuda:12.8.1-runtime-ubuntu24.04",
+    )
     cpu = BuildConfig()
     assert default_images(cpu) == (
         "docker.io/library/debian:bookworm",
-        "docker.io/library/debian:bookworm-slim")
+        "docker.io/library/debian:bookworm-slim",
+    )
 
 
 def test_render_defines_skips_blank_non_bool_values():
@@ -163,6 +193,7 @@ def test_parse_raw_defines_never_raises_on_unbalanced_quote():
 
 def test_rpc_target_detected_for_cmake_spellings():
     from llama_launcher.core.build_command import render_native
+
     for raw in ("-DGGML_RPC=1", "-DGGML_RPC=on", "-DGGML_RPC:BOOL=TRUE"):
         c = BuildConfig(name="w", source_dir="/s", raw_defines=raw)
         assert "rpc-server" in render_native(c).build_cmd, raw
@@ -173,7 +204,9 @@ def test_rpc_target_detected_for_cmake_spellings():
 def test_rpc_raw_override_of_checkbox_still_builds_target():
     # raw -DGGML_RPC=1 replaces the catalog's =ON rendering via the dedup;
     # the rpc-server target must survive that.
-    c = BuildConfig(name="w", source_dir="/s",
-                    options={"rpc": True}, raw_defines="-DGGML_RPC=1")
+    c = BuildConfig(
+        name="w", source_dir="/s", options={"rpc": True}, raw_defines="-DGGML_RPC=1"
+    )
     from llama_launcher.core.build_command import render_native
+
     assert "rpc-server" in render_native(c).build_cmd

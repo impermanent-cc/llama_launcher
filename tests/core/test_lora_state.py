@@ -2,10 +2,12 @@ from llama_launcher.core.lora_state import LoraAdapter, parse_adapters
 
 
 def test_parses_a_normal_payload():
-    got = parse_adapters([
-        {"id": 0, "path": "/Models/adapters/style.gguf", "scale": 0.0},
-        {"id": 1, "path": "/Models/adapters/domain.gguf", "scale": 0.65},
-    ])
+    got = parse_adapters(
+        [
+            {"id": 0, "path": "/Models/adapters/style.gguf", "scale": 0.0},
+            {"id": 1, "path": "/Models/adapters/domain.gguf", "scale": 0.65},
+        ]
+    )
     assert got == [
         LoraAdapter(id=0, path="/Models/adapters/style.gguf", scale=0.0),
         LoraAdapter(id=1, path="/Models/adapters/domain.gguf", scale=0.65),

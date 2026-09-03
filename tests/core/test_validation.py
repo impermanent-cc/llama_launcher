@@ -1,13 +1,15 @@
 from llama_launcher.core.command_builder import raw_arg_warnings
-from llama_launcher.core.spec import Profile, Mount, Runtime, RpcWorker
-from llama_launcher.core.validation import validate, Issue
+from llama_launcher.core.spec import Mount, Profile, RouterMember, RpcWorker, Runtime
+from llama_launcher.core.validation import validate
 
 
 def _ok_profile():
     return Profile(
-        name="p", image="img",
+        name="p",
+        image="img",
         mounts=[Mount(host="/h/models", container="/models", role="model", mode="ro")],
-        model="/models/m.gguf", settings={"port": 8080},
+        model="/models/m.gguf",
+        settings={"port": 8080},
     )
 
 
@@ -38,8 +40,12 @@ def test_mmproj_and_lora_paths_checked():
 
 
 def test_binary_not_found_is_error():
-    errs = [i for i in validate(_ok_profile(), binary_found=False) if i.level == "error"]
-    assert any("podman" in i.message.lower() or "runtime" in i.message.lower() for i in errs)
+    errs = [
+        i for i in validate(_ok_profile(), binary_found=False) if i.level == "error"
+    ]
+    assert any(
+        "podman" in i.message.lower() or "runtime" in i.message.lower() for i in errs
+    )
 
 
 def test_tools_with_rw_model_mount_warns():
@@ -78,26 +84,30 @@ def _mtp_profile():
 
 def test_mtp_with_mmproj_warns():
     p = _mtp_profile()
-    p.mmproj = "/models/mmproj.gguf"   # under the mount, so no path error
+    p.mmproj = "/models/mmproj.gguf"  # under the mount, so no path error
     warns = [i for i in validate(p) if i.level == "warning"]
-    assert any("mtp" in i.message.lower() and "mmproj" in i.message.lower() for i in warns)
+    assert any(
+        "mtp" in i.message.lower() and "mmproj" in i.message.lower() for i in warns
+    )
 
 
 def test_mtp_with_parallel_gt1_warns():
     p = _mtp_profile()
     p.settings["parallel"] = 4
     warns = [i for i in validate(p) if i.level == "warning"]
-    assert any("mtp" in i.message.lower() and "parallel" in i.message.lower() for i in warns)
+    assert any(
+        "mtp" in i.message.lower() and "parallel" in i.message.lower() for i in warns
+    )
 
 
 def test_mtp_single_slot_text_only_has_no_mtp_warning():
     p = _mtp_profile()
-    p.settings["parallel"] = 1   # mmproj unset, single slot -> nothing to warn about
+    p.settings["parallel"] = 1  # mmproj unset, single slot -> nothing to warn about
     assert not any("mtp" in i.message.lower() for i in validate(p))
 
 
 def test_non_mtp_profile_gets_no_mtp_warning():
-    p = _ok_profile()                       # no spec-type
+    p = _ok_profile()  # no spec-type
     p.mmproj = "/models/mmproj.gguf"
     p.settings["parallel"] = 4
     assert not any("mtp" in i.message.lower() for i in validate(p))
@@ -105,16 +115,17 @@ def test_non_mtp_profile_gets_no_mtp_warning():
 
 def test_draft_model_without_spec_type_warns():
     p = _ok_profile()
-    p.draft_model = "/models/draft.gguf"    # loaded but spec-type left at 'none'
+    p.draft_model = "/models/draft.gguf"  # loaded but spec-type left at 'none'
     warns = [i for i in validate(p) if i.level == "warning"]
-    assert any("draft" in i.message.lower() and "spec-type" in i.message.lower()
-               for i in warns)
+    assert any(
+        "draft" in i.message.lower() and "spec-type" in i.message.lower() for i in warns
+    )
 
 
 def test_draft_model_with_spec_type_has_no_draft_warning():
     p = _ok_profile()
     p.draft_model = "/models/draft.gguf"
-    p.settings["spec-type"] = "draft-simple"   # now actually used
+    p.settings["spec-type"] = "draft-simple"  # now actually used
     assert not any("draft model" in i.message.lower() for i in validate(p))
 
 
@@ -124,12 +135,15 @@ def test_no_draft_model_has_no_draft_warning():
 
 
 def _vprofile(**settings):
-    from llama_launcher.core.spec import Profile, Mount, Runtime
+    from llama_launcher.core.spec import Mount, Profile, Runtime
+
     return Profile(
-        name="e", image="img",
+        name="e",
+        image="img",
         runtime=Runtime(binary="podman", gpu_mode="cdi"),
         mounts=[Mount(host="/m", container="/models", role="model", mode="ro")],
-        model="/models/x.gguf", settings={**settings},
+        model="/models/x.gguf",
+        settings={**settings},
     )
 
 
@@ -140,7 +154,9 @@ def test_reranking_without_rank_pooling_warns():
 
 def test_reranking_without_embeddings_warns():
     issues = validate(_vprofile(reranking=True, pooling="rank"))
-    assert any(i.level == "warning" and "embedding" in i.message.lower() for i in issues)
+    assert any(
+        i.level == "warning" and "embedding" in i.message.lower() for i in issues
+    )
 
 
 def test_sampling_changed_in_embedding_mode_warns():
@@ -150,16 +166,16 @@ def test_sampling_changed_in_embedding_mode_warns():
 
 def test_clean_embedding_profile_has_no_embed_warnings():
     issues = validate(_vprofile(embeddings=True, pooling="mean"))
-    assert not any("rank" in i.message or "sampling" in i.message.lower() for i in issues)
-
-
-from llama_launcher.core.spec import Mount, Profile, RouterMember, Runtime
-from llama_launcher.core.validation import validate
+    assert not any(
+        "rank" in i.message or "sampling" in i.message.lower() for i in issues
+    )
 
 
 def _router(**kw):
     base = dict(
-        name="Host", mode="router", image="img",
+        name="Host",
+        mode="router",
+        image="img",
         mounts=[Mount(host="/mnt/models", container="/models")],
         members=[RouterMember(profile="Qwen")],
         settings={"port": 8080},
@@ -181,8 +197,11 @@ def _warnings(issues):
 
 
 def test_router_does_not_require_its_own_model():
-    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), _member_profile())],
-                      api_key_present=True)
+    issues = validate(
+        _router(),
+        members=[(RouterMember(profile="Qwen"), _member_profile())],
+        api_key_present=True,
+    )
     assert not any("No model selected" in m for m in _errors(issues))
 
 
@@ -193,10 +212,12 @@ def test_router_with_no_members_is_an_error():
 
 def test_duplicate_model_ids_are_an_error():
     m1 = RouterMember(profile="Qwen Big")
-    m2 = RouterMember(profile="Qwen  Big")       # slugifies to the same id
-    issues = validate(_router(), api_key_present=True,
-                      members=[(m1, _member_profile("Qwen Big")),
-                               (m2, _member_profile("Qwen  Big"))])
+    m2 = RouterMember(profile="Qwen  Big")  # slugifies to the same id
+    issues = validate(
+        _router(),
+        api_key_present=True,
+        members=[(m1, _member_profile("Qwen Big")), (m2, _member_profile("Qwen  Big"))],
+    )
     assert any("qwen-big" in m for m in _errors(issues))
 
 
@@ -208,22 +229,31 @@ def test_member_model_must_be_under_a_router_mount():
 
 def test_non_loopback_bind_without_api_key_is_an_error():
     p = _router(runtime=Runtime(bind_host="0.0.0.0"))
-    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
-                      api_key_present=False)
+    issues = validate(
+        p,
+        members=[(RouterMember(profile="Q"), _member_profile())],
+        api_key_present=False,
+    )
     assert any("without an API key" in m for m in _errors(issues))
 
 
 def test_non_loopback_bind_with_api_key_is_allowed():
     p = _router(runtime=Runtime(bind_host="0.0.0.0"))
-    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
-                      api_key_present=True)
+    issues = validate(
+        p,
+        members=[(RouterMember(profile="Q"), _member_profile())],
+        api_key_present=True,
+    )
     assert not any("without an API key" in m for m in _errors(issues))
 
 
 def test_models_max_above_one_warns():
     p = _router(settings={"port": 8080, "models-max": 3})
-    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
-                      api_key_present=True)
+    issues = validate(
+        p,
+        members=[(RouterMember(profile="Q"), _member_profile())],
+        api_key_present=True,
+    )
     assert any("models-max" in m for m in _warnings(issues))
 
 
@@ -231,24 +261,35 @@ def test_port_choice_never_warns_about_discovery():
     # Any router port is fine; there is no discovery-scan port warning.
     for port in (8080, 9999):
         p = _router(settings={"port": port})
-        issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
-                          api_key_present=True)
+        issues = validate(
+            p,
+            members=[(RouterMember(profile="Q"), _member_profile())],
+            api_key_present=True,
+        )
         assert not any("discover" in m.lower() for m in _warnings(issues))
 
 
 def test_multi_lora_member_warns():
     from llama_launcher.core.spec import LoraRef
-    member_profile = _member_profile(loras=[LoraRef(path="/models/a.gguf"),
-                                            LoraRef(path="/models/b.gguf")])
-    issues = validate(_router(), api_key_present=True,
-                      members=[(RouterMember(profile="Q"), member_profile)])
+
+    member_profile = _member_profile(
+        loras=[LoraRef(path="/models/a.gguf"), LoraRef(path="/models/b.gguf")]
+    )
+    issues = validate(
+        _router(),
+        api_key_present=True,
+        members=[(RouterMember(profile="Q"), member_profile)],
+    )
     assert any("LoRA" in m for m in _warnings(issues))
 
 
 def test_unconvertible_member_raw_args_warns():
     member_profile = _member_profile(raw_args="--foo a --foo b")
-    issues = validate(_router(), api_key_present=True,
-                      members=[(RouterMember(profile="Q"), member_profile)])
+    issues = validate(
+        _router(),
+        api_key_present=True,
+        members=[(RouterMember(profile="Q"), member_profile)],
+    )
     assert any("preset" in m.lower() for m in _warnings(issues))
 
 
@@ -257,18 +298,28 @@ def test_blank_cors_origins_reads_as_upstream_wildcard():
     # upstream's '*' default: the exposed-bind wildcard warning must still
     # fire.
     from llama_launcher.core.spec import Runtime
-    p = _router(runtime=Runtime(bind_host="0.0.0.0"),
-                settings={"port": 8080, "cors-origins": ""})
-    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
-                      api_key_present=True)
+
+    p = _router(
+        runtime=Runtime(bind_host="0.0.0.0"),
+        settings={"port": 8080, "cors-origins": ""},
+    )
+    issues = validate(
+        p,
+        members=[(RouterMember(profile="Q"), _member_profile())],
+        api_key_present=True,
+    )
     assert any("CORS origins '*'" in m for m in _warnings(issues))
 
 
 def test_tools_with_lan_cors_origin_warns():
-    p = _router(settings={"port": 8080, "tools": "all",
-                          "cors-origins": "http://vm.local"})
-    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
-                      api_key_present=True)
+    p = _router(
+        settings={"port": 8080, "tools": "all", "cors-origins": "http://vm.local"}
+    )
+    issues = validate(
+        p,
+        members=[(RouterMember(profile="Q"), _member_profile())],
+        api_key_present=True,
+    )
     assert any("clamp" in m.lower() for m in _warnings(issues))
 
 
@@ -280,32 +331,50 @@ def test_server_mode_validation_unchanged():
 def test_server_mode_non_loopback_bind_without_key_is_an_error():
     # The Bind address control is shown in BOTH modes, so the exposure guard
     # cannot live only in the router branch.
-    p = Profile(name="Solo", image="img", model="/models/a.gguf",
-                mounts=[Mount(host="/h", container="/models")],
-                runtime=Runtime(bind_host="0.0.0.0"), settings={"port": 8080})
+    p = Profile(
+        name="Solo",
+        image="img",
+        model="/models/a.gguf",
+        mounts=[Mount(host="/h", container="/models")],
+        runtime=Runtime(bind_host="0.0.0.0"),
+        settings={"port": 8080},
+    )
     assert any("without an API key" in m for m in _errors(validate(p)))
 
 
 def test_server_mode_non_loopback_bind_with_a_typed_key_is_allowed():
-    p = Profile(name="Solo", image="img", model="/models/a.gguf",
-                mounts=[Mount(host="/h", container="/models")],
-                runtime=Runtime(bind_host="0.0.0.0"),
-                settings={"port": 8080, "api-key": "sk-typed"})
+    p = Profile(
+        name="Solo",
+        image="img",
+        model="/models/a.gguf",
+        mounts=[Mount(host="/h", container="/models")],
+        runtime=Runtime(bind_host="0.0.0.0"),
+        settings={"port": 8080, "api-key": "sk-typed"},
+    )
     assert not any("without an API key" in m for m in _errors(validate(p)))
 
 
 def test_server_mode_loopback_bind_is_silent():
-    p = Profile(name="Solo", image="img", model="/models/a.gguf",
-                mounts=[Mount(host="/h", container="/models")],
-                settings={"port": 8080})
+    p = Profile(
+        name="Solo",
+        image="img",
+        model="/models/a.gguf",
+        mounts=[Mount(host="/h", container="/models")],
+        settings={"port": 8080},
+    )
     assert not any("without an API key" in m for m in _errors(validate(p)))
 
 
 def _srv(raw="", **settings):
     return Profile(
-        name="s", image="img", runtime=Runtime(bind_host="127.0.0.1"), mode="server",
+        name="s",
+        image="img",
+        runtime=Runtime(bind_host="127.0.0.1"),
+        mode="server",
         mounts=[Mount(host="/h", container="/models", role="model")],
-        model="/models/m.gguf", raw_args=raw, settings={"port": 8080, **settings},
+        model="/models/m.gguf",
+        raw_args=raw,
+        settings={"port": 8080, **settings},
     )
 
 
@@ -321,8 +390,10 @@ def test_raw_arg_warnings_empty_when_no_collision():
 
 def test_validate_emits_warning_issue_for_raw_collision():
     issues = validate(_srv(raw="-ngl 50", **{"n-gpu-layers": "99"}))
-    assert any(i.level == "warning" and "overrides '--n-gpu-layers'" in i.message
-               for i in issues)
+    assert any(
+        i.level == "warning" and "overrides '--n-gpu-layers'" in i.message
+        for i in issues
+    )
 
 
 def test_validate_no_raw_warning_when_clean():
@@ -330,13 +401,10 @@ def test_validate_no_raw_warning_when_clean():
     assert not any("overrides" in i.message for i in issues)
 
 
-from llama_launcher.core.spec import Profile, Runtime, Mount
-from llama_launcher.core.validation import validate
-
-
 def _ok_server(**kw):
     base = dict(
-        name="p", image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
+        name="p",
+        image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
         runtime=Runtime(engine="ik_llama.cpp"),
         mounts=[Mount(host="/m", container="/models", role="model")],
         model="/models/x.gguf",
@@ -356,10 +424,13 @@ def test_engine_ik_but_mainline_image_warns():
 
 
 def test_engine_llama_but_ik_image_warns():
-    p = Profile(name="p", image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
-                runtime=Runtime(engine="llama.cpp"),
-                mounts=[Mount(host="/m", container="/models", role="model")],
-                model="/models/x.gguf")
+    p = Profile(
+        name="p",
+        image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
+        runtime=Runtime(engine="llama.cpp"),
+        mounts=[Mount(host="/m", container="/models", role="model")],
+        model="/models/x.gguf",
+    )
     assert any("looks like an ik_llama.cpp build" in m for m in _msgs(p))
 
 
@@ -385,16 +456,25 @@ def test_native_requires_existing_executable_binary():
     # services.native.native_binary_available and is passed in as
     # `native_binary_ok`; a real stat of this path is covered separately in
     # tests/services/test_native.py.
-    p = Profile(name="n", model="/m.gguf",
-                runtime=Runtime(launch_mode="native", native_binary="/no/such/llama-server"))
+    p = Profile(
+        name="n",
+        model="/m.gguf",
+        runtime=Runtime(launch_mode="native", native_binary="/no/such/llama-server"),
+    )
     msgs = [i.message for i in validate(p, native_binary_ok=False)]
     assert any("binary" in m.lower() for m in msgs)
 
 
 def test_native_binary_present_and_executable_passes():
-    p = Profile(name="n", model="/m.gguf",
-                runtime=Runtime(launch_mode="native", native_binary="/opt/bin/llama-server",
-                                bind_host="127.0.0.1"))
+    p = Profile(
+        name="n",
+        model="/m.gguf",
+        runtime=Runtime(
+            launch_mode="native",
+            native_binary="/opt/bin/llama-server",
+            bind_host="127.0.0.1",
+        ),
+    )
     errors = [i for i in validate(p, native_binary_ok=True) if i.level == "error"]
     assert errors == []
 
@@ -402,9 +482,11 @@ def test_native_binary_present_and_executable_passes():
 def test_ik_engine_router_is_refused():
     """ik_llama.cpp has no router: its llama-server carries no --models-preset,
     so the container would die on "unknown argument" the moment it started."""
-    issues = validate(_router(runtime=Runtime(engine="ik_llama.cpp"), image="ik-llama-cpp"),
-                      members=[(RouterMember(profile="Qwen"), _member_profile())],
-                      api_key_present=True)
+    issues = validate(
+        _router(runtime=Runtime(engine="ik_llama.cpp"), image="ik-llama-cpp"),
+        members=[(RouterMember(profile="Qwen"), _member_profile())],
+        api_key_present=True,
+    )
     assert any("router" in m.lower() and "ik_llama.cpp" in m for m in _errors(issues))
 
 
@@ -413,9 +495,11 @@ def test_router_on_an_ik_image_is_refused_even_with_the_mainline_engine():
     image, so a router whose image looks like an ik build is refused outright
     (the container would die on unknown argument --models-preset), not merely
     given the looks-ik warning."""
-    issues = validate(_router(image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"),
-                      members=[(RouterMember(profile="Qwen"), _member_profile())],
-                      api_key_present=True)
+    issues = validate(
+        _router(image="ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"),
+        members=[(RouterMember(profile="Qwen"), _member_profile())],
+        api_key_present=True,
+    )
     assert any("router" in m.lower() and "ik_llama.cpp" in m for m in _errors(issues))
 
 
@@ -424,24 +508,35 @@ def test_router_member_with_a_different_engine_is_refused():
     router's own (mainline) llama-server spawns every member, so an ik-tagged
     member writes ik-only keys into the preset and the child dies on unknown
     argument."""
-    member = _member_profile(runtime=Runtime(engine="ik_llama.cpp"),
-                             settings={"defer-experts": True})
-    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), member)],
-                      api_key_present=True)
+    member = _member_profile(
+        runtime=Runtime(engine="ik_llama.cpp"), settings={"defer-experts": True}
+    )
+    issues = validate(
+        _router(),
+        members=[(RouterMember(profile="Qwen"), member)],
+        api_key_present=True,
+    )
     errors = _errors(issues)
-    assert any("Qwen" in m and "ik_llama.cpp" in m and "engine" in m.lower()
-               for m in errors), errors
+    assert any(
+        "Qwen" in m and "ik_llama.cpp" in m and "engine" in m.lower() for m in errors
+    ), errors
 
 
 def test_mainline_router_with_mainline_members_has_no_engine_errors():
-    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), _member_profile())],
-                      api_key_present=True)
+    issues = validate(
+        _router(),
+        members=[(RouterMember(profile="Qwen"), _member_profile())],
+        api_key_present=True,
+    )
     assert not any("router mode" in m or "engine" in m.lower() for m in _errors(issues))
 
 
 def test_native_router_is_refused():
-    p = Profile(name="n", mode="router",
-                runtime=Runtime(launch_mode="native", native_binary="/bin/sh"))
+    p = Profile(
+        name="n",
+        mode="router",
+        runtime=Runtime(launch_mode="native", native_binary="/bin/sh"),
+    )
     msgs = [i.message.lower() for i in validate(p)]
     assert any("router" in m and "native" in m for m in msgs)
 
@@ -450,11 +545,20 @@ def test_native_profile_not_blocked_by_missing_container_runtime():
     # Runtime.binary defaults to "podman" for every profile regardless of
     # launch_mode; a native user (no podman installed) must not be blocked by
     # a check about a runtime the native path never uses.
-    p = Profile(name="n", model="/m.gguf",
-                runtime=Runtime(launch_mode="native", native_binary="/opt/bin/llama-server",
-                                bind_host="127.0.0.1"))
-    errors = [i for i in validate(p, binary_found=False, native_binary_ok=True)
-              if i.level == "error"]
+    p = Profile(
+        name="n",
+        model="/m.gguf",
+        runtime=Runtime(
+            launch_mode="native",
+            native_binary="/opt/bin/llama-server",
+            bind_host="127.0.0.1",
+        ),
+    )
+    errors = [
+        i
+        for i in validate(p, binary_found=False, native_binary_ok=True)
+        if i.level == "error"
+    ]
     assert errors == []
 
 
@@ -465,10 +569,14 @@ def test_container_profile_still_blocked_by_missing_runtime():
 
 
 def _rpc(workers, settings=None):
-    return Profile(name="pool", image="img", model="/m/x.gguf",
-                   mounts=[Mount(host="/m", container="/m")],
-                   settings=settings or {},
-                   runtime=Runtime(launch_mode="rpc", rpc_workers=workers))
+    return Profile(
+        name="pool",
+        image="img",
+        model="/m/x.gguf",
+        mounts=[Mount(host="/m", container="/m")],
+        settings=settings or {},
+        runtime=Runtime(launch_mode="rpc", rpc_workers=workers),
+    )
 
 
 def _levels(issues, needle):
@@ -480,21 +588,26 @@ def test_rpc_empty_pool_is_error():
 
 
 def test_rpc_missing_worker_image_is_error():
-    issues = validate(_rpc([RpcWorker(node="box2")]),
-                      worker_image_present={"box2": False})
+    issues = validate(
+        _rpc([RpcWorker(node="box2")]), worker_image_present={"box2": False}
+    )
     assert "error" in _levels(issues, "box2")
 
 
 def test_rpc_overcommit_mem_is_warning():
-    issues = validate(_rpc([RpcWorker(node="box2", mem_mb=64000)]),
-                      worker_image_present={"box2": True},
-                      worker_free_mb={"box2": 32000})
+    issues = validate(
+        _rpc([RpcWorker(node="box2", mem_mb=64000)]),
+        worker_image_present={"box2": True},
+        worker_free_mb={"box2": 32000},
+    )
     assert "warning" in _levels(issues, "more than")
 
 
 def test_rpc_cpu_moe_centralizing_warning():
-    issues = validate(_rpc([RpcWorker(node="local")], settings={"cpu-moe": True}),
-                      worker_image_present={"local": True})
+    issues = validate(
+        _rpc([RpcWorker(node="local")], settings={"cpu-moe": True}),
+        worker_image_present={"local": True},
+    )
     assert "warning" in _levels(issues, "centralizes")
 
 
@@ -510,10 +623,15 @@ def test_router_port_choice_raises_no_discovery_warning():
     """Any router port is fine; validation does not couple to an outside
     harness's discovery scan."""
     p = _router(settings={"port": 9123})
-    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
-                      api_key_present=True)
-    assert not any("scan" in m.lower() or "odysseus" in m.lower()
-                   for m in _warnings(issues) + _errors(issues))
+    issues = validate(
+        p,
+        members=[(RouterMember(profile="Q"), _member_profile())],
+        api_key_present=True,
+    )
+    assert not any(
+        "scan" in m.lower() or "odysseus" in m.lower()
+        for m in _warnings(issues) + _errors(issues)
+    )
 
 
 def test_member_port_setting_warns_it_is_ignored():
@@ -521,14 +639,20 @@ def test_member_port_setting_warns_it_is_ignored():
     --port from the preset, so a port set on a member profile silently does
     nothing; say so instead of letting it look like the router is randomizing."""
     member = _member_profile(settings={"port": 8090})
-    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), member)],
-                      api_key_present=True)
+    issues = validate(
+        _router(),
+        members=[(RouterMember(profile="Qwen"), member)],
+        api_key_present=True,
+    )
     assert any("port" in m and "router" in m for m in _warnings(issues))
 
 
 def test_member_without_port_setting_does_not_warn_about_ports():
-    issues = validate(_router(), members=[(RouterMember(profile="Qwen"), _member_profile())],
-                      api_key_present=True)
+    issues = validate(
+        _router(),
+        members=[(RouterMember(profile="Qwen"), _member_profile())],
+        api_key_present=True,
+    )
     assert not any("random" in m for m in _warnings(issues))
 
 
@@ -537,18 +661,33 @@ def test_router_ignores_leftover_single_server_warnings():
     settings (kept so a Save in router mode is not destructive); the
     single-server launch warnings (inert draft, MTP limits) must not fire on
     a router launch -- the router itself loads no model."""
-    p = _router(draft_model="/models/d.gguf",
-                settings={"port": 8080, "spec-type": "draft-mtp",
-                          "parallel": 4, "ctx-size": 8192})
-    issues = validate(p, members=[(RouterMember(profile="Q"), _member_profile())],
-                      api_key_present=True)
-    assert not any("draft" in m.lower() or "mtp" in m.lower()
-                   for m in _warnings(issues))
+    p = _router(
+        draft_model="/models/d.gguf",
+        settings={
+            "port": 8080,
+            "spec-type": "draft-mtp",
+            "parallel": 4,
+            "ctx-size": 8192,
+        },
+    )
+    issues = validate(
+        p,
+        members=[(RouterMember(profile="Q"), _member_profile())],
+        api_key_present=True,
+    )
+    assert not any(
+        "draft" in m.lower() or "mtp" in m.lower() for m in _warnings(issues)
+    )
 
 
 def test_server_inert_draft_warning_still_fires():
-    p = Profile(name="S", image="img", model="/models/m.gguf",
-                mounts=[Mount(host="/h", container="/models")],
-                draft_model="/models/d.gguf", settings={"port": 8080})
+    p = Profile(
+        name="S",
+        image="img",
+        model="/models/m.gguf",
+        mounts=[Mount(host="/h", container="/models")],
+        draft_model="/models/d.gguf",
+        settings={"port": 8080},
+    )
     issues = validate(p)
     assert any("never used" in m for m in _warnings(issues))

@@ -2,11 +2,13 @@ import pytest
 
 from llama_launcher.services import terminal
 from llama_launcher.services.terminal import (
-    build_terminal_argv, detect_terminal, DEFAULT_TEMPLATE, NoTerminalError,
+    NoTerminalError,
+    build_terminal_argv,
+    detect_terminal,
 )
 
-
 # --- {cmd} terminals: single quoted command string ---
+
 
 def test_build_terminal_argv_konsole():
     argv = build_terminal_argv(["podman", "run", "--rm", "img"])
@@ -29,9 +31,11 @@ def test_custom_template():
 
 # --- shell_hold: portable "keep window open" for terminals without native --hold ---
 
+
 def test_shell_hold_appends_read_to_command_string():
-    argv = build_terminal_argv(["podman", "run", "img"],
-                               template="ptyxis -- bash -lc {cmd}", shell_hold=True)
+    argv = build_terminal_argv(
+        ["podman", "run", "img"], template="ptyxis -- bash -lc {cmd}", shell_hold=True
+    )
     assert argv[:3] == ["ptyxis", "--", "bash"]
     cmd = argv[-1]
     assert cmd.startswith("podman run img")
@@ -39,12 +43,14 @@ def test_shell_hold_appends_read_to_command_string():
 
 
 def test_no_shell_hold_leaves_command_bare():
-    argv = build_terminal_argv(["podman", "run", "img"],
-                               template="ptyxis -- bash -lc {cmd}", shell_hold=False)
+    argv = build_terminal_argv(
+        ["podman", "run", "img"], template="ptyxis -- bash -lc {cmd}", shell_hold=False
+    )
     assert argv[-1] == "podman run img"
 
 
 # --- {bashcmd}: single-string -e terminals (kgx, tilix, xfce4) ---
+
 
 def test_bashcmd_placeholder_is_single_token():
     argv = build_terminal_argv(["echo", "hi"], template="kgx -e {bashcmd}")
@@ -56,9 +62,10 @@ def test_bashcmd_placeholder_is_single_token():
 
 # --- detection ---
 
+
 def _which_only(*present):
     names = set(present)
-    return lambda b: (f"/usr/bin/{b}" if b in names else None)
+    return lambda b: f"/usr/bin/{b}" if b in names else None
 
 
 def test_detect_prefers_konsole_when_present():
@@ -86,10 +93,10 @@ def test_every_terminal_template_builds_a_valid_argv():
 
 # --- launch: graceful failure instead of an unhandled FileNotFoundError ---
 
+
 def test_launch_raises_no_terminal_when_none_available(monkeypatch):
     started = []
-    monkeypatch.setattr(terminal.subprocess, "Popen",
-                        lambda *a, **k: started.append(a))
+    monkeypatch.setattr(terminal.subprocess, "Popen", lambda *a, **k: started.append(a))
     with pytest.raises(NoTerminalError):
         terminal.launch(["echo", "hi"], template=None, which=_which_only())
     assert started == []  # never tried to spawn
@@ -98,6 +105,7 @@ def test_launch_raises_no_terminal_when_none_available(monkeypatch):
 def test_launch_wraps_filenotfound_as_no_terminal(monkeypatch):
     def _boom(*a, **k):
         raise FileNotFoundError(2, "No such file or directory", "konsole")
+
     monkeypatch.setattr(terminal.subprocess, "Popen", _boom)
     with pytest.raises(NoTerminalError):
         terminal.launch(["echo", "hi"], template="konsole --hold -e bash -lc {cmd}")
@@ -105,42 +113,54 @@ def test_launch_wraps_filenotfound_as_no_terminal(monkeypatch):
 
 def test_launch_uses_detected_terminal(monkeypatch):
     calls = {}
-    monkeypatch.setattr(terminal.subprocess, "Popen",
-                        lambda argv, **k: calls.setdefault("argv", argv))
+    monkeypatch.setattr(
+        terminal.subprocess, "Popen", lambda argv, **k: calls.setdefault("argv", argv)
+    )
     terminal.launch(["echo", "hi"], template=None, which=_which_only("ptyxis"))
     assert calls["argv"][0] == "ptyxis"
 
 
 # --- a custom template from (possibly shared) config.json is screened ---
 
-def _which_all(name):          # every binary "installed"
+
+def _which_all(name):  # every binary "installed"
     return f"/usr/bin/{name}"
 
 
 def test_custom_template_without_placeholder_is_rejected(monkeypatch):
     """A config `terminal` value that never references {cmd}/{bashcmd} would run
     its own argv and drop the launch command -- the shape an injection takes."""
-    monkeypatch.setattr(terminal.subprocess, "Popen",
-                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned")))
+    monkeypatch.setattr(
+        terminal.subprocess,
+        "Popen",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned")),
+    )
     with pytest.raises(NoTerminalError):
         terminal.launch(["echo", "hi"], template="sh -c id", which=_which_all)
 
 
 def test_custom_template_with_uninstalled_program_is_rejected(monkeypatch):
-    monkeypatch.setattr(terminal.subprocess, "Popen",
-                        lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned")))
+    monkeypatch.setattr(
+        terminal.subprocess,
+        "Popen",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("spawned")),
+    )
     with pytest.raises(NoTerminalError):
-        terminal.launch(["echo", "hi"],
-                        template="not-a-real-term -e bash -lc {cmd}",
-                        which=lambda b: None)
+        terminal.launch(
+            ["echo", "hi"],
+            template="not-a-real-term -e bash -lc {cmd}",
+            which=lambda b: None,
+        )
 
 
 def test_custom_template_valid_terminal_is_accepted(monkeypatch):
     calls = {}
-    monkeypatch.setattr(terminal.subprocess, "Popen",
-                        lambda argv, **k: calls.setdefault("argv", argv))
-    terminal.launch(["echo", "hi"], template="wezterm -e bash -lc {cmd}",
-                    which=_which_all)
+    monkeypatch.setattr(
+        terminal.subprocess, "Popen", lambda argv, **k: calls.setdefault("argv", argv)
+    )
+    terminal.launch(
+        ["echo", "hi"], template="wezterm -e bash -lc {cmd}", which=_which_all
+    )
     assert calls["argv"][0] == "wezterm"
 
 
@@ -148,12 +168,17 @@ def test_launch_wraps_any_oserror_as_no_terminal(monkeypatch):
     """A snap-confined or exec-format-broken terminal raises PermissionError/
     OSError, not FileNotFoundError -- it must still become a graceful
     NoTerminalError, not crash the launch."""
+
     def _boom(*a, **k):
         raise PermissionError(13, "Permission denied", "konsole")
+
     monkeypatch.setattr(terminal.subprocess, "Popen", _boom)
     with pytest.raises(NoTerminalError):
-        terminal.launch(["echo", "hi"], template="konsole --hold -e bash -lc {cmd}",
-                        which=lambda b: "/usr/bin/konsole")
+        terminal.launch(
+            ["echo", "hi"],
+            template="konsole --hold -e bash -lc {cmd}",
+            which=lambda b: "/usr/bin/konsole",
+        )
 
 
 def test_foot_is_a_known_terminal():
@@ -175,7 +200,8 @@ def test_x_terminal_emulator_is_the_last_resort():
 
 def test_detect_prefers_a_named_terminal_over_x_terminal_emulator():
     tmpl, _hold = detect_terminal(
-        which=_which_only("xfce4-terminal", "x-terminal-emulator"))
+        which=_which_only("xfce4-terminal", "x-terminal-emulator")
+    )
     assert tmpl.startswith("xfce4-terminal")
 
 

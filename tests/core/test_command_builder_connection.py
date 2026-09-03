@@ -1,11 +1,15 @@
-from llama_launcher.core.spec import Profile, Runtime, Mount, RpcWorker
 from llama_launcher.core.command_builder import build_command, build_worker_command
+from llama_launcher.core.spec import Profile, RpcWorker, Runtime
 
 
 def _p(binary="podman"):
-    return Profile(name="p", image="ghcr.io/ggml-org/llama.cpp:server-cuda13",
-                   runtime=Runtime(binary=binary),
-                   model="/models/m.gguf", settings={"port": 8080})
+    return Profile(
+        name="p",
+        image="ghcr.io/ggml-org/llama.cpp:server-cuda13",
+        runtime=Runtime(binary=binary),
+        model="/models/m.gguf",
+        settings={"port": 8080},
+    )
 
 
 def test_local_connection_is_byte_for_byte_unchanged():
@@ -18,7 +22,7 @@ def test_remote_connection_inserted_after_binary_before_run():
     assert argv[0] == "podman"
     assert argv[1:3] == ["--connection", "box-b"]
     assert argv[3] == "run"
-    assert "--connection" not in build_command(_p())     # default still clean
+    assert "--connection" not in build_command(_p())  # default still clean
 
 
 def test_remote_docker_node_uses_context_not_connection():
@@ -34,8 +38,9 @@ def test_remote_docker_node_uses_context_not_connection():
 
 
 def test_remote_docker_worker_uses_context_not_connection():
-    argv = build_worker_command(_p("docker"), RpcWorker(node="box-b", device="CPU"),
-                                index=0, connection="box-b")
+    argv = build_worker_command(
+        _p("docker"), RpcWorker(node="box-b", device="CPU"), index=0, connection="box-b"
+    )
     assert argv[0] == "docker"
     assert argv[1:3] == ["--context", "box-b"]
     assert "--connection" not in argv

@@ -1,15 +1,15 @@
 from collections import deque
 
 from PySide6.QtGui import QFont
-from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel
+from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
 
 from llama_launcher.core.mtp_stats import sparkline
 
-_SPARK_W = 40          # fixed sparkline width -> the panel never widens over time
+_SPARK_W = 40  # fixed sparkline width -> the panel never widens over time
 
 
 def _gib_from_bytes(b: int) -> float:
-    return b / 1024 ** 3
+    return b / 1024**3
 
 
 def _gib_from_mib(mib: int) -> float:
@@ -28,6 +28,7 @@ class StatsPanel(QWidget):
     would widen the labels and make the QDockWidget (and the whole window)
     grow tick after tick without ever shrinking back.
     """
+
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
@@ -41,7 +42,7 @@ class StatsPanel(QWidget):
             w.setWordWrap(True)
             layout.addWidget(w)
         layout.addStretch(1)
-        self._hist: dict = {}          # metric key -> deque[float] (len == _SPARK_W)
+        self._hist: dict = {}  # metric key -> deque[float] (len == _SPARK_W)
 
     def _spark(self, key, value: float) -> str:
         """Push value into the key's rolling history and render a fixed-width
@@ -72,7 +73,8 @@ class StatsPanel(QWidget):
                 f"{g.name}\n"
                 f"  util {spark} {g.util_pct:3d}%\n"
                 f"  vram {_gib_from_mib(g.mem_used_mib):5.1f} / "
-                f"{_gib_from_mib(g.mem_total_mib):5.1f} GiB  {g.temp_c:3d}\u00b0C{power}")
+                f"{_gib_from_mib(g.mem_total_mib):5.1f} GiB  {g.temp_c:3d}\u00b0C{power}"
+            )
         self.gpu_label.setText("GPU\n" + "\n".join(blocks))
 
     def _render_system(self, snap) -> None:
@@ -88,16 +90,21 @@ class StatsPanel(QWidget):
             f"  cores {cores}\n"
             f"  ram   {_gib_from_bytes(snap.mem.used_bytes):6.1f} / "
             f"{_gib_from_bytes(snap.mem.total_bytes):6.1f} GiB\n"
-            f"  load  {l1:.2f} {l5:.2f} {l15:.2f}")
+            f"  load  {l1:.2f} {l5:.2f} {l15:.2f}"
+        )
 
     def _render_container(self, snap) -> None:
         c = snap.container
         if c is None:
             self.container_label.setText("Container: no server running")
             return
-        limit = (f" / {_gib_from_bytes(c.mem_limit_bytes):6.1f} GiB"
-                 if c.mem_limit_bytes else "")
+        limit = (
+            f" / {_gib_from_bytes(c.mem_limit_bytes):6.1f} GiB"
+            if c.mem_limit_bytes
+            else ""
+        )
         self.container_label.setText(
             f"Container: {c.name}\n"
             f"  cpu   {c.cpu_pct:6.1f}%\n"
-            f"  mem   {_gib_from_bytes(c.mem_used_bytes):6.1f} GiB{limit}")
+            f"  mem   {_gib_from_bytes(c.mem_used_bytes):6.1f} GiB{limit}"
+        )

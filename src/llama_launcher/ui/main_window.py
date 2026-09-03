@@ -1,70 +1,101 @@
-# subprocess is not called in this file (ReportController.open_web_ui owns
-# the Popen call) but stays imported: the test suite monkeypatches it as
-# `mw.subprocess.Popen`, and both names resolve to the same module object
-# report_controller.py imports, so the patch reaches the real call site.
-import subprocess
+# Re-exported for the test suite; ReportController.open_web_ui owns the Popen call.
+import subprocess as subprocess
 
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
-    QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-    QScrollArea, QLabel, QPushButton,
-    QMessageBox, QInputDialog, QTabWidget, QDockWidget
+    QDockWidget,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QMainWindow,
+    QMessageBox,
+    QPushButton,
+    QScrollArea,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
 )
 
-from llama_launcher.core.spec import (
-    member_model_id, profile_port, slugify,
-)
-from llama_launcher.core.router_preset import render_preset
 from llama_launcher.core.pathmap import host_to_container
+from llama_launcher.core.router_preset import render_preset
+from llama_launcher.core.spec import (
+    member_model_id,
+    profile_port,
+    slugify,
+)
 from llama_launcher.core.validation import (
-    LOOPBACK_HOSTS, dial_host,
+    LOOPBACK_HOSTS,
+    dial_host,
+)
+from llama_launcher.services import api_key as api_key_store
+
+# Re-exported for the test suite, which patches these names on this
+# module; each resolves to the same module object the controllers import,
+# so a patch reaches the call site.
+from llama_launcher.services import (
+    gpu as gpu,
+)
+from llama_launcher.services import (
+    health as health,
+)
+from llama_launcher.services import (
+    metrics as metrics,
+)
+from llama_launcher.services import (
+    model_info as model_info,
+)
+from llama_launcher.services import (
+    registry as registry,
+)
+from llama_launcher.services import (
+    router_api as router_api,
+)
+from llama_launcher.services import (
+    runtime,
+)
+from llama_launcher.services import (
+    terminal as terminal,
 )
 from llama_launcher.store.profiles import (
-    default_base_dir, list_profiles, save_profile, delete_profile,
+    default_base_dir,
+    delete_profile,
+    list_profiles,
     load_config,
+    save_profile,
 )
-# health, router_api, gpu, metrics and model_info are not called in this
-# file (MonitorController/LaunchController/ReportController own that
-# behavior) but stay imported: the test suite monkeypatches them as
-# `mw.health.probe_health` / `llama_launcher.ui.main_window.router_api.*` /
-# `mw.gpu.query_gpus` / `mw.metrics.fetch_metrics` / `mw.model_info.*`, and
-# the names resolve to the same module objects the controllers import, so
-# the patches reach the real call sites.
-from llama_launcher.services import runtime, terminal, registry, health, metrics, gpu, model_info
-from llama_launcher.ui.panels.configure_panel import ConfigurePanel
-from llama_launcher.ui.panels.monitor_panel import MonitorPanel
 from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
 from llama_launcher.ui.panels.build_panel import BuildPanel
+from llama_launcher.ui.panels.configure_panel import ConfigurePanel
+from llama_launcher.ui.panels.monitor_panel import MonitorPanel
 from llama_launcher.ui.panels.stats_panel import StatsPanel
 from llama_launcher.ui.widgets.router_models_table import RouterModelsTable
 from llama_launcher.ui.widgets.status_banner import StatusBanner
-from llama_launcher.services import api_key as api_key_store
-from llama_launcher.services import router_api
 
 
 def base_dir():
     return default_base_dir()
 
 
-# build_monitor_data lives in monitor_controller.py and is re-exported here
-# because the test suite reaches it as
-# `llama_launcher.ui.main_window.build_monitor_data`.
-#
-# This import comes after base_dir(): monitor_controller.py imports base_dir
-# back from this module lazily, per method, so the name must already be
-# bound here by the time those imports resolve.
-from llama_launcher.ui.controllers.monitor_controller import (  # noqa: E402
-    MonitorController, build_monitor_data,
-)
-
-from llama_launcher.ui.controllers.launch_controller import (  # noqa: E402
-    LaunchController,
-)
-
 # BenchmarkWorker lives in benchmark_controller.py and is not re-exported
 # here: no test reaches it through main_window's namespace.
 from llama_launcher.ui.controllers.benchmark_controller import (  # noqa: E402
     BenchmarkController,
+)
+from llama_launcher.ui.controllers.launch_controller import (  # noqa: E402
+    LaunchController,
+)
+
+# This import comes after base_dir(): monitor_controller.py imports base_dir
+# back from this module lazily, per method, so the name must already be
+# bound here by the time those imports resolve.
+#
+# build_monitor_data is re-exported for the test suite, which reaches it as
+# `llama_launcher.ui.main_window.build_monitor_data`.
+from llama_launcher.ui.controllers.monitor_controller import (  # noqa: E402
+    MonitorController,
+)
+from llama_launcher.ui.controllers.monitor_controller import (  # noqa: E402
+    build_monitor_data as build_monitor_data,
 )
 
 # Owns report/export/web-ui behavior (see report_controller.py). It has no
@@ -114,10 +145,18 @@ class MainWindow(QMainWindow):
         self.tabs = QTabWidget()
         self.tabs.addTab(self._configure_panel.configure_tab, "Configure")
         self.monitor_panel = MonitorPanel()
-        self.monitor_panel.enable_metrics_requested.connect(self._launch._on_enable_metrics)
-        self.monitor_panel.instance_selected.connect(self._monitor._on_instance_selected)
-        self.monitor_panel.instance_stop_requested.connect(self._monitor._on_instance_stop)
-        self.monitor_panel.instance_remove_requested.connect(self._monitor._on_instance_remove)
+        self.monitor_panel.enable_metrics_requested.connect(
+            self._launch._on_enable_metrics
+        )
+        self.monitor_panel.instance_selected.connect(
+            self._monitor._on_instance_selected
+        )
+        self.monitor_panel.instance_stop_requested.connect(
+            self._monitor._on_instance_stop
+        )
+        self.monitor_panel.instance_remove_requested.connect(
+            self._monitor._on_instance_remove
+        )
         # Scroll the Monitor tab (like Configure): a short window otherwise
         # squeezes the log to a few lines. The log owns the tab, so it fills
         # the height.
@@ -128,15 +167,23 @@ class MainWindow(QMainWindow):
 
         self.router_models_table = RouterModelsTable()
         self.router_models_table.load_requested.connect(self._monitor._on_router_load)
-        self.router_models_table.unload_requested.connect(self._monitor._on_router_unload)
+        self.router_models_table.unload_requested.connect(
+            self._monitor._on_router_unload
+        )
         self.monitor_status = StatusBanner()
         self.monitor_panel.add_status_banner(self.monitor_status)
         self.monitor_panel.add_below_log(self.router_models_table)
 
         self.benchmark_panel = BenchmarkPanel()
-        self.benchmark_panel.benchmark_run_requested.connect(self._benchmark._on_benchmark_run)
-        self.benchmark_panel.benchmark_cancel_requested.connect(self._benchmark._on_benchmark_cancel)
-        self.benchmark_panel.benchmark_clear_requested.connect(self._benchmark._on_benchmark_clear)
+        self.benchmark_panel.benchmark_run_requested.connect(
+            self._benchmark._on_benchmark_run
+        )
+        self.benchmark_panel.benchmark_cancel_requested.connect(
+            self._benchmark._on_benchmark_cancel
+        )
+        self.benchmark_panel.benchmark_clear_requested.connect(
+            self._benchmark._on_benchmark_clear
+        )
         self.tabs.addTab(self.benchmark_panel, "Benchmark")
         # Same base_dir() indirection every other store access uses (tests
         # monkeypatch it), and the Configure form's runtime choice decides
@@ -144,7 +191,8 @@ class MainWindow(QMainWindow):
         self.build_panel = BuildPanel(
             base_dir=base_dir(),
             binary_provider=lambda: (
-                self._configure_panel.binary_combo.currentText() or "podman"),
+                self._configure_panel.binary_combo.currentText() or "podman"
+            ),
         )
         self.build_panel.profile_updated.connect(self._on_build_profile_updated)
         self.tabs.addTab(self.build_panel, "Build")
@@ -177,8 +225,12 @@ class MainWindow(QMainWindow):
         # _on_tab_changed). Launch/Stop/etc stay shared below.
         root.addWidget(self._configure_panel._config_bottom)
         buttons = QHBoxLayout()
-        for b in (self._configure_panel.launch_btn, self._configure_panel.stop_btn,
-                  self._configure_panel.restart_btn, self._configure_panel.web_ui_btn):
+        for b in (
+            self._configure_panel.launch_btn,
+            self._configure_panel.stop_btn,
+            self._configure_panel.restart_btn,
+            self._configure_panel.web_ui_btn,
+        ):
             buttons.addWidget(b)
         buttons.addWidget(self._configure_panel.detached_check)
         root.addLayout(buttons)
@@ -187,7 +239,9 @@ class MainWindow(QMainWindow):
         bar = QHBoxLayout()
         self.stats_toggle_btn = QPushButton("\U0001f4ca Stats")
         self.stats_toggle_btn.setCheckable(True)
-        self.stats_toggle_btn.setToolTip("Show/hide the live stats panel (Ctrl+Shift+S)")
+        self.stats_toggle_btn.setToolTip(
+            "Show/hide the live stats panel (Ctrl+Shift+S)"
+        )
         self.nodes_btn = QPushButton("Nodes\u2026")
         self.nodes_btn.setToolTip("Add/test/remove remote podman-over-SSH nodes")
         self.nodes_btn.clicked.connect(self.open_nodes_dialog)
@@ -195,9 +249,14 @@ class MainWindow(QMainWindow):
         bar.addWidget(QLabel("Name"))
         bar.addWidget(self._configure_panel.name_edit, 1)
         bar.addWidget(self._configure_panel.profile_combo, 1)
-        for b in (self._configure_panel.save_btn, self._configure_panel.save_as_btn,
-                  self._configure_panel.delete_btn, self._configure_panel.report_btn,
-                  self.nodes_btn, self.stats_toggle_btn):
+        for b in (
+            self._configure_panel.save_btn,
+            self._configure_panel.save_as_btn,
+            self._configure_panel.delete_btn,
+            self._configure_panel.report_btn,
+            self.nodes_btn,
+            self.stats_toggle_btn,
+        ):
             bar.addWidget(b)
         bar.addWidget(self.status_label)
         root.insertLayout(0, bar)
@@ -211,9 +270,13 @@ class MainWindow(QMainWindow):
         # calls are idempotent, so double-firing (this + visibilityChanged,
         # once the window is shown) is harmless.
         self.stats_toggle_btn.toggled.connect(self._monitor._on_stats_visibility)
-        from PySide6.QtGui import QShortcut, QKeySequence
-        QShortcut(QKeySequence("Ctrl+Shift+S"), self,
-                  activated=lambda: self.stats_toggle_btn.toggle())
+        from PySide6.QtGui import QKeySequence, QShortcut
+
+        QShortcut(
+            QKeySequence("Ctrl+Shift+S"),
+            self,
+            activated=lambda: self.stats_toggle_btn.toggle(),
+        )
 
         self._reload_profile_list()
 
@@ -228,12 +291,14 @@ class MainWindow(QMainWindow):
 
         _stats_cfg = load_config(base_dir())
         if _stats_cfg.get("stats_open", False):
-            self.stats_toggle_btn.setChecked(True)     # shows the dock
+            self.stats_toggle_btn.setChecked(True)  # shows the dock
         _w = int(_stats_cfg.get("stats_width", 320) or 320)
         self.resizeDocks([self.stats_dock], [_w], Qt.Horizontal)
 
-        from PySide6.QtWidgets import QSystemTrayIcon, QMenu, QStyle
+        from PySide6.QtWidgets import QMenu, QStyle, QSystemTrayIcon
+
         from llama_launcher.ui.icon import app_icon
+
         self._really_quit = False
         # Apply our own SVG icon to the window. app.main() also sets it at the
         # application level, but doing it here means the icon is present even
@@ -251,7 +316,7 @@ class MainWindow(QMainWindow):
         if self._minimize_to_tray:
             self.tray = QSystemTrayIcon(self)
             tray_icon = app_icon()
-            if tray_icon.isNull():   # no asset/theme icon found; keep a visible fallback
+            if tray_icon.isNull():  # no asset/theme icon found; keep a visible fallback
                 tray_icon = self.style().standardIcon(QStyle.SP_ComputerIcon)
             self.tray.setIcon(tray_icon)
             self.tray.setToolTip("Llama Launcher")
@@ -275,6 +340,7 @@ class MainWindow(QMainWindow):
         self._launch._autofill_image_if_empty()
 
         from PySide6.QtCore import QTimer
+
         self._status_timer = QTimer(self)
         interval = load_config(base_dir()).get("monitor_interval_ms", 2000)
         self._status_timer.setInterval(interval)
@@ -293,7 +359,8 @@ class MainWindow(QMainWindow):
         # Command preview / api-key / harness only make sense while configuring,
         # so hide the bottom strip on the Monitor/Benchmark tabs.
         self._configure_panel._config_bottom.setVisible(
-            self.tabs.currentWidget() is self._configure_panel.configure_tab)
+            self.tabs.currentWidget() is self._configure_panel.configure_tab
+        )
 
     def _reload_profile_list(self):
         self._configure_panel.profile_combo.clear()
@@ -327,15 +394,16 @@ class MainWindow(QMainWindow):
             self._configure_panel.load_profile(self._profiles[name])
 
     def save_current_profile(self):
-        p = self._configure_panel.current_profile()       # name comes from the Name field
+        p = self._configure_panel.current_profile()  # name comes from the Name field
         self._configure_panel._profile = p
         save_profile(p, base_dir())
         self._reload_profile_list()
         self._configure_panel.profile_combo.setCurrentText(p.name)
 
     def save_as_profile(self):
-        name, ok = QInputDialog.getText(self, "Save As", "Profile name:",
-                                        text=self._configure_panel._profile_name())
+        name, ok = QInputDialog.getText(
+            self, "Save As", "Profile name:", text=self._configure_panel._profile_name()
+        )
         if ok and name:
             self._configure_panel.name_edit.setText(name)
             self.save_current_profile()
@@ -357,21 +425,27 @@ class MainWindow(QMainWindow):
 
     def open_nodes_dialog(self) -> None:
         from llama_launcher.ui.dialogs.nodes_dialog import NodesDialog
+
         NodesDialog(self.base_dir(), self).exec()
         self._configure_panel.reload_nodes()
 
     def router_api_key(self) -> str:
         p = self._configure_panel.current_profile()
-        return (api_key_store.resolve_api_key(self.router_base_dir(), p)
-                or api_key_store.ensure_api_key(self.router_base_dir(), p.name))
+        return api_key_store.resolve_api_key(
+            self.router_base_dir(), p
+        ) or api_key_store.ensure_api_key(self.router_base_dir(), p.name)
 
     def prepare_router_files(self) -> tuple:
         """Write models.ini + api-key for the current router. Returns (dir, warnings)."""
         name = self._configure_panel._profile_name()
         result = render_preset(self._configure_panel.member_pairs())
-        api_key_store.prepare_launch_key(self.router_base_dir(), self._configure_panel.current_profile())
+        api_key_store.prepare_launch_key(
+            self.router_base_dir(), self._configure_panel.current_profile()
+        )
         api_key_store.write_preset(self.router_base_dir(), name, result.text)
-        return str(api_key_store.router_dir(self.router_base_dir(), name)), result.warnings
+        return str(
+            api_key_store.router_dir(self.router_base_dir(), name)
+        ), result.warnings
 
     def _on_key_scope_changed(self, mode: str) -> None:
         # The radio already feeds current_profile(); persist and re-resolve display.
@@ -384,7 +458,9 @@ class MainWindow(QMainWindow):
         if scope == "global":
             api_key_store.write_global_key(base, value)
         else:
-            api_key_store.set_profile_key(base, self._configure_panel._profile_name(), value)
+            api_key_store.set_profile_key(
+                base, self._configure_panel._profile_name(), value
+            )
         self.refresh_router_panel_header()
         self._notify_key_change_needs_relaunch()
 
@@ -394,12 +470,16 @@ class MainWindow(QMainWindow):
         who copies the newly-shown key into their harness while the router is
         still up gets a bare 401 with nothing in the GUI explaining why."""
         p = self._configure_panel.current_profile()
-        if runtime.container_state(self._container_name(),
-                                   p.runtime.binary) == "running":
+        if (
+            runtime.container_state(self._container_name(), p.runtime.binary)
+            == "running"
+        ):
             QMessageBox.information(
-                self, "Relaunch needed",
+                self,
+                "Relaunch needed",
                 "The router is running. Relaunch it for the new API key to "
-                "take effect.")
+                "take effect.",
+            )
 
     def _lora_live_target(self):
         """Where the LoRA panel should send a live rescale, or None.
@@ -412,8 +492,11 @@ class MainWindow(QMainWindow):
         p = self._configure_panel.current_profile()
         if p.mode == "router":
             return None
-        return (dial_host(p.runtime.bind_host), profile_port(p),
-                p.settings.get("api-key") or None)
+        return (
+            dial_host(p.runtime.bind_host),
+            profile_port(p),
+            p.settings.get("api-key") or None,
+        )
 
     def _set_router_connected(self, connected: bool) -> None:
         self._configure_panel.configure_status.set_connected(connected)
@@ -451,11 +534,13 @@ class MainWindow(QMainWindow):
             key = api_key_store.ensure_api_key(self.router_base_dir(), p.name)
         self._configure_panel.api_key_box.set_key(key)
         self._configure_panel.harness_box.set_endpoint(
-            f"http://{display_host}:{port}",
-            [member_model_id(m) for m in p.members])
+            f"http://{display_host}:{port}", [member_model_id(m) for m in p.members]
+        )
         self._set_router_exposure(
             f"Bound to {host}: reachable beyond this machine. The API key is required."
-            if host not in LOOPBACK_HOSTS else "")
+            if host not in LOOPBACK_HOSTS
+            else ""
+        )
 
     def _stop_timers(self) -> None:
         """Stop background timers/workers so a torn-down window can't keep
@@ -493,6 +578,7 @@ class MainWindow(QMainWindow):
             self._stop_timers()
             event.accept()
             from PySide6.QtWidgets import QApplication
+
             QApplication.instance().quit()
         else:
             event.ignore()
@@ -503,4 +589,5 @@ class MainWindow(QMainWindow):
         self._monitor._stop_log_follower()
         self._stop_timers()
         from PySide6.QtWidgets import QApplication
+
         QApplication.instance().quit()

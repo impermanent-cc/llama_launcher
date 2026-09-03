@@ -25,8 +25,9 @@ def auth_headers(api_key: str | None) -> dict:
     return {"Authorization": f"Bearer {api_key}"} if api_key else {}
 
 
-def list_models(host: str, port: int, api_key: str | None,
-                timeout: float = 1.0) -> list[RouterModel] | None:
+def list_models(
+    host: str, port: int, api_key: str | None, timeout: float = 1.0
+) -> list[RouterModel] | None:
     """The router's models, or None when the router could not be reached.
 
     None and [] are different states and the caller must be able to tell them
@@ -37,9 +38,12 @@ def list_models(host: str, port: int, api_key: str | None,
     the status timer, on the UI thread.
     """
     try:
-        r = requests.get(f"{base_url(host, port)}/v1/models",
-                         headers=auth_headers(api_key), params=dict(_NO_AUTOLOAD),
-                         timeout=timeout)
+        r = requests.get(
+            f"{base_url(host, port)}/v1/models",
+            headers=auth_headers(api_key),
+            params=dict(_NO_AUTOLOAD),
+            timeout=timeout,
+        )
         if r.status_code != 200:
             return None
         return parse_models(r.json())
@@ -47,24 +51,30 @@ def list_models(host: str, port: int, api_key: str | None,
         return None
 
 
-def _post_model(host: str, port: int, api_key: str | None, path: str,
-                model_id: str, timeout: float) -> bool:
+def _post_model(
+    host: str, port: int, api_key: str | None, path: str, model_id: str, timeout: float
+) -> bool:
     try:
-        r = requests.post(f"{base_url(host, port)}{path}",
-                          headers=auth_headers(api_key), json={"model": model_id},
-                          timeout=timeout)
+        r = requests.post(
+            f"{base_url(host, port)}{path}",
+            headers=auth_headers(api_key),
+            json={"model": model_id},
+            timeout=timeout,
+        )
         return r.status_code == 200
     except requests.RequestException:
         return False
 
 
-def load_model(host: str, port: int, api_key: str | None, model_id: str,
-               timeout: float = 10.0) -> bool:
+def load_model(
+    host: str, port: int, api_key: str | None, model_id: str, timeout: float = 10.0
+) -> bool:
     return _post_model(host, port, api_key, "/models/load", model_id, timeout)
 
 
-def unload_model(host: str, port: int, api_key: str | None, model_id: str,
-                 timeout: float = 10.0) -> bool:
+def unload_model(
+    host: str, port: int, api_key: str | None, model_id: str, timeout: float = 10.0
+) -> bool:
     return _post_model(host, port, api_key, "/models/unload", model_id, timeout)
 
 
@@ -76,9 +86,12 @@ def iter_sse_events(host: str, port: int, api_key: str | None, timeout: float = 
     it to autoload. (Stated explicitly because the module docstring's rule reads
     as absolute.)
     """
-    with requests.get(f"{base_url(host, port)}/models/sse",
-                      headers=auth_headers(api_key), stream=True,
-                      timeout=timeout) as r:
+    with requests.get(
+        f"{base_url(host, port)}/models/sse",
+        headers=auth_headers(api_key),
+        stream=True,
+        timeout=timeout,
+    ) as r:
         if r.status_code != 200:
             return
         block: list[str] = []
@@ -127,7 +140,7 @@ def make_sse_reader(host: str, port: int, api_key: str | None):
                     if self._stop:
                         return
                     self.event.emit(ev)
-            except Exception as exc:            # network, parse, teardown
+            except Exception as exc:  # network, parse, teardown
                 self.failed.emit(str(exc))
                 return
             if not self._stop:

@@ -1,4 +1,13 @@
-from llama_launcher.core.settings_catalog import CATALOG, Setting, KV_CACHE_TYPES
+from llama_launcher.core.settings_catalog import (
+    CATALOG,
+    HOST_KEYS,
+    IK_EXTRA_KV_CACHE_TYPES,
+    KV_CACHE_TYPES,
+    ROUTER_ONLY_KEYS,
+    for_engine,
+    member_catalog,
+    router_catalog,
+)
 
 
 def test_catalog_keys_match_their_setting_key():
@@ -28,6 +37,7 @@ def test_defrag_thold_is_never_offered_on_mainline():
     catalog exposes it there and only there; a mainline user is never shown it.
     """
     from llama_launcher.core.settings_catalog import for_engine, member_catalog
+
     assert "defrag-thold" not in for_engine(member_catalog(), "llama.cpp")
     assert CATALOG["defrag-thold"].engine == "ik_llama.cpp"
     assert CATALOG["defrag-thold"].deprecated is False
@@ -41,6 +51,7 @@ def test_enum_defaults_are_within_enum():
 
 def test_speculative_decoding_group():
     from llama_launcher.core.settings_catalog import CATALOG, KV_CACHE_TYPES
+
     assert CATALOG["spec-type"].type == "enum"
     assert CATALOG["spec-type"].default == "none"
     assert "draft-mtp" in CATALOG["spec-type"].enum
@@ -51,8 +62,14 @@ def test_speculative_decoding_group():
     assert CATALOG["spec-draft-n-min"].default == 0
     assert CATALOG["cache-type-k-draft"].enum == KV_CACHE_TYPES
     assert CATALOG["cache-type-v-draft"].default == "f16"
-    for k in ("spec-type", "spec-draft-ngl", "spec-draft-n-max",
-              "spec-draft-n-min", "cache-type-k-draft", "cache-type-v-draft"):
+    for k in (
+        "spec-type",
+        "spec-draft-ngl",
+        "spec-draft-n-max",
+        "spec-draft-n-min",
+        "cache-type-k-draft",
+        "cache-type-v-draft",
+    ):
         assert CATALOG[k].group == "Speculative Decoding", k
 
 
@@ -85,6 +102,7 @@ def test_spec_draft_backend_sampling_present_as_negatable_bool():
 
 def test_gpu_additions_and_split_mode_tensor():
     from llama_launcher.core.settings_catalog import CATALOG
+
     assert CATALOG["no-mmproj-offload"].type == "bool"
     assert CATALOG["no-mmproj-offload"].default is False
     assert CATALOG["override-tensor"].type == "string"
@@ -118,6 +136,7 @@ def test_mmproj_device_present():
 
 def test_context_and_caching_additions():
     from llama_launcher.core.settings_catalog import CATALOG
+
     assert CATALOG["swa-full"].type == "bool"
     assert CATALOG["swa-full"].group == "Model & Context"
     assert CATALOG["context-shift"].type == "bool"
@@ -130,6 +149,7 @@ def test_context_and_caching_additions():
 
 def test_sampling_perf_server_additions():
     from llama_launcher.core.settings_catalog import CATALOG
+
     assert CATALOG["dry-sequence-breaker"].type == "string"
     assert CATALOG["dry-sequence-breaker"].group == "Sampling"
     assert CATALOG["numa"].type == "enum"
@@ -138,7 +158,12 @@ def test_sampling_perf_server_additions():
     assert CATALOG["threads-http"].default == -1
     assert CATALOG["no-webui"].type == "bool"
     assert CATALOG["reasoning-format"].default == "auto"
-    assert CATALOG["reasoning-format"].enum == ("auto", "none", "deepseek", "deepseek-legacy")
+    assert CATALOG["reasoning-format"].enum == (
+        "auto",
+        "none",
+        "deepseek",
+        "deepseek-legacy",
+    )
 
 
 def test_checkpoint_min_step_matches_upstream_default():
@@ -162,14 +187,9 @@ def test_repeat_last_n_no_longer_offers_dead_sentinel():
     assert s.minimum == 0
 
 
-from llama_launcher.core.settings_catalog import (
-    HOST_KEYS, ROUTER_ONLY_KEYS, member_catalog, router_catalog,
-)
-
-
 def test_router_settings_present():
     assert CATALOG["models-max"].flag == "--models-max"
-    assert CATALOG["models-max"].default == 4          # upstream's default
+    assert CATALOG["models-max"].default == 4  # upstream's default
     assert CATALOG["models-autoload"].type == "bool"
     assert CATALOG["sleep-idle-seconds"].flag == "--sleep-idle-seconds"
     assert CATALOG["sleep-idle-seconds"].default == -1  # -1 = disabled
@@ -231,6 +251,7 @@ def test_models_autoload_uses_the_negative_flag():
 
 def test_load_mode_setting():
     from llama_launcher.core.settings_catalog import CATALOG
+
     s = CATALOG["load-mode"]
     assert s.flag == "--load-mode"
     assert s.type == "enum"
@@ -244,13 +265,16 @@ def test_load_mode_setting():
     assert CATALOG["mlock"].type == "bool"
 
 
-from llama_launcher.core.settings_catalog import (
-    CATALOG, member_catalog, for_engine, IK_EXTRA_KV_CACHE_TYPES,
-)
-
-_IK_KEYS = {"run-time-repack", "no-fused-moe", "mla-use",
-            "attention-max-batch", "smart-expert-reduction",
-            "ctx-size-draft", "swa-compress", "indexer-cache-type-k"}
+_IK_KEYS = {
+    "run-time-repack",
+    "no-fused-moe",
+    "mla-use",
+    "attention-max-batch",
+    "smart-expert-reduction",
+    "ctx-size-draft",
+    "swa-compress",
+    "indexer-cache-type-k",
+}
 
 
 def test_ik_flags_exist_and_are_engine_tagged():
@@ -289,6 +313,7 @@ def test_for_engine_keeps_ik_flags_for_ik():
 
 def test_ik_extra_kv_cache_types_are_additive():
     from llama_launcher.core.settings_catalog import KV_CACHE_TYPES
+
     assert set(IK_EXTRA_KV_CACHE_TYPES).isdisjoint(KV_CACHE_TYPES)
     assert "q6_0" in IK_EXTRA_KV_CACHE_TYPES
 
@@ -305,9 +330,15 @@ def test_tools_options_match_upstream():
     # get_datetime is a webui tool, not a server one (llama.cpp #27255);
     # apply_diff is not in upstream's set; get_info (OS/cwd runtime info) is.
     s = CATALOG["tools"]
-    assert set(s.enum) == {"read_file", "write_file", "edit_file",
-                           "file_glob_search", "grep_search",
-                           "exec_shell_command", "get_info"}
+    assert set(s.enum) == {
+        "read_file",
+        "write_file",
+        "edit_file",
+        "file_glob_search",
+        "grep_search",
+        "exec_shell_command",
+        "get_info",
+    }
     assert {opt for opt, _ in s.option_help} == set(s.enum)
 
 
@@ -341,8 +372,10 @@ def test_ik_spec_type_translation_table():
     # ik's parser map (common/speculative.cpp) has no draft- prefix on the
     # draft-model types; mainline's does. The renames bridge our shared enum.
     from llama_launcher.core.settings_catalog import (
-        IK_SPEC_TYPE_RENAMES, IK_EXTRA_SPEC_TYPES,
+        IK_EXTRA_SPEC_TYPES,
+        IK_SPEC_TYPE_RENAMES,
     )
+
     assert IK_SPEC_TYPE_RENAMES == {
         "draft-simple": "draft",
         "draft-eagle3": "eagle3",
@@ -360,35 +393,85 @@ def test_ik_spec_type_translation_table():
 # --- ik_llama.cpp-only and shared settings coverage --------------------------
 
 _NEW_IK_KEYS = {
-    "defer-experts", "prefetch-experts", "prefetch-experts-threads",
-    "no-offload-only-active-experts", "offload-policy", "fit-margin",
-    "gpu-fit-margin", "max-gpu", "max-extra-alloc", "transparent-huge-pages",
-    "merge-qkv", "merge-up-gate-experts", "grouped-expert-routing",
-    "validate-quants", "split-mode-f16", "split-mode-f32",
-    "split-mode-graph-scheduling", "graph-reduce-type", "graph-attn-precision",
-    "no-graph-reuse", "scheduler-async", "worst-graph-tokens", "cuda-params",
-    "no-fused-up-gate", "no-fused-mul-multiadd", "dsa",
-    "dsa-top-k", "cache-type-k-first", "cache-type-k-last", "cache-type-v-first",
-    "cache-type-v-last", "k-cache-hadamard", "v-cache-hadamard",
-    "mtp-requantize-output-tensor", "ctx-checkpoints-interval",
-    "ctx-checkpoints-tolerance", "ctx-checkpoints-eviction",
-    "cache-ram-similarity", "cache-ram-n-min", "attention", "embd-output-format",
-    "embd-separator", "webui", "send-done", "sql-save-file",
-    "sqlite-zstd-ext-file", "system-prompt-file", "parallel-tool-calls",
-    "reasoning-tokens", "spec-autotune", "spec-ckpt-mode", "p-split",
-    "draft-params", "mtmd-kq-type", "threads-mtmd", "grp-attn-n", "grp-attn-w",
-    "tfs", "penalize-nl", "defrag-thold",
+    "defer-experts",
+    "prefetch-experts",
+    "prefetch-experts-threads",
+    "no-offload-only-active-experts",
+    "offload-policy",
+    "fit-margin",
+    "gpu-fit-margin",
+    "max-gpu",
+    "max-extra-alloc",
+    "transparent-huge-pages",
+    "merge-qkv",
+    "merge-up-gate-experts",
+    "grouped-expert-routing",
+    "validate-quants",
+    "split-mode-f16",
+    "split-mode-f32",
+    "split-mode-graph-scheduling",
+    "graph-reduce-type",
+    "graph-attn-precision",
+    "no-graph-reuse",
+    "scheduler-async",
+    "worst-graph-tokens",
+    "cuda-params",
+    "no-fused-up-gate",
+    "no-fused-mul-multiadd",
+    "dsa",
+    "dsa-top-k",
+    "cache-type-k-first",
+    "cache-type-k-last",
+    "cache-type-v-first",
+    "cache-type-v-last",
+    "k-cache-hadamard",
+    "v-cache-hadamard",
+    "mtp-requantize-output-tensor",
+    "ctx-checkpoints-interval",
+    "ctx-checkpoints-tolerance",
+    "ctx-checkpoints-eviction",
+    "cache-ram-similarity",
+    "cache-ram-n-min",
+    "attention",
+    "embd-output-format",
+    "embd-separator",
+    "webui",
+    "send-done",
+    "sql-save-file",
+    "sqlite-zstd-ext-file",
+    "system-prompt-file",
+    "parallel-tool-calls",
+    "reasoning-tokens",
+    "spec-autotune",
+    "spec-ckpt-mode",
+    "p-split",
+    "draft-params",
+    "mtmd-kq-type",
+    "threads-mtmd",
+    "grp-attn-n",
+    "grp-attn-w",
+    "tfs",
+    "penalize-nl",
+    "defrag-thold",
 }
 
 # Both engines accept these and the catalog exposes them for both.
 _NEW_SHARED_KEYS = {
-    "grammar", "grammar-file", "json-schema", "logit-bias", "special",
-    "spm-infill", "ui-mcp-proxy", "lookup-cache-static", "lookup-cache-dynamic",
+    "grammar",
+    "grammar-file",
+    "json-schema",
+    "logit-bias",
+    "special",
+    "spm-infill",
+    "ui-mcp-proxy",
+    "lookup-cache-static",
+    "lookup-cache-dynamic",
 }
 
 
 def test_new_ik_settings_are_ik_tagged_and_hidden_from_mainline():
     from llama_launcher.core.settings_catalog import for_engine, member_catalog
+
     mainline = for_engine(member_catalog(), "llama.cpp")
     ik = for_engine(member_catalog(), "ik_llama.cpp")
     for k in _NEW_IK_KEYS:
@@ -400,6 +483,7 @@ def test_new_ik_settings_are_ik_tagged_and_hidden_from_mainline():
 
 def test_new_shared_settings_reach_both_engines():
     from llama_launcher.core.settings_catalog import for_engine, member_catalog
+
     mainline = for_engine(member_catalog(), "llama.cpp")
     ik = for_engine(member_catalog(), "ik_llama.cpp")
     for k in _NEW_SHARED_KEYS:
@@ -412,6 +496,7 @@ def test_respelled_flags_reach_both_engines():
     serves both engines instead of being gated to mainline. The keys are the
     ones saved profiles are written with."""
     from llama_launcher.core.settings_catalog import for_engine, member_catalog
+
     expected = {
         "typical-p": "--typical",
         "sampler-seq": "--sampling-seq",
@@ -432,6 +517,7 @@ def test_respelled_flags_keep_their_old_spelling_as_an_alias():
     both spellings reach argv, llama-server takes the last one, and the form
     shows a value that is not the one running, with no collision warning."""
     from llama_launcher.core import command_builder as cb
+
     old = {
         "typical-p": "--typical-p",
         "sampler-seq": "--sampler-seq",
@@ -455,6 +541,6 @@ def test_catalog_flags_and_aliases_are_unique():
     setting."""
     seen = {}
     for s in CATALOG.values():
-        for spelling in (s.flag,) + tuple(s.aliases):
+        for spelling in (s.flag, *s.aliases):
             assert spelling not in seen, f"{spelling}: {seen.get(spelling)} vs {s.key}"
             seen[spelling] = s.key

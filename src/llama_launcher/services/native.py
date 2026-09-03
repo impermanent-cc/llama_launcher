@@ -2,9 +2,9 @@
 under base_dir/native/, liveness via /proc, and helpers the Monitor/launch paths
 call. Row shape mirrors runtime.list_launcher_containers so build_instances can
 merge native + container instances into one Instance list."""
+
 import json
 import os
-import signal
 import subprocess
 import time
 from dataclasses import dataclass
@@ -68,7 +68,7 @@ def _proc_state(pid: int) -> str | None:
     None if the pid is gone. `comm` (field 2) is parenthesised and may itself
     contain spaces and parens, so the fields are taken after the LAST ')'."""
     try:
-        with open(f"/proc/{pid}/stat", "r") as fh:
+        with open(f"/proc/{pid}/stat") as fh:
             fields = fh.read().rpartition(")")[2].split()
     except (OSError, ValueError):
         return None
@@ -108,9 +108,16 @@ def list_native_instances(base_dir: Path) -> list[dict]:
     for e in read_entries(base_dir):
         pid = e.get("pid")
         if isinstance(pid, int) and is_alive(pid, e.get("binary", "")):
-            rows.append({"name": native_name(e["profile"]), "running": True,
-                         "profile": e["profile"], "mode": "server",
-                         "pid": pid, "kind": "native"})
+            rows.append(
+                {
+                    "name": native_name(e["profile"]),
+                    "running": True,
+                    "profile": e["profile"],
+                    "mode": "server",
+                    "pid": pid,
+                    "kind": "native",
+                }
+            )
         else:
             # Prune a dead/stale registry file so the card list can clear.
             p = _entry_path(base_dir, e.get("profile", ""))
@@ -145,13 +152,23 @@ def launch_native(profile, base_dir, now_iso: str) -> NativeResult:
     log = native_log_path(base_dir, profile.name)
     try:
         with open(log, "w") as logf:
-            proc = subprocess.Popen(argv, stdout=logf, stderr=subprocess.STDOUT,
-                                    start_new_session=True)
+            proc = subprocess.Popen(
+                argv, stdout=logf, stderr=subprocess.STDOUT, start_new_session=True
+            )
     except OSError as exc:
         return NativeResult(False, name, host, port, None, str(exc))
-    write_entry(base_dir, {"pid": proc.pid, "profile": profile.name, "port": port,
-                           "host": host, "started_at": now_iso,
-                           "binary": profile.runtime.native_binary, "log": str(log)})
+    write_entry(
+        base_dir,
+        {
+            "pid": proc.pid,
+            "profile": profile.name,
+            "port": port,
+            "host": host,
+            "started_at": now_iso,
+            "binary": profile.runtime.native_binary,
+            "log": str(log),
+        },
+    )
     return NativeResult(True, name, host, port, proc.pid, None)
 
 
@@ -163,9 +180,11 @@ def stop_native(pid: int, sig: int) -> None:
 
 
 def remove_native(name: str, base_dir) -> None:
-    slug = name[len("llama-"):] if name.startswith("llama-") else name
-    for path in (registry_dir(base_dir) / f"{slug}.json",
-                 registry_dir(base_dir) / f"{slug}.log"):
+    slug = name[len("llama-") :] if name.startswith("llama-") else name
+    for path in (
+        registry_dir(base_dir) / f"{slug}.json",
+        registry_dir(base_dir) / f"{slug}.log",
+    ):
         try:
             path.unlink(missing_ok=True)
         except OSError:
@@ -177,7 +196,7 @@ _CLK_TCK = os.sysconf("SC_CLK_TCK")
 
 def _read_jiffies(pid: int) -> int | None:
     try:
-        with open(f"/proc/{pid}/stat", "r") as fh:
+        with open(f"/proc/{pid}/stat") as fh:
             fields = fh.read().split()
         # utime, stime are fields 14, 15 (1-indexed); index 13, 14 here.
         return int(fields[13]) + int(fields[14])
@@ -187,7 +206,7 @@ def _read_jiffies(pid: int) -> int | None:
 
 def _read_rss_bytes(pid: int) -> int | None:
     try:
-        with open(f"/proc/{pid}/status", "r") as fh:
+        with open(f"/proc/{pid}/status") as fh:
             for line in fh:
                 if line.startswith("VmRSS:"):
                     return int(line.split()[1]) * 1024  # kB -> bytes

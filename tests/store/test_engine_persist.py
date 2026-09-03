@@ -1,5 +1,5 @@
 from llama_launcher.core.spec import Profile, Runtime
-from llama_launcher.store.profiles import profile_to_dict, profile_from_dict
+from llama_launcher.store.profiles import profile_from_dict, profile_to_dict
 
 
 def test_old_profile_without_engine_loads_as_llama_cpp():

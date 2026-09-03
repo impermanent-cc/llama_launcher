@@ -1,7 +1,13 @@
-from PySide6.QtCore import QThreadPool, QRunnable, QTimer, Signal
+from PySide6.QtCore import QRunnable, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QFileDialog, QLabel
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from llama_launcher.core.spec import LoraRef
@@ -26,7 +32,7 @@ class _LoraCall(QRunnable):
     def run(self):
         try:
             self.result = self._fn()
-        except Exception:            # noqa: BLE001 - worker must never raise
+        except Exception:  # worker must never raise
             self.result = None
         finally:
             self.done = True
@@ -53,7 +59,8 @@ class LoraPanel(QWidget):
         rm = QPushButton("- Remove")
         add.clicked.connect(self._add_blank)
         rm.clicked.connect(self._remove_selected)
-        row.addWidget(add); row.addWidget(rm)
+        row.addWidget(add)
+        row.addWidget(rm)
         layout.addLayout(row)
 
         # Live control. Scales are the one part of a LoRA setup a running server
@@ -69,13 +76,16 @@ class LoraPanel(QWidget):
         self.apply_btn = QPushButton("Apply to server")
         self.sync_btn.setToolTip(
             "Read the scales the RUNNING server is using and load them into the "
-            "table above.")
+            "table above."
+        )
         self.apply_btn.setToolTip(
             "Push the scales above to the running server, no restart. Paths must "
-            "match the adapters it was launched with.")
+            "match the adapters it was launched with."
+        )
         self.sync_btn.clicked.connect(self.sync_from_server)
         self.apply_btn.clicked.connect(self.apply_to_server)
-        live.addWidget(self.sync_btn); live.addWidget(self.apply_btn)
+        live.addWidget(self.sync_btn)
+        live.addWidget(self.apply_btn)
         layout.addLayout(live)
         self.live_status = QLabel("")
         self.live_status.setWordWrap(True)
@@ -101,7 +111,7 @@ class LoraPanel(QWidget):
             return None
         try:
             return self._live_resolver()
-        except Exception:            # noqa: BLE001 - a resolver must not break the form
+        except Exception:  # a resolver must not break the form
             return None
 
     def refresh_live_enabled(self):
@@ -139,8 +149,10 @@ class LoraPanel(QWidget):
             return
         host, port, key = target
         self.live_status.setText("Reading adapters\u2026")
-        self._start(lambda: lora_api.list_adapters(host, port, key, timeout=5.0),
-                    self._apply_synced)
+        self._start(
+            lambda: lora_api.list_adapters(host, port, key, timeout=5.0),
+            self._apply_synced,
+        )
 
     def _apply_synced(self, adapters):
         if adapters is None:
@@ -149,7 +161,8 @@ class LoraPanel(QWidget):
         if not adapters:
             self.live_status.setText(
                 "Server is running but was launched with no LoRA adapters. "
-                "Adapters are chosen at launch; add them here and restart.")
+                "Adapters are chosen at launch; add them here and restart."
+            )
             return
         by_path = {a.path: a for a in adapters}
         matched = 0
@@ -165,7 +178,8 @@ class LoraPanel(QWidget):
         active = sum(1 for a in adapters if a.active)
         self.live_status.setText(
             f"Server has {len(adapters)} adapter(s), {active} active; "
-            f"matched {matched} of the rows above by path.")
+            f"matched {matched} of the rows above by path."
+        )
 
     def apply_to_server(self):
         target = self._live_target()
@@ -208,7 +222,8 @@ class LoraPanel(QWidget):
         elif state == "none-loaded":
             self.live_status.setText(
                 "Server has no LoRA adapters loaded; scales apply only to "
-                "adapters passed at launch.")
+                "adapters passed at launch."
+            )
         elif state == "failed":
             self.live_status.setText("Server rejected the scale change.")
         else:
@@ -244,6 +259,7 @@ class LoraPanel(QWidget):
                     item = self.table.item(row, 0)
                     if item is not None:
                         item.setText(resolved)
+
                 return _browse
 
             browse_btn.clicked.connect(_make_browse(row_index))
@@ -280,8 +296,10 @@ class LoraPanel(QWidget):
                 continue
             if self.table.cellWidget(r, 1) is None:
                 continue  # row still mid-construction
-            out.append(LoraRef(
-                path=path,
-                scale=self.table.cellWidget(r, 1).value(),
-            ))
+            out.append(
+                LoraRef(
+                    path=path,
+                    scale=self.table.cellWidget(r, 1).value(),
+                )
+            )
         return out

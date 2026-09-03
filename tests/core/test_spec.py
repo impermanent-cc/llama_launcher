@@ -1,4 +1,11 @@
-from llama_launcher.core.spec import Mount, LoraRef, Runtime, Profile, slugify
+from llama_launcher.core.spec import (
+    Mount,
+    Profile,
+    RouterMember,
+    Runtime,
+    member_model_id,
+    slugify,
+)
 
 
 def test_profile_defaults():
@@ -31,9 +38,6 @@ def test_slugify():
     assert slugify("  multiple   spaces ") == "multiple-spaces"
 
 
-from llama_launcher.core.spec import Profile, RouterMember, Runtime, member_model_id
-
-
 def test_profile_defaults_to_server_mode():
     p = Profile(name="x")
     assert p.mode == "server"
@@ -61,6 +65,7 @@ def test_router_member_defaults():
 
 def test_runtime_defaults_to_attached():
     from llama_launcher.core.spec import Runtime
+
     assert Runtime().detached is False
 
 

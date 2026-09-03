@@ -34,7 +34,10 @@ def test_parse_equals_form():
 
 def test_parse_bare_flag_is_none_value():
     assert cb._parse_raw_pairs("--mlock") == [("--mlock", None)]
-    assert cb._parse_raw_pairs("--mlock --no-mmap") == [("--mlock", None), ("--no-mmap", None)]
+    assert cb._parse_raw_pairs("--mlock --no-mmap") == [
+        ("--mlock", None),
+        ("--no-mmap", None),
+    ]
 
 
 def test_parse_negative_value_is_not_a_flag():
@@ -44,7 +47,9 @@ def test_parse_negative_value_is_not_a_flag():
 
 def test_parse_preserves_order_and_repeats():
     assert cb._parse_raw_pairs("--lora /a.gguf --lora /b.gguf") == [
-        ("--lora", "/a.gguf"), ("--lora", "/b.gguf")]
+        ("--lora", "/a.gguf"),
+        ("--lora", "/b.gguf"),
+    ]
 
 
 def test_parse_empty_is_empty():
@@ -60,13 +65,19 @@ def test_merge_override_raw_wins_in_place():
     owned = [("-m", "/m.gguf"), ("--n-gpu-layers", "99"), ("--host", "0.0.0.0")]
     argv, warns = cb._merge_raw_args(owned, [("-ngl", "50")], PORTCANON, LORACANON)
     assert argv == ["-m", "/m.gguf", "--n-gpu-layers", "50", "--host", "0.0.0.0"]
-    assert len(warns) == 1 and "overrides '--n-gpu-layers'" in warns[0] and "was 99" in warns[0]
+    assert (
+        len(warns) == 1
+        and "overrides '--n-gpu-layers'" in warns[0]
+        and "was 99" in warns[0]
+    )
 
 
 def test_merge_alias_folds_both_directions():
     # raw long form overrides owned short form
     owned = [("-ngl", "99")]
-    argv, warns = cb._merge_raw_args(owned, [("--n-gpu-layers", "7")], PORTCANON, LORACANON)
+    argv, warns = cb._merge_raw_args(
+        owned, [("--n-gpu-layers", "7")], PORTCANON, LORACANON
+    )
     assert argv == ["-ngl", "7"] and len(warns) == 1
 
 
@@ -79,14 +90,18 @@ def test_merge_protected_port_dropped_and_warned():
 
 def test_merge_repeatable_lora_appends_no_warning():
     owned = [("--lora", "/b.gguf")]
-    argv, warns = cb._merge_raw_args(owned, [("--lora", "/a.gguf")], PORTCANON, LORACANON)
+    argv, warns = cb._merge_raw_args(
+        owned, [("--lora", "/a.gguf")], PORTCANON, LORACANON
+    )
     assert argv == ["--lora", "/b.gguf", "--lora", "/a.gguf"]
     assert warns == []
 
 
 def test_merge_unknown_flag_appended_no_warning():
     owned = [("--ctx-size", "4096")]
-    argv, warns = cb._merge_raw_args(owned, [("--numa", "distribute")], PORTCANON, LORACANON)
+    argv, warns = cb._merge_raw_args(
+        owned, [("--numa", "distribute")], PORTCANON, LORACANON
+    )
     assert argv == ["--ctx-size", "4096", "--numa", "distribute"]
     assert warns == []
 
@@ -107,6 +122,7 @@ def test_merge_no_raw_is_owned_unchanged():
 
 # -- alias mainline spellings still fold -------------------------------------
 
+
 def test_raw_old_spelling_folds_onto_the_respelled_setting():
     """Saved raw_args and copied commands can carry --typical-p /
     --spec-draft-ngl. Those alias spellings fold onto the setting (override,
@@ -114,9 +130,13 @@ def test_raw_old_spelling_folds_onto_the_respelled_setting():
     llama-server's last-wins parsing silently prefers."""
     from llama_launcher.core.command_builder import build_command, raw_arg_warnings
     from llama_launcher.core.spec import Profile
-    p = Profile(name="p", model="/m.gguf",
-                settings={"typical-p": 0.9, "spec-draft-ngl": 10},
-                raw_args="--typical-p 0.5 --spec-draft-ngl 20")
+
+    p = Profile(
+        name="p",
+        model="/m.gguf",
+        settings={"typical-p": 0.9, "spec-draft-ngl": 10},
+        raw_args="--typical-p 0.5 --spec-draft-ngl 20",
+    )
     argv = build_command(p)
     assert argv[argv.index("--typical") + 1] == "0.5"
     assert argv[argv.index("--gpu-layers-draft") + 1] == "20"
@@ -132,8 +152,13 @@ def test_raw_logit_bias_is_appended_not_swapped():
     form's entry."""
     from llama_launcher.core.command_builder import build_command, raw_arg_warnings
     from llama_launcher.core.spec import Profile
-    p = Profile(name="p", model="/m.gguf",
-                settings={"logit-bias": "15043+1"}, raw_args="--logit-bias 200-1")
+
+    p = Profile(
+        name="p",
+        model="/m.gguf",
+        settings={"logit-bias": "15043+1"},
+        raw_args="--logit-bias 200-1",
+    )
     argv = build_command(p)
     values = [argv[i + 1] for i, a in enumerate(argv) if a == "--logit-bias"]
     assert values == ["15043+1", "200-1"]

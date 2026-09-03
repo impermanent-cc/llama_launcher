@@ -47,12 +47,17 @@ def parse_adapters(payload) -> list[LoraAdapter]:
         if isinstance(raw_id, bool) or not isinstance(raw_id, int):
             continue
         raw_scale = item.get("scale")
-        scale = float(raw_scale) if isinstance(raw_scale, (int, float)) \
-            and not isinstance(raw_scale, bool) else 0.0
+        scale = (
+            float(raw_scale)
+            if isinstance(raw_scale, (int, float)) and not isinstance(raw_scale, bool)
+            else 0.0
+        )
         path = item.get("path")
-        out.append(LoraAdapter(
-            id=raw_id,
-            path=path if isinstance(path, str) else "",
-            scale=scale,
-        ))
+        out.append(
+            LoraAdapter(
+                id=raw_id,
+                path=path if isinstance(path, str) else "",
+                scale=scale,
+            )
+        )
     return out

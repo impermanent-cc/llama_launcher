@@ -5,6 +5,7 @@ via llama_launcher.ui.icon.app_icon()."""
 
 def test_find_repo_icon_locates_asset():
     from llama_launcher.ui.icon import _find_repo_icon
+
     p = _find_repo_icon()
     assert p is not None, "could not locate assets/llama-launcher.svg from the package"
     assert p.name == "llama-launcher.svg"
@@ -15,6 +16,7 @@ def test_app_icon_is_non_null(qtbot):
     """QIcon must actually load the SVG (requires the qsvg plugin); a null icon
     would mean the window still shows the default."""
     from llama_launcher.ui.icon import app_icon
+
     ic = app_icon()
     assert not ic.isNull()
     # SVG icons are scalable (availableSizes() is empty), so prove it actually
@@ -27,6 +29,7 @@ def test_app_icon_is_non_null(qtbot):
 
 def test_main_window_sets_window_icon(qtbot):
     from llama_launcher.ui.main_window import MainWindow
+
     w = MainWindow()
     qtbot.addWidget(w)
     assert not w.windowIcon().isNull(), "MainWindow did not set its window icon"

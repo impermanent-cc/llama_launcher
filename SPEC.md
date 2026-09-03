@@ -49,7 +49,8 @@ numbers elsewhere.
 ## 3. Constraints
 
 3.1 Python 3.12 and 3.13 are the tested floor and ceiling; the code needs
-only 3.10 but the declared floor is the CI-backed one.
+only 3.11 (enum.StrEnum, datetime.UTC) but the declared floor is the
+CI-backed one.
 
 3.2 No host paths, emails or secrets in tracked files; the repository is
 public.
@@ -60,6 +61,13 @@ in the localci Containerfile; the two lists stay in sync.
 3.4 Tracked text is ASCII and free of em and en dashes except README.md,
 CHANGELOG.md and RPC.md until their cleanup cycle. UI glyphs in code are
 \u escapes.
+
+3.5 ruff, at the version the workflow standard pins in its CI lint job,
+reports nothing for `ruff check .` and `ruff format --check .` under the
+[tool.ruff] configuration in pyproject.toml, which is the standard's block
+(line-length 88, rule sets E, F, W, I, UP, B and RUF, E501 ignored, *.md
+excluded) and is not narrowed here. CI runs both as a lint job next to the
+sanity job.
 
 ## 4. Out of scope
 

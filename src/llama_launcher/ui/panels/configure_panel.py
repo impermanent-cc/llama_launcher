@@ -1,47 +1,73 @@
+import functools
 import html as _html
 import os
 import posixpath
 import time
 
-from PySide6.QtCore import Qt, QRunnable, QThreadPool, QTimer
+from PySide6.QtCore import QRunnable, Qt, QThreadPool, QTimer
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QCheckBox,
-    QGroupBox, QScrollArea, QLabel, QPlainTextEdit, QPushButton,
-    QMessageBox, QFileDialog, QInputDialog,
+    QCheckBox,
+    QFileDialog,
+    QFormLayout,
+    QGroupBox,
+    QHBoxLayout,
+    QInputDialog,
+    QLabel,
+    QLineEdit,
+    QMessageBox,
+    QPlainTextEdit,
+    QPushButton,
+    QScrollArea,
+    QVBoxLayout,
+    QWidget,
 )
 
+from llama_launcher.core import vram
 from llama_launcher.core.capabilities import (
-    describe_relevance, Tier, suggestions as compute_suggestions,
+    Tier,
+    describe_relevance,
+)
+from llama_launcher.core.capabilities import (
+    suggestions as compute_suggestions,
 )
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.nodes import LOCAL_NODE, connection_for
-from llama_launcher.core.pathmap import host_to_container, container_to_host
+from llama_launcher.core.pathmap import container_to_host, host_to_container
 from llama_launcher.core.settings_catalog import (
-    CATALOG, member_catalog, router_catalog, for_engine,
-    KV_CACHE_TYPES, IK_EXTRA_KV_CACHE_TYPES, IK_EXTRA_SPEC_TYPES,
+    CATALOG,
+    IK_EXTRA_KV_CACHE_TYPES,
+    IK_EXTRA_SPEC_TYPES,
+    KV_CACHE_TYPES,
+    for_engine,
+    member_catalog,
+    router_catalog,
 )
 from llama_launcher.core.spec import (
-    DEFAULT_STOP_TIMEOUT, Profile, Runtime, RouterMember, member_model_id,
+    DEFAULT_STOP_TIMEOUT,
+    Profile,
+    RouterMember,
+    Runtime,
+    member_model_id,
 )
-from llama_launcher.core import vram
-from llama_launcher.core.validation import validate, Issue
+from llama_launcher.core.validation import Issue, validate
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import gpu as gpu_svc
-from llama_launcher.services import model_info, runtime, native, pool_preflight
-from llama_launcher.store.nodes import load_nodes, get_node, gpu_ssh_target
+from llama_launcher.services import model_info, native, pool_preflight, runtime
+from llama_launcher.store.nodes import get_node, gpu_ssh_target, load_nodes
 from llama_launcher.store.profiles import list_profiles, resolve_member_pairs
-from llama_launcher.ui.widgets.setting_widgets import (
-    make_row_label, make_widget, SuggestionDot,
-)
+from llama_launcher.ui.panels.lora_panel import LoraPanel
+from llama_launcher.ui.panels.mounts_panel import MountsPanel
+from llama_launcher.ui.widgets.api_key_box import ApiKeyBox
+from llama_launcher.ui.widgets.collapsible import CollapsibleSection
+from llama_launcher.ui.widgets.harness_info_box import HarnessInfoBox
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox, NoWheelSpinBox
 from llama_launcher.ui.widgets.rpc_workers_table import RpcWorkersTable
-from llama_launcher.ui.panels.mounts_panel import MountsPanel
-from llama_launcher.ui.panels.lora_panel import LoraPanel
-from llama_launcher.ui.widgets.collapsible import CollapsibleSection
-from llama_launcher.ui.widgets.api_key_box import ApiKeyBox
-from llama_launcher.ui.widgets.harness_info_box import HarnessInfoBox
+from llama_launcher.ui.widgets.setting_widgets import (
+    SuggestionDot,
+    make_row_label,
+    make_widget,
+)
 from llama_launcher.ui.widgets.status_banner import StatusBanner
-
 
 _ENGINE_DEFAULT_IMAGE = {
     "llama.cpp": "ghcr.io/ggml-org/llama.cpp:server-cuda",
@@ -59,7 +85,8 @@ def _gather_check_fit(profile: Profile, base_dir, estimate_bytes: int):
     gpus_reader = pool_preflight.default_gpus_reader(base_dir)
     ram_reader = pool_preflight.default_ram_reader(base_dir)
     donations = pool_preflight.gather_donations(
-        profile, base_dir, gpus=gpus_reader, ram=ram_reader)
+        profile, base_dir, gpus=gpus_reader, ram=ram_reader
+    )
     headline_text = pool_preflight.headline(estimate_bytes, donations)
 
     worker_free_mb: dict = {}
@@ -70,14 +97,20 @@ def _gather_check_fit(profile: Profile, base_dir, estimate_bytes: int):
         worker_free_mb[w.node] = int(free_bytes // (1024 * 1024))
         node = get_node(base_dir, w.node) or LOCAL_NODE
         worker_image_present[w.node] = (
-            runtime.image_exists(profile.image, profile.runtime.binary,
-                                 connection_for(node))
-            if profile.image else True)
+            runtime.image_exists(
+                profile.image, profile.runtime.binary, connection_for(node)
+            )
+            if profile.image
+            else True
+        )
 
-    issues = validate(profile, binary_found=runtime.binary_available(profile.runtime.binary),
-                      native_binary_ok=native.native_binary_ok_for(profile),
-                      worker_image_present=worker_image_present,
-                      worker_free_mb=worker_free_mb)
+    issues = validate(
+        profile,
+        binary_found=runtime.binary_available(profile.runtime.binary),
+        native_binary_ok=native.native_binary_ok_for(profile),
+        worker_image_present=worker_image_present,
+        worker_free_mb=worker_free_mb,
+    )
     return headline_text, issues
 
 
@@ -91,6 +124,7 @@ class _CheckFitGather(QRunnable):
     mid-gather. `_poll_check_fit` (a short-interval QTimer.singleShot loop)
     renders the result once `_check_fit_inflight` flips back to False.
     """
+
     def __init__(self, owner, profile, base_dir, estimate_bytes):
         super().__init__()
         self._owner = owner
@@ -100,14 +134,16 @@ class _CheckFitGather(QRunnable):
 
     def run(self):
         try:
-            result = _gather_check_fit(self._profile, self._base_dir, self._estimate_bytes)
-        except Exception:            # noqa: BLE001 - worker must never raise
+            result = _gather_check_fit(
+                self._profile, self._base_dir, self._estimate_bytes
+            )
+        except Exception:  # worker must never raise
             result = None
         self._owner._check_fit_result = result
         self._owner._check_fit_inflight = False
 
 
-_FIT_GPU_TTL = 5.0    # seconds a free-VRAM probe stays fresh for the fit readout
+_FIT_GPU_TTL = 5.0  # seconds a free-VRAM probe stays fresh for the fit readout
 
 
 class _FitGpusGather(QRunnable):
@@ -115,6 +151,7 @@ class _FitGpusGather(QRunnable):
     subprocess (an ssh round-trip for a remote node), so it must not run on
     the UI thread. Same attribute-write + singleShot-poll delivery as
     _CheckFitGather above."""
+
     def __init__(self, owner, ssh_target: str):
         super().__init__()
         self._owner = owner
@@ -123,7 +160,7 @@ class _FitGpusGather(QRunnable):
     def run(self):
         try:
             gpus = gpu_svc.query_gpus(self._ssh)
-        except Exception:            # noqa: BLE001 - worker must never raise
+        except Exception:  # worker must never raise
             gpus = []
         self._owner._fit_gpus = gpus
         self._owner._fit_gpus_ssh = self._ssh
@@ -153,8 +190,8 @@ class ConfigurePanel(QWidget):
         self._fit_gpus = None
         self._fit_gpus_ssh = None
         self._fit_gpus_at = 0.0
-        self._member_meta_cache: dict = {}   # host path -> (stamp, meta, weights)
-        self._member_pairs_cache: tuple | None = None   # (at, members-key, pairs)
+        self._member_meta_cache: dict = {}  # host path -> (stamp, meta, weights)
+        self._member_pairs_cache: tuple | None = None  # (at, members-key, pairs)
         self._fit_gather_inflight = False
         self._fit_timer = QTimer(self)
         self._fit_timer.setSingleShot(True)
@@ -172,7 +209,8 @@ class ConfigurePanel(QWidget):
         self._left_form = left_form
         self.image_edit = QLineEdit()
         self.model_edit = QLineEdit()
-        self.binary_combo = NoWheelComboBox(); self.binary_combo.addItems(["podman", "docker"])
+        self.binary_combo = NoWheelComboBox()
+        self.binary_combo.addItems(["podman", "docker"])
         self.engine_combo = NoWheelComboBox()
         self.engine_combo.addItem("llama.cpp", "llama.cpp")
         self.engine_combo.addItem("ik_llama.cpp", "ik_llama.cpp")
@@ -195,14 +233,16 @@ class ConfigurePanel(QWidget):
         self.detect_image_btn = QPushButton("Detect")
         self.detect_image_btn.setToolTip(
             "Fill the Image field from llama.cpp images already pulled locally "
-            "(podman/docker images).")
+            "(podman/docker images)."
+        )
         self.detect_image_btn.clicked.connect(self.window._launch.detect_image)
         self.fetch_btn = QPushButton("Fetch latest")
         self.fetch_btn.setToolTip(
             "Query the container registry (GHCR) for the newest build tag matching "
             "this image's repo and variant, and update the Image field. Requires an "
             "image to be set (use Detect or type one). This updates the tag only; it "
-            "does NOT download the build; pull it with podman/docker pull.")
+            "does NOT download the build; pull it with podman/docker pull."
+        )
         self.fetch_btn.clicked.connect(self.window._launch.on_fetch_latest)
         image_row = QHBoxLayout()
         image_row.setContentsMargins(0, 0, 0, 0)
@@ -212,7 +252,7 @@ class ConfigurePanel(QWidget):
         image_row.addWidget(self.update_badge)
         image_widget = QWidget()
         image_widget.setLayout(image_row)
-        self._image_row = image_widget   # container-only row, hidden in native mode
+        self._image_row = image_widget  # container-only row, hidden in native mode
         from PySide6.QtWidgets import QTableWidget
 
         from llama_launcher.ui.widgets.table_columns import set_resizable_columns
@@ -252,7 +292,8 @@ class ConfigurePanel(QWidget):
         self.native_binary_edit.setPlaceholderText("/path/to/llama-server")
         self.native_binary_edit.setToolTip(
             "Path to a prebuilt llama-server executable (mainline or ik_llama.cpp). "
-            "The launcher runs it directly as a managed background process.")
+            "The launcher runs it directly as a managed background process."
+        )
         self.native_binary_edit.textChanged.connect(self.refresh_preview)
 
         # RPC pool: one row per --rpc worker (node/device/mem/port). The head
@@ -264,7 +305,8 @@ class ConfigurePanel(QWidget):
         self.rpc_workers_table.setToolTip(
             "rpc-server workers this profile's head connects to (--rpc host:port,\u2026). "
             "Each row is a worker: which node it runs on, which device it exposes, "
-            "an optional --mem budget, and its rpc-server port.")
+            "an optional --mem budget, and its rpc-server port."
+        )
 
         # "Check fit" preflight: probes each worker's node for free VRAM/RAM
         # (or trusts its --mem pledge when set) and reports whether the pool
@@ -274,7 +316,8 @@ class ConfigurePanel(QWidget):
         self.check_fit_btn = QPushButton("Check fit")
         self.check_fit_btn.setToolTip(
             "Probe each RPC worker's node for free VRAM/RAM and check whether the "
-            "pool can hold the selected model.")
+            "pool can hold the selected model."
+        )
         self.check_fit_btn.clicked.connect(self._on_check_fit)
         self.check_fit_label = QLabel("")
         self.check_fit_label.setWordWrap(True)
@@ -298,21 +341,25 @@ class ConfigurePanel(QWidget):
             "(SIGTERM \u2192 wait \u2192 SIGKILL). Raise it if a large model needs longer "
             "to unload cleanly.\n\nApplies to this profile's own container; in "
             "router mode that's the router container; each router member's kill "
-            "delay is the per-row 'Stop timeout (s)' in the Router members table.")
+            "delay is the per-row 'Stop timeout (s)' in the Router members table."
+        )
 
         # A table, not a list: model id / load-on-startup / stop-timeout are
         # per-member settings edited inline, which keeps them reachable without
         # a modal dialog (a modal would hang the headless test run).
         self.members_list = QTableWidget(0, 4)
         self.members_list.setHorizontalHeaderLabels(
-            ["Profile", "Model id (harness)", "Load at start", "Stop timeout (s)"])
-        for _col, _tip in enumerate((
-            "A saved model profile to serve. Configure its GPU layers / MoE / "
-            "context in that profile (single-server mode), then add it here.",
-            "Name the harness calls this model. Empty = derived from the profile name.",
-            "Load this member as soon as the router starts (otherwise on first request).",
-            "Seconds to wait after unload before force-killing this member's container.",
-        )):
+            ["Profile", "Model id (harness)", "Load at start", "Stop timeout (s)"]
+        )
+        for _col, _tip in enumerate(
+            (
+                "A saved model profile to serve. Configure its GPU layers / MoE / "
+                "context in that profile (single-server mode), then add it here.",
+                "Name the harness calls this model. Empty = derived from the profile name.",
+                "Load this member as soon as the router starts (otherwise on first request).",
+                "Seconds to wait after unload before force-killing this member's container.",
+            )
+        ):
             item = self.members_list.horizontalHeaderItem(_col)
             if item is not None:
                 item.setToolTip(_tip)
@@ -327,7 +374,8 @@ class ConfigurePanel(QWidget):
         self.edit_member_btn = QPushButton("Edit member\u2026")
         self.edit_member_btn.setToolTip(
             "Load the selected member's profile into the form to set its GPU "
-            "layers, MoE offload, context, etc. (double-clicking a row does the same).")
+            "layers, MoE offload, context, etc. (double-clicking a row does the same)."
+        )
         self.edit_member_btn.clicked.connect(self._on_edit_member)
         members_row = QHBoxLayout()
         members_row.setContentsMargins(0, 0, 0, 0)
@@ -344,12 +392,14 @@ class ConfigurePanel(QWidget):
             "Each member is a saved model profile: set its GPU layers, MoE offload, "
             "and context in that profile (single-server mode), then add it here. "
             "Members are served through the router's port; a member's own --port "
-            "is ignored (llama.cpp gives each instance a random internal port).")
+            "is ignored (llama.cpp gives each instance a random internal port)."
+        )
         self.members_guidance.setWordWrap(True)
         self.members_guidance.setStyleSheet("QLabel { color: palette(mid); }")
         members_box.addWidget(self.members_guidance)
         self.members_list.cellDoubleClicked.connect(
-            lambda _r, _c: self._on_edit_member() if _c == 0 else None)
+            lambda _r, _c: self._on_edit_member() if _c == 0 else None
+        )
 
         left_form.addRow("Launch mode", self.launch_mode_combo)
         left_form.addRow("Node", self.node_combo)
@@ -372,59 +422,82 @@ class ConfigurePanel(QWidget):
         self.mounts_panel = MountsPanel()
         self.mounts_panel.changed.connect(self.refresh_preview)
         left_form.addRow("Folders", self.mounts_panel)
-        self.mmproj_edit = QLineEdit(); self.mmproj_edit.textChanged.connect(self.refresh_preview)
-        self.draft_model_edit = QLineEdit(); self.draft_model_edit.textChanged.connect(self.refresh_preview)
-        self.raw_edit = QLineEdit(); self.raw_edit.textChanged.connect(self.refresh_preview)
+        self.mmproj_edit = QLineEdit()
+        self.mmproj_edit.textChanged.connect(self.refresh_preview)
+        self.draft_model_edit = QLineEdit()
+        self.draft_model_edit.textChanged.connect(self.refresh_preview)
+        self.raw_edit = QLineEdit()
+        self.raw_edit.textChanged.connect(self.refresh_preview)
         self._mmproj_dot = SuggestionDot(self)
         self._draft_model_dot = SuggestionDot(self)
-        left_form.addRow("mmproj", self._field_with_browse(self.mmproj_edit, self._mmproj_dot))
-        left_form.addRow("draft model", self._field_with_browse(self.draft_model_edit, self._draft_model_dot))
+        left_form.addRow(
+            "mmproj", self._field_with_browse(self.mmproj_edit, self._mmproj_dot)
+        )
+        left_form.addRow(
+            "draft model",
+            self._field_with_browse(self.draft_model_edit, self._draft_model_dot),
+        )
         self.lora_panel = LoraPanel()
         self.lora_panel.changed.connect(self.refresh_preview)
-        self.lora_section = CollapsibleSection("LoRA adapters", self.lora_panel, collapsed=True)
+        self.lora_section = CollapsibleSection(
+            "LoRA adapters", self.lora_panel, collapsed=True
+        )
         left_form.addRow(self.lora_section)
         left_form.addRow("Raw args", self.raw_edit)
         self.extra_args_edit = QLineEdit()
         self.extra_args_edit.textChanged.connect(self.refresh_preview)
         left_form.addRow("Extra podman args", self.extra_args_edit)
-        self.selinux_check = QCheckBox("Disable SELinux labels (--security-opt=label=disable)")
+        self.selinux_check = QCheckBox(
+            "Disable SELinux labels (--security-opt=label=disable)"
+        )
         self.selinux_check.toggled.connect(self.refresh_preview)
         left_form.addRow(self.selinux_check)
 
         # Set tooltips on Environment field widgets
         self.mode_combo.setToolTip(
             "Single server runs one model. Router (headless host) serves several "
-            "member models on one port with an API key, loading them on demand.")
+            "member models on one port with an API key, loading them on demand."
+        )
         self.bind_host_combo.setToolTip(
             "Address the server binds to. 127.0.0.1 = this machine only; "
-            "0.0.0.0 = reachable from the network (an API key is then required).")
+            "0.0.0.0 = reachable from the network (an API key is then required)."
+        )
         self.image_edit.setToolTip(
             "Container image for llama-server, e.g. "
-            "ghcr.io/ggml-org/llama.cpp:server-cuda. Use Detect to list local images.")
+            "ghcr.io/ggml-org/llama.cpp:server-cuda. Use Detect to list local images."
+        )
         self.model_edit.setToolTip(
             "Path to the .gguf model as seen INSIDE the container, e.g. "
-            "/models/Qwen3-A3B-Q4.gguf (add a Folder that maps the host dir).")
+            "/models/Qwen3-A3B-Q4.gguf (add a Folder that maps the host dir)."
+        )
         self.binary_combo.setToolTip("Container runtime used to launch the server.")
         self.engine_combo.setToolTip(
             "Which llama.cpp-family server to run. 'llama.cpp' = mainline "
             "(ghcr.io/ggml-org/llama.cpp); 'ik_llama.cpp' = ikawrakow's fork with "
-            "extra MoE/quant flags (ghcr.io/ikawrakow/ik-llama-cpp).")
+            "extra MoE/quant flags (ghcr.io/ikawrakow/ik-llama-cpp)."
+        )
         self.gpu_combo.setToolTip(
             "GPU passthrough. CDI (nvidia.com/gpu=all) is recommended on modern "
-            "NVIDIA + podman; Legacy uses --gpus all; None runs CPU-only.")
+            "NVIDIA + podman; Legacy uses --gpus all; None runs CPU-only."
+        )
         self.mmproj_edit.setToolTip(
-            "Optional multimodal projector .gguf (container path) for vision models.")
+            "Optional multimodal projector .gguf (container path) for vision models."
+        )
         self.draft_model_edit.setToolTip(
-            "Optional small draft model .gguf (container path) for speculative decoding.")
+            "Optional small draft model .gguf (container path) for speculative decoding."
+        )
         self.raw_edit.setToolTip(
             "Extra llama-server flags appended verbatim, e.g. --temp 0.6 --top-k 20. "
-            "Duplicates of structured settings are de-duplicated.")
+            "Duplicates of structured settings are de-duplicated."
+        )
         self.extra_args_edit.setToolTip(
             "Extra flags for the container runtime (podman/docker) itself, e.g. "
-            "--shm-size=1g. Not passed to llama-server.")
+            "--shm-size=1g. Not passed to llama-server."
+        )
         self.selinux_check.setToolTip(
             "Add --security-opt=label=disable. Needed on some SELinux hosts when a "
-            "mounted model dir is otherwise unreadable in the container.")
+            "mounted model dir is otherwise unreadable in the container."
+        )
         left_scroll = QScrollArea()
         left_scroll.setWidgetResizable(True)
         left_scroll.setWidget(left)
@@ -432,8 +505,10 @@ class ConfigurePanel(QWidget):
 
         # RIGHT: settings grouped, scrollable
         self._widgets: dict[str, object] = {}
-        right_scroll = QScrollArea(); right_scroll.setWidgetResizable(True)
-        right_inner = QWidget(); right_layout = QVBoxLayout(right_inner)
+        right_scroll = QScrollArea()
+        right_scroll.setWidgetResizable(True)
+        right_inner = QWidget()
+        right_layout = QVBoxLayout(right_inner)
         groups: dict[str, QFormLayout] = {}
         self._group_boxes: dict[str, QGroupBox] = {}
         # key -> (form layout, widget), so _on_mode_changed can hide whole rows
@@ -464,7 +539,7 @@ class ConfigurePanel(QWidget):
         self._config_bottom = QWidget()
         config_bottom_box = QVBoxLayout(self._config_bottom)
         config_bottom_box.setContentsMargins(0, 0, 0, 0)
-        config_bottom_box.setSpacing(3)   # tighten the bottom strip's dead space
+        config_bottom_box.setSpacing(3)  # tighten the bottom strip's dead space
         self.model_meta_label = QLabel("")
         config_bottom_box.addWidget(self.model_meta_label)
         self.model_edit.textChanged.connect(lambda _: self.apply_model_caps())
@@ -478,7 +553,8 @@ class ConfigurePanel(QWidget):
         config_bottom_box.addWidget(self.api_key_box)
         config_bottom_box.addWidget(self.harness_box)
         preview_row = QHBoxLayout()
-        self.preview = QPlainTextEdit(); self.preview.setReadOnly(True)
+        self.preview = QPlainTextEdit()
+        self.preview.setReadOnly(True)
         self.preview.setMaximumHeight(90)
         preview_row.addWidget(self.preview, 1)
         self.export_sh_btn = QPushButton("Export .sh")
@@ -497,7 +573,8 @@ class ConfigurePanel(QWidget):
         self.detached_check = QCheckBox("Run detached (no terminal window)")
         self.detached_check.setToolTip(
             "Launch without a terminal window; watch output on the Monitor "
-            "tab and use Stop to shut it down.")
+            "tab and use Stop to shut it down."
+        )
         self.detached_check.toggled.connect(self.refresh_preview)
 
         # profile bar widgets (assembled into the top bar, alongside
@@ -506,7 +583,8 @@ class ConfigurePanel(QWidget):
         self.name_edit.setPlaceholderText("Profile name")
         self.name_edit.setToolTip(
             "Name for this profile. Also sets the container name "
-            "(llama-<name>), so pick something filesystem-friendly.")
+            "(llama-<name>), so pick something filesystem-friendly."
+        )
         self.name_edit.textChanged.connect(self.refresh_preview)
         self.profile_combo = NoWheelComboBox()
         # Shown when nothing is selected (index -1) so a freshly started window
@@ -542,13 +620,16 @@ class ConfigurePanel(QWidget):
         not be able to carry model-level settings; conversely --models-max on a
         single-model llama-server is rejected outright.
         """
-        base = (router_catalog() if self.mode_combo.currentData() == "router"
-                else member_catalog())
+        base = (
+            router_catalog()
+            if self.mode_combo.currentData() == "router"
+            else member_catalog()
+        )
         return for_engine(base, self.engine_combo.currentData() or "llama.cpp")
 
     def _apply_mode_to_settings_form(self) -> None:
         active = self.active_catalog()
-        for group, box in self._group_boxes.items():
+        for box in self._group_boxes.values():
             box.setVisible(False)
         for key, (form, widget) in self._setting_rows.items():
             visible = key in active
@@ -583,7 +664,7 @@ class ConfigurePanel(QWidget):
             self.window.refresh_router_panel_header()
 
     def _update_detached_visibility(self) -> None:
-        """"Run detached" only makes sense for a container launch in server
+        """ "Run detached" only makes sense for a container launch in server
         mode: a router is never detached (it's always a managed background
         process) and neither is native mode (native always runs as a managed
         background subprocess -- there's no terminal-vs-detached choice)."""
@@ -637,23 +718,31 @@ class ConfigurePanel(QWidget):
         self._check_fit_result = None
         self._check_fit_inflight = True
         QThreadPool.globalInstance().start(
-            _CheckFitGather(self, p, self.window.base_dir(), estimate_bytes))
+            _CheckFitGather(self, p, self.window.base_dir(), estimate_bytes)
+        )
         QTimer.singleShot(150, self._poll_check_fit)
 
     def _model_estimate_bytes(self, p: Profile) -> int:
         """Same weights+KV-cache estimate LaunchController.vram_check() uses
         for the single-node preflight, reused here for the pooled one."""
-        meta, weights, _caps = model_info.inspect_model(p.model, self.mounts_panel.mounts())
+        meta, weights, _caps = model_info.inspect_model(
+            p.model, self.mounts_panel.mounts()
+        )
         return vram.estimate_for_model(
-            meta, weights, ctx_size=p.settings.get("ctx-size"),
+            meta,
+            weights,
+            ctx_size=p.settings.get("ctx-size"),
             k_quant=p.settings.get("cache-type-k", "f16"),
-            v_quant=p.settings.get("cache-type-v", "f16"))
+            v_quant=p.settings.get("cache-type-v", "f16"),
+        )
 
     def _poll_check_fit(self) -> None:
         if not self._check_fit_inflight:
             self.check_fit_btn.setEnabled(True)
             headline_text, issues = self._check_fit_result or (
-                "Check fit failed (see logs).", [])
+                "Check fit failed (see logs).",
+                [],
+            )
             lines = [headline_text]
             for issue in issues:
                 prefix = "Error" if issue.level == "error" else "Warning"
@@ -698,9 +787,13 @@ class ConfigurePanel(QWidget):
         to 0.0.0.0 when a remote node is chosen (the existing exposure warning
         then requires an API key, keeping it secure)."""
         name = self.node_combo.currentData()
-        if name and name != "local" and self.bind_host_combo.currentText() in ("127.0.0.1", ""):
+        if (
+            name
+            and name != "local"
+            and self.bind_host_combo.currentText() in ("127.0.0.1", "")
+        ):
             self.bind_host_combo.setCurrentText("0.0.0.0")
-        self._schedule_fit_refresh()    # the fit budget is the new node's GPUs
+        self._schedule_fit_refresh()  # the fit budget is the new node's GPUs
 
     def _apply_engine_enums(self) -> None:
         """Extend/revert -ctk/-ctv and spec-type enum choices for the engine."""
@@ -714,8 +807,7 @@ class ConfigurePanel(QWidget):
         spec = self._widgets.get("spec-type")
         if spec is not None:
             extra_spec = IK_EXTRA_SPEC_TYPES if is_ik else ()
-            spec.set_enum_choices(
-                tuple(CATALOG["spec-type"].enum) + tuple(extra_spec))
+            spec.set_enum_choices(tuple(CATALOG["spec-type"].enum) + tuple(extra_spec))
 
     def _maybe_seed_default_image(self, engine: str) -> None:
         """Seed a sensible default image only when the field is empty or still
@@ -727,7 +819,7 @@ class ConfigurePanel(QWidget):
     def _on_engine_changed(self, _index=0) -> None:
         engine = self.engine_combo.currentData() or "llama.cpp"
         self._apply_engine_enums()
-        self._apply_mode_to_settings_form()   # show/hide the ik group by active_catalog
+        self._apply_mode_to_settings_form()  # show/hide the ik group by active_catalog
         self._maybe_seed_default_image(engine)
         self.refresh_preview()
 
@@ -744,6 +836,7 @@ class ConfigurePanel(QWidget):
 
     def _add_member_item(self, member: RouterMember) -> None:
         from PySide6.QtWidgets import QTableWidgetItem
+
         row = self.members_list.rowCount()
         # itemChanged fires per setItem; without this the handler reads a
         # half-populated row and hits None cells.
@@ -751,7 +844,7 @@ class ConfigurePanel(QWidget):
         self.members_list.insertRow(row)
 
         name = QTableWidgetItem(member.profile)
-        name.setFlags(name.flags() & ~Qt.ItemIsEditable)   # the profile is the identity
+        name.setFlags(name.flags() & ~Qt.ItemIsEditable)  # the profile is the identity
         self.members_list.setItem(row, 0, name)
 
         # Empty means "derive from the profile name"; show the derived value as a
@@ -768,15 +861,20 @@ class ConfigurePanel(QWidget):
         self.members_list.setItem(row, 3, QTableWidgetItem(str(member.stop_timeout)))
         self.members_list.blockSignals(blocked)
 
-    def set_member_fields(self, row: int, model_id: str | None = None,
-                          load_on_startup: bool | None = None,
-                          stop_timeout: int | None = None) -> None:
+    def set_member_fields(
+        self,
+        row: int,
+        model_id: str | None = None,
+        load_on_startup: bool | None = None,
+        stop_timeout: int | None = None,
+    ) -> None:
         """Programmatic equivalent of editing a member row (used by tests)."""
         if model_id is not None:
             self.members_list.item(row, 1).setText(model_id)
         if load_on_startup is not None:
             self.members_list.item(row, 2).setCheckState(
-                Qt.Checked if load_on_startup else Qt.Unchecked)
+                Qt.Checked if load_on_startup else Qt.Unchecked
+            )
         if stop_timeout is not None:
             self.members_list.item(row, 3).setText(str(stop_timeout))
         self.refresh_preview()
@@ -792,13 +890,20 @@ class ConfigurePanel(QWidget):
         back to router mode) leaves the new model's name in the Name field, and
         that model must still be offered.
         """
-        return [p.name for p in list_profiles(self.window.router_base_dir()) if p.mode != "router"]
+        return [
+            p.name
+            for p in list_profiles(self.window.router_base_dir())
+            if p.mode != "router"
+        ]
 
     def _on_add_member(self) -> None:
         names = self._member_candidates()
         if not names:
-            QMessageBox.information(self, "No profiles",
-                                    "Save a model profile first; routers serve members.")
+            QMessageBox.information(
+                self,
+                "No profiles",
+                "Save a model profile first; routers serve members.",
+            )
             return
         name, ok = QInputDialog.getItem(self, "Add member", "Profile:", names, 0, False)
         if ok and name:
@@ -806,8 +911,9 @@ class ConfigurePanel(QWidget):
             self.refresh_preview()
 
     def _on_remove_member(self) -> None:
-        for row in sorted({i.row() for i in self.members_list.selectedIndexes()},
-                          reverse=True):
+        for row in sorted(
+            {i.row() for i in self.members_list.selectedIndexes()}, reverse=True
+        ):
             self.members_list.removeRow(row)
         self.refresh_preview()
 
@@ -816,31 +922,39 @@ class ConfigurePanel(QWidget):
         # equal to the stored profile of the same name (dataclass equality is
         # dict-order-independent). A never-saved profile counts as changed.
         cur = self.current_profile()
-        saved = {p.name: p for p in list_profiles(self.window.router_base_dir())}.get(cur.name)
+        saved = {p.name: p for p in list_profiles(self.window.router_base_dir())}.get(
+            cur.name
+        )
         return saved is None or cur != saved
 
     def _on_edit_member(self) -> None:
         row = self.members_list.currentRow()
         if row < 0:
             return
-        item = self.members_list.item(row, 0)   # column 0 = member profile name
+        item = self.members_list.item(row, 0)  # column 0 = member profile name
         if item is None:
             return
         name = item.text()
-        target = {p.name: p for p in list_profiles(self.window.router_base_dir())}.get(name)
+        target = {p.name: p for p in list_profiles(self.window.router_base_dir())}.get(
+            name
+        )
         if target is None:
             QMessageBox.warning(
-                self, "Profile missing",
+                self,
+                "Profile missing",
                 f"Profile '{name}' no longer exists; remove it from the router "
-                f"or recreate it.")
+                f"or recreate it.",
+            )
             return
         if self._has_unsaved_changes():
             choice = QMessageBox.question(
-                self, "Unsaved changes",
+                self,
+                "Unsaved changes",
                 f"You have unsaved changes to '{self.current_profile().name}'. "
                 f"Editing member '{name}' will load its profile and lose those changes.",
                 QMessageBox.Save | QMessageBox.Discard | QMessageBox.Cancel,
-                QMessageBox.Cancel)
+                QMessageBox.Cancel,
+            )
             if choice == QMessageBox.Cancel:
                 return
             if choice == QMessageBox.Save:
@@ -855,17 +969,23 @@ class ConfigurePanel(QWidget):
             load = self.members_list.item(row, 2)
             timeout_item = self.members_list.item(row, 3)
             if name is None:
-                continue          # row still being built
+                continue  # row still being built
             try:
-                timeout = int(((timeout_item.text() if timeout_item else "") or "10").strip())
+                timeout = int(
+                    ((timeout_item.text() if timeout_item else "") or "10").strip()
+                )
             except ValueError:
                 timeout = 10
-            out.append(RouterMember(
-                profile=name.text(),
-                model_id=((mid.text() if mid else "") or "").strip(),
-                load_on_startup=bool(load is not None and load.checkState() == Qt.Checked),
-                stop_timeout=timeout,
-            ))
+            out.append(
+                RouterMember(
+                    profile=name.text(),
+                    model_id=((mid.text() if mid else "") or "").strip(),
+                    load_on_startup=bool(
+                        load is not None and load.checkState() == Qt.Checked
+                    ),
+                    stop_timeout=timeout,
+                )
+            )
         return out
 
     def member_pairs(self) -> list:
@@ -898,24 +1018,38 @@ class ConfigurePanel(QWidget):
     def router_issues(self) -> list:
         """Validation issues for the current profile, router context included."""
         p = self.current_profile()
-        key_present = bool(api_key_store.resolve_api_key(self.window.router_base_dir(), p)) \
-            if p.mode == "router" else False
+        key_present = (
+            bool(api_key_store.resolve_api_key(self.window.router_base_dir(), p))
+            if p.mode == "router"
+            else False
+        )
         connection = self.window._launch._connection_for_profile(p)
         img_present = True
         if connection and p.image:
-            img_present = runtime.image_exists(p.image, p.runtime.binary, connection=connection)
-        issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
-                          members=self.member_pairs(), api_key_present=key_present,
-                          native_binary_ok=native.native_binary_ok_for(p),
-                          image_present=img_present)
+            img_present = runtime.image_exists(
+                p.image, p.runtime.binary, connection=connection
+            )
+        issues = validate(
+            p,
+            binary_found=runtime.binary_available(p.runtime.binary),
+            members=self.member_pairs(),
+            api_key_present=key_present,
+            native_binary_ok=native.native_binary_ok_for(p),
+            image_present=img_present,
+        )
         for name in self.missing_member_profiles():
-            issues.append(Issue(
-                "error",
-                f"Member profile {name!r} no longer exists; it would be dropped from "
-                f"the router silently. Remove it or recreate the profile."))
+            issues.append(
+                Issue(
+                    "error",
+                    f"Member profile {name!r} no longer exists; it would be dropped from "
+                    f"the router silently. Remove it or recreate the profile.",
+                )
+            )
         return issues
 
-    def _field_with_browse(self, line_edit: QLineEdit, dot: QWidget | None = None) -> QWidget:
+    def _field_with_browse(
+        self, line_edit: QLineEdit, dot: QWidget | None = None
+    ) -> QWidget:
         container = QWidget()
         row = QHBoxLayout(container)
         row.setContentsMargins(0, 0, 0, 0)
@@ -948,7 +1082,8 @@ class ConfigurePanel(QWidget):
 
     def _browse_native_binary(self) -> None:
         path, _ = QFileDialog.getOpenFileName(
-            self, "Select llama-server binary", os.path.expanduser("~"))
+            self, "Select llama-server binary", os.path.expanduser("~")
+        )
         if path:
             self.native_binary_edit.setText(path)
 
@@ -964,9 +1099,11 @@ class ConfigurePanel(QWidget):
         container_path = host_to_container(path, self.mounts_panel.mounts())
         if container_path is None:
             QMessageBox.warning(
-                self, "File not in a mounted folder",
+                self,
+                "File not in a mounted folder",
                 "The selected file is not inside any mounted folder.\n"
-                "Add a folder mount that contains it first, then pick it again.")
+                "Add a folder mount that contains it first, then pick it again.",
+            )
             return
         line_edit.setText(container_path)
 
@@ -977,12 +1114,14 @@ class ConfigurePanel(QWidget):
         self.image_edit.setText(p.image)
         self.model_edit.setText(p.model)
         self.binary_combo.setCurrentText(p.runtime.binary)
-        self.gpu_combo.setCurrentIndex(max(0, self.gpu_combo.findData(p.runtime.gpu_mode)))
+        self.gpu_combo.setCurrentIndex(
+            max(0, self.gpu_combo.findData(p.runtime.gpu_mode))
+        )
         self.engine_combo.blockSignals(True)
         _eidx = self.engine_combo.findData(p.runtime.engine)
         self.engine_combo.setCurrentIndex(_eidx if _eidx >= 0 else 0)
         self.engine_combo.blockSignals(False)
-        self._apply_engine_enums()   # extend enums before values are set (no image seeding on load)
+        self._apply_engine_enums()  # extend enums before values are set (no image seeding on load)
         self.mounts_panel.set_mounts(p.mounts)
         self.mmproj_edit.setText(p.mmproj or "")
         self.draft_model_edit.setText(p.draft_model or "")
@@ -1043,22 +1182,23 @@ class ConfigurePanel(QWidget):
         return Profile(
             name=self._profile_name(),
             image=self.image_edit.text(),
-            runtime=Runtime(binary=self.binary_combo.currentText(),
-                            gpu_mode=self.gpu_combo.currentData(),
-                            selinux_label_disable=self.selinux_check.isChecked(),
-                            extra_run_args=self.extra_args_edit.text(),
-                            bind_host=self.bind_host_combo.currentText().strip()
-                                      or "127.0.0.1",
-                            detached=self.detached_check.isChecked(),
-                            router_key_mode=self.api_key_box._current_scope(),
-                            engine=self.engine_combo.currentData() or "llama.cpp",
-                            stop_timeout=self.stop_timeout_spin.value(),
-                            launch_mode=launch_mode,
-                            native_binary=self.native_binary_edit.text().strip(),
-                            # RPC pool: the head always runs locally (node_combo
-                            # is force-disabled in _on_launch_mode_changed).
-                            node="local" if is_rpc else (self.node_combo.currentData() or "local"),
-                            rpc_workers=self.rpc_workers_table.workers() if is_rpc else []),
+            runtime=Runtime(
+                binary=self.binary_combo.currentText(),
+                gpu_mode=self.gpu_combo.currentData(),
+                selinux_label_disable=self.selinux_check.isChecked(),
+                extra_run_args=self.extra_args_edit.text(),
+                bind_host=self.bind_host_combo.currentText().strip() or "127.0.0.1",
+                detached=self.detached_check.isChecked(),
+                router_key_mode=self.api_key_box._current_scope(),
+                engine=self.engine_combo.currentData() or "llama.cpp",
+                stop_timeout=self.stop_timeout_spin.value(),
+                launch_mode=launch_mode,
+                native_binary=self.native_binary_edit.text().strip(),
+                # RPC pool: the head always runs locally (node_combo
+                # is force-disabled in _on_launch_mode_changed).
+                node="local" if is_rpc else (self.node_combo.currentData() or "local"),
+                rpc_workers=self.rpc_workers_table.workers() if is_rpc else [],
+            ),
             mounts=self.mounts_panel.mounts(),
             model=self.model_edit.text(),
             mmproj=self.mmproj_edit.text() or None,
@@ -1083,7 +1223,11 @@ class ConfigurePanel(QWidget):
         if p.mode != "router":
             return build_command(p, detach=p.runtime.detached)
         return build_command(
-            p, router_host_dir=str(api_key_store.router_dir(self.window.router_base_dir(), p.name)))
+            p,
+            router_host_dir=str(
+                api_key_store.router_dir(self.window.router_base_dir(), p.name)
+            ),
+        )
 
     def preview_text(self) -> str:
         return " ".join(self.build_current_command())
@@ -1096,20 +1240,28 @@ class ConfigurePanel(QWidget):
         p = self.current_profile()
         meta, size, caps = (None, None, None)
         if p.model:
-            meta, size, caps = model_info.inspect_model(p.model, self.mounts_panel.mounts())
+            meta, size, caps = model_info.inspect_model(
+                p.model, self.mounts_panel.mounts()
+            )
         self._last_caps = caps
         self._fit_meta, self._fit_weights = meta, size
         self._meta_text = self._meta_caps_text(meta, size, caps)
-        self._set_fit_line("")      # model changed: never show the OLD model's fit
+        self._set_fit_line("")  # model changed: never show the OLD model's fit
         self._schedule_fit_refresh()
 
         described = describe_relevance(caps) if caps else {}
-        sugg_by_key, reason_by_key = self._suggestion_index(caps)   # concrete-value suggestions
+        sugg_by_key, reason_by_key = self._suggestion_index(
+            caps
+        )  # concrete-value suggestions
 
         for key, widget in self._widgets.items():
             self._apply_dot(widget, key, described, sugg_by_key, reason_by_key)
-        self._apply_field_dot(self._mmproj_dot, "mmproj", described, sugg_by_key, reason_by_key)
-        self._apply_field_dot(self._draft_model_dot, "draft_model", described, sugg_by_key, reason_by_key)
+        self._apply_field_dot(
+            self._mmproj_dot, "mmproj", described, sugg_by_key, reason_by_key
+        )
+        self._apply_field_dot(
+            self._draft_model_dot, "draft_model", described, sugg_by_key, reason_by_key
+        )
 
     # -- live fit readout -----------------------------------------------------
     def _schedule_fit_refresh(self) -> None:
@@ -1125,10 +1277,14 @@ class ConfigurePanel(QWidget):
         elif self._fit_meta is None:
             self._set_fit_line("")
             return
-        ssh = gpu_ssh_target(self.window.base_dir(),
-                             self.node_combo.currentData() or "local")
-        fresh = (self._fit_gpus is not None and self._fit_gpus_ssh == ssh
-                 and time.monotonic() - self._fit_gpus_at < _FIT_GPU_TTL)
+        ssh = gpu_ssh_target(
+            self.window.base_dir(), self.node_combo.currentData() or "local"
+        )
+        fresh = (
+            self._fit_gpus is not None
+            and self._fit_gpus_ssh == ssh
+            and time.monotonic() - self._fit_gpus_at < _FIT_GPU_TTL
+        )
         if fresh:
             self._render_fit_line()
             return
@@ -1159,11 +1315,15 @@ class ConfigurePanel(QWidget):
             meta, weights = self._cached_meta_weights(prof.model, prof.mounts)
             if meta is None and not weights:
                 continue
-            out.append(vram.estimate_for_model(
-                meta, weights or 0,
-                ctx_size=prof.settings.get("ctx-size"),
-                k_quant=prof.settings.get("cache-type-k", "f16"),
-                v_quant=prof.settings.get("cache-type-v", "f16")))
+            out.append(
+                vram.estimate_for_model(
+                    meta,
+                    weights or 0,
+                    ctx_size=prof.settings.get("ctx-size"),
+                    k_quant=prof.settings.get("cache-type-k", "f16"),
+                    v_quant=prof.settings.get("cache-type-v", "f16"),
+                )
+            )
         return out
 
     def _cached_meta_weights(self, container_path: str, mounts) -> tuple:
@@ -1188,7 +1348,7 @@ class ConfigurePanel(QWidget):
         if stamp is not None:
             self._member_meta_cache[host] = (stamp, meta, weights)
         else:
-            self._member_meta_cache.pop(host, None)   # unreadable: don't cache
+            self._member_meta_cache.pop(host, None)  # unreadable: don't cache
         return meta, weights
 
     @staticmethod
@@ -1202,29 +1362,37 @@ class ConfigurePanel(QWidget):
     def _render_fit_line(self) -> None:
         mib = 1024 * 1024
         free = [g.mem_free_mib * mib for g in (self._fit_gpus or [])]
-        gib = 1024 ** 3
+        gib = 1024**3
         if self._is_router_mode():
             s = vram.router_fit_summary(
                 self._member_estimates(),
                 models_max=self.current_profile().settings.get(
-                    "models-max", CATALOG["models-max"].default),
-                free_bytes_per_gpu=free)
+                    "models-max", CATALOG["models-max"].default
+                ),
+                free_bytes_per_gpu=free,
+            )
             note = f" ({self._router_fit_note(s)})" if s is not None else ""
         else:
             s = vram.fit_summary(
-                self._fit_meta, self._fit_weights or 0,
+                self._fit_meta,
+                self._fit_weights or 0,
                 settings=self.current_profile().settings,
-                free_bytes_per_gpu=free)
+                free_bytes_per_gpu=free,
+            )
             note = ""
         if s is None:
             line = ""
         elif s.fits:
-            line = (f"fit{note}: est ~{s.est_bytes/gib:.1f} / ~{s.free_bytes/gib:.1f} "
-                    f"GiB free (margin {s.margin/gib:.1f} GiB) \u2713")
+            line = (
+                f"fit{note}: est ~{s.est_bytes / gib:.1f} / ~{s.free_bytes / gib:.1f} "
+                f"GiB free (margin {s.margin / gib:.1f} GiB) \u2713"
+            )
         else:
-            line = (f'<span style="color:#c62828">may not fit{note}: est '
-                    f"~{s.est_bytes/gib:.1f} GiB &gt; ~{s.free_bytes/gib:.1f} GiB "
-                    f"free (short {-s.margin/gib:.1f} GiB)</span>")
+            line = (
+                f'<span style="color:#c62828">may not fit{note}: est '
+                f"~{s.est_bytes / gib:.1f} GiB &gt; ~{s.free_bytes / gib:.1f} GiB "
+                f"free (short {-s.margin / gib:.1f} GiB)</span>"
+            )
         self._set_fit_line(line)
 
     def _set_fit_line(self, line: str) -> None:
@@ -1245,9 +1413,11 @@ class ConfigurePanel(QWidget):
         if not caps:
             return sugg_by_key, reason_by_key
         for sg in compute_suggestions(
-                caps, self.current_profile().settings,
-                mmproj_set=bool(self.mmproj_edit.text()),
-                draft_set=bool(self.draft_model_edit.text())):
+            caps,
+            self.current_profile().settings,
+            mmproj_set=bool(self.mmproj_edit.text()),
+            draft_set=bool(self.draft_model_edit.text()),
+        ):
             for k in list(sg.settings) + list(sg.fields):
                 sugg_by_key[k] = sg
                 reason_by_key[k] = sg.text
@@ -1256,8 +1426,9 @@ class ConfigurePanel(QWidget):
     @staticmethod
     def _dot_state_for(key, described, sugg_by_key, reason_by_key):
         tier, reason = described.get(key, (Tier.NEUTRAL, ""))
-        state = {"recommended": "suggested", "tune": "suggested",
-                 "na": "muted"}.get(getattr(tier, "value", ""), "none")
+        state = {"recommended": "suggested", "tune": "suggested", "na": "muted"}.get(
+            getattr(tier, "value", ""), "none"
+        )
         return state, reason
 
     def _apply_dot(self, widget, key, described, sugg_by_key, reason_by_key) -> None:
@@ -1267,7 +1438,7 @@ class ConfigurePanel(QWidget):
             state = "suggested"
             reason = reason_by_key[key]
             sg = sugg_by_key[key]
-            on_apply = lambda s=sg: self._apply_suggestion(s)
+            on_apply = functools.partial(self._apply_suggestion, sg)
         widget.set_suggestion(state, reason, on_apply)
 
     def _apply_field_dot(self, dot, key, described, sugg_by_key, reason_by_key) -> None:
@@ -1277,13 +1448,16 @@ class ConfigurePanel(QWidget):
             state = "suggested"
             reason = reason_by_key[key]
             sg = sugg_by_key[key]
-            on_apply = lambda s=sg: self._apply_suggestion(s)
+            on_apply = functools.partial(self._apply_suggestion, sg)
         dot.set_state(state, reason, on_apply)
 
     def _resolve_sibling(self, filename) -> str | None:
         model = self.model_edit.text()
         mounts = self.mounts_panel.mounts()
-        for d in (posixpath.dirname(model), posixpath.dirname(posixpath.dirname(model))):
+        for d in (
+            posixpath.dirname(model),
+            posixpath.dirname(posixpath.dirname(model)),
+        ):
             container = posixpath.join(d, filename)
             host = container_to_host(container, mounts)
             if host and os.path.exists(host):

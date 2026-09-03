@@ -45,9 +45,13 @@ def delta(new: dict, old: dict) -> dict:
         o = old_by.get(r["target_size"])
         if o is None:
             continue
-        shared.append({"size": r["target_size"],
-                       "pp_pct": _pct(r["pp_tok_s"], o["pp_tok_s"]),
-                       "gen_pct": _pct(r["gen_tok_s"], o["gen_tok_s"])})
+        shared.append(
+            {
+                "size": r["target_size"],
+                "pp_pct": _pct(r["pp_tok_s"], o["pp_tok_s"]),
+                "gen_pct": _pct(r["gen_tok_s"], o["gen_tok_s"]),
+            }
+        )
     new_sizes = {r["target_size"] for r in new.get("rows", [])}
     old_sizes = {r["target_size"] for r in old.get("rows", [])}
     return {"shared": shared, "sizes_differ": new_sizes != old_sizes}

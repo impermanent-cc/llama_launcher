@@ -1,8 +1,10 @@
-from llama_launcher.ui.main_window import MainWindow
 import llama_launcher.ui.main_window as mw
+from llama_launcher.ui.main_window import MainWindow
 
-_DRAFT_LINE = ("draft acceptance = 0.62008 ( 1797 accepted /  2898 generated), "
-               "mean acceptance length =  2.24, acceptance rate per position = (0.727, 0.513)")
+_DRAFT_LINE = (
+    "draft acceptance = 0.62008 ( 1797 accepted /  2898 generated), "
+    "mean acceptance length =  2.24, acceptance rate per position = (0.727, 0.513)"
+)
 
 
 def test_on_launch_resets_monitor(qtbot, monkeypatch):

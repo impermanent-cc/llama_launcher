@@ -1,8 +1,8 @@
 from pathlib import Path
 
-from llama_launcher.core.gguf import parse_gguf_header, GgufMeta
+from llama_launcher.core.capabilities import derive_caps
+from llama_launcher.core.gguf import GgufMeta, parse_gguf_header
 from llama_launcher.core.pathmap import container_to_host
-from llama_launcher.core.capabilities import derive_caps, ModelCaps
 
 
 def read_gguf_meta(path, max_bytes: int = 64 * 1024 * 1024) -> GgufMeta | None:

@@ -1,38 +1,64 @@
 import posixpath
 import re
 import shlex
+from collections.abc import Callable
 
 from .settings_catalog import (
     CATALOG,
-    SKIP, engine_value,
     ROUTER_ONLY_KEYS,
+    SKIP,
+    engine_value,
     router_catalog,
 )
-from collections.abc import Callable
-
 from .spec import Profile, RpcWorker, profile_port, slugify
-
 
 # Container-runtime flags in `extra_run_args` that escalate a launch to host
 # access -- a shared profile.json must not carry these silently. Any of these as
 # an exact token or `flag=...` form is flagged; volume/device get extra checks
 # below. (The launcher's OWN CDI device form `nvidia.com/gpu=all` is allowed.)
-_ESCALATING_RUN_FLAGS = frozenset({
-    "--privileged", "--entrypoint", "--security-opt", "--cap-add",
-    "--pid", "--ipc", "--userns", "--uts", "--cgroupns",
-    "-v", "--volume", "--mount", "--device", "--device-cgroup-rule",
-    "--group-add",
-    # Host-exec vectors: an attacker-named OCI runtime / hooks dir / conmon
-    # makes podman/docker execute an arbitrary binary on the host.
-    "--runtime", "--hooks-dir", "--conmon",
-})
+_ESCALATING_RUN_FLAGS = frozenset(
+    {
+        "--privileged",
+        "--entrypoint",
+        "--security-opt",
+        "--cap-add",
+        "--pid",
+        "--ipc",
+        "--userns",
+        "--uts",
+        "--cgroupns",
+        "-v",
+        "--volume",
+        "--mount",
+        "--device",
+        "--device-cgroup-rule",
+        "--group-add",
+        # Host-exec vectors: an attacker-named OCI runtime / hooks dir / conmon
+        # makes podman/docker execute an arbitrary binary on the host.
+        "--runtime",
+        "--hooks-dir",
+        "--conmon",
+    }
+)
 # System roots whose mount into a container is a host-filesystem escape. Matched
 # by PREFIX (any subpath counts), not exact membership, so /var/run/docker.sock,
 # /root/.aws and the like count too. /home is special-cased in
 # is_sensitive_host_path: ordinary home data mounts stay allowed, only
 # credential dotfile dirs under it are sensitive.
-_SENSITIVE_ROOTS = ("/etc", "/root", "/var", "/usr", "/boot", "/sys", "/proc",
-                    "/dev", "/bin", "/sbin", "/lib", "/run")
+_SENSITIVE_ROOTS = (
+    "/etc",
+    "/root",
+    "/var",
+    "/usr",
+    "/boot",
+    "/sys",
+    "/proc",
+    "/dev",
+    "/bin",
+    "/sbin",
+    "/lib",
+    "/run",
+)
 _RUNTIME_SOCKETS = ("docker.sock", "podman.sock")
 
 
@@ -49,9 +75,9 @@ def is_sensitive_host_path(host: str) -> bool:
     if not host:
         return False
     host = posixpath.normpath(host)
-    if host.startswith("//"):                   # normpath keeps a leading "//"
+    if host.startswith("//"):  # normpath keeps a leading "//"
         host = host[1:]
-    if not host.startswith("/"):                # relative path or named volume
+    if not host.startswith("/"):  # relative path or named volume
         return False
     if host == "/":
         return True
@@ -60,8 +86,8 @@ def is_sensitive_host_path(host: str) -> bool:
     if any(host == r or host.startswith(r + "/") for r in _SENSITIVE_ROOTS):
         return True
     if host == "/home" or host.startswith("/home/"):
-        parts = [p for p in host[len("/home"):].split("/") if p]
-        if len(parts) <= 1:                     # /home or a whole home dir
+        parts = [p for p in host[len("/home") :].split("/") if p]
+        if len(parts) <= 1:  # /home or a whole home dir
             return True
         return any(p.startswith(".") for p in parts[1:])  # ~/.ssh, ~/.aws, ...
     return False
@@ -91,13 +117,13 @@ def _iter_flag_values(tokens: list[str]):
 def _is_sensitive_mount(flag: str, value: str | None) -> bool:
     if value is None or flag not in ("-v", "--volume", "--mount"):
         return False
-    if flag == "--mount":                      # --mount type=bind,source=/,...
+    if flag == "--mount":  # --mount type=bind,source=/,...
         src = ""
         for part in value.split(","):
             if part.startswith(("source=", "src=")):
                 src = part.split("=", 1)[1]
         host = src
-    else:                                       # -v host:container[:opts]
+    else:  # -v host:container[:opts]
         host = value.split(":", 1)[0]
     return is_sensitive_host_path(host)
 
@@ -112,11 +138,11 @@ def dangerous_run_args(extra_run_args: str) -> list[str]:
     try:
         tokens = shlex.split(extra_run_args)
     except ValueError:
-        return [extra_run_args]                # unparseable -> treat as suspect
+        return [extra_run_args]  # unparseable -> treat as suspect
     bad: list[str] = []
     for flag, val in _iter_flag_values(tokens):
         if flag == "--device" and val and val.startswith("nvidia.com/gpu"):
-            continue                            # the launcher's own CDI form
+            continue  # the launcher's own CDI form
         if flag in ("-v", "--volume", "--mount"):
             if _is_sensitive_mount(flag, val):
                 bad.append(f"{flag} {val}" if val else flag)
@@ -188,7 +214,7 @@ def _build_alias_fold(catalog: dict) -> dict:
     """alias/spelling -> canonical long flag, from catalog + structural flags."""
     fold: dict = dict(_STRUCTURAL_ALIASES)
     for setting in catalog.values():
-        fold[setting.flag] = setting.flag          # long form is its own canonical
+        fold[setting.flag] = setting.flag  # long form is its own canonical
         for alias in setting.aliases:
             fold[alias] = setting.flag
     return fold
@@ -232,7 +258,7 @@ def _parse_raw_pairs(raw: str) -> list:
     while i < len(tokens):
         tok = tokens[i]
         if not _FLAG_RE.match(tok):
-            i += 1                      # stray positional; nothing to pair it with
+            i += 1  # stray positional; nothing to pair it with
             continue
         if "=" in tok:
             flag, _, value = tok.partition("=")
@@ -265,16 +291,18 @@ def _merge_raw_args(owned, raw_pairs, protected_canon, repeatable_canon):
     canon flags keep the launcher value; repeatable/unknown flags append.
     Returns (argv, warnings).
     """
-    owned = [list(pair) for pair in owned]          # mutable copy for in-place override
+    owned = [list(pair) for pair in owned]  # mutable copy for in-place override
     owned_index: dict = {}
     for pos, (flag, _value) in enumerate(owned):
-        owned_index.setdefault(_canonical_flag(flag), pos)   # first owner wins the slot
+        owned_index.setdefault(_canonical_flag(flag), pos)  # first owner wins the slot
     warnings: list = []
     extras: list = []
     for flag, value in raw_pairs:
         canon = _canonical_flag(flag)
         if canon in protected_canon:
-            warnings.append(f"raw arg '{flag}' ignored; the launcher controls '{canon}'")
+            warnings.append(
+                f"raw arg '{flag}' ignored; the launcher controls '{canon}'"
+            )
             continue
         if canon in owned_index and canon not in repeatable_canon:
             pos = owned_index[canon]
@@ -293,7 +321,7 @@ def _merge_raw_args(owned, raw_pairs, protected_canon, repeatable_canon):
 def image_tag(image: str) -> str:
     """Return the tag portion of an image ref, or '' when none is present."""
     _, sep, tag = image.rpartition(":")
-    if not sep or "/" in tag:        # ":" belonged to a host:port, or no tag
+    if not sep or "/" in tag:  # ":" belonged to a host:port, or no tag
         return ""
     return tag
 
@@ -311,9 +339,13 @@ def _connection_flag(binary: str) -> str:
     return "--context" if binary == "docker" else "--connection"
 
 
-def _run_level_args(profile: Profile, router_host_dir: str = "",
-                    detach: bool = False, connection: str = "",
-                    network_host: bool = False) -> list[str]:
+def _run_level_args(
+    profile: Profile,
+    router_host_dir: str = "",
+    detach: bool = False,
+    connection: str = "",
+    network_host: bool = False,
+) -> list[str]:
     rt = profile.runtime
     is_router = profile.mode == "router"
 
@@ -342,7 +374,7 @@ def _run_level_args(profile: Profile, router_host_dir: str = "",
         argv.append("--security-opt=label=disable")
 
     if network_host:
-        argv += ["--network", "host"]           # head shares host loopback for --rpc
+        argv += ["--network", "host"]  # head shares host loopback for --rpc
     else:
         port = profile_port(profile)
         argv += ["-p", f"{rt.bind_host}:{port}:{port}"]
@@ -384,8 +416,12 @@ def _run_level_args(profile: Profile, router_host_dir: str = "",
     # (tools.sh-entrypoint) build, yet a user's custom tag (e.g. `...:rpc-cuda`)
     # won't match the full/light tag heuristic; without the override the head
     # runs tools.sh and prints usage instead of serving.
-    has_entrypoint = any(a == "--entrypoint" or a.startswith("--entrypoint=") for a in extra)
-    force_server = needs_server_entrypoint(profile.image) or profile.runtime.launch_mode == "rpc"
+    has_entrypoint = any(
+        a == "--entrypoint" or a.startswith("--entrypoint=") for a in extra
+    )
+    force_server = (
+        needs_server_entrypoint(profile.image) or profile.runtime.launch_mode == "rpc"
+    )
     if force_server and not has_entrypoint:
         argv += ["--entrypoint", _SERVER_ENTRYPOINT]
 
@@ -432,10 +468,12 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
     # Enforced here, not just in the UI, so the CLI/headless path (which skips
     # the form) stays consistent too.
     lm = catalog.get("load-mode")
-    suppress = ({"no-mmap", "mlock"}
-                if lm is not None
-                and profile.settings.get("load-mode", lm.default) != lm.default
-                else set())
+    suppress = (
+        {"no-mmap", "mlock"}
+        if lm is not None
+        and profile.settings.get("load-mode", lm.default) != lm.default
+        else set()
+    )
     # Emit changed settings in catalog order, skipping port (handled below).
     for key, setting in catalog.items():
         if key == "port":
@@ -456,12 +494,13 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
             # tokens, enum-default sentinel) live in one place shared with
             # router_preset; the UI drops defaults via is_set(), this mirrors
             # that on the headless path.
-            value = engine_value(key, setting, profile.settings[key],
-                                 profile.runtime.engine)
+            value = engine_value(
+                key, setting, profile.settings[key], profile.runtime.engine
+            )
             if value is SKIP:
                 continue
             rendered = _render_setting(setting, value)
-            if not rendered:                      # bool that is False -> emits nothing
+            if not rendered:  # bool that is False -> emits nothing
                 continue
             pairs.append((rendered[0], rendered[1] if len(rendered) > 1 else None))
 
@@ -479,7 +518,8 @@ _REPEATABLE = {"--lora", "--lora-scaled", "--logit-bias"}
 def _server_args(profile: Profile, catalog: dict, host: str = "0.0.0.0") -> list[str]:
     owned = _owned_server_pairs(profile, catalog, host)
     argv, _warnings = _merge_raw_args(
-        owned, _parse_raw_pairs(profile.raw_args), _SERVER_PROTECTED, _REPEATABLE)
+        owned, _parse_raw_pairs(profile.raw_args), _SERVER_PROTECTED, _REPEATABLE
+    )
     return argv
 
 
@@ -508,7 +548,8 @@ def _router_server_args(profile: Profile) -> list[str]:
     """Server args for a router: no model, host-level settings only."""
     owned = _owned_router_pairs(profile)
     argv, _warnings = _merge_raw_args(
-        owned, _parse_raw_pairs(profile.raw_args), _ROUTER_PROTECTED, _REPEATABLE)
+        owned, _parse_raw_pairs(profile.raw_args), _ROUTER_PROTECTED, _REPEATABLE
+    )
     return argv
 
 
@@ -527,30 +568,42 @@ def raw_arg_warnings(profile: Profile, catalog: dict = CATALOG) -> list[str]:
     return warnings
 
 
-def build_command(profile: Profile, catalog: dict = CATALOG,
-                  router_host_dir: str = "", detach: bool = False,
-                  connection: str = "", rpc_endpoints: str = "") -> list[str]:
+def build_command(
+    profile: Profile,
+    catalog: dict = CATALOG,
+    router_host_dir: str = "",
+    detach: bool = False,
+    connection: str = "",
+    rpc_endpoints: str = "",
+) -> list[str]:
     if profile.mode == "router":
-        return _run_level_args(profile, router_host_dir, connection=connection) \
-            + _router_server_args(profile)
+        return _run_level_args(
+            profile, router_host_dir, connection=connection
+        ) + _router_server_args(profile)
     if profile.runtime.launch_mode == "native":
-        return [profile.runtime.native_binary] + _server_args(
-            profile, catalog, host=profile.runtime.bind_host)
+        return [
+            profile.runtime.native_binary,
+            *_server_args(profile, catalog, host=profile.runtime.bind_host),
+        ]
     if profile.runtime.launch_mode == "rpc":
         # Head runs locally (no --connection) and host-networked so it can
         # reach every worker over 127.0.0.1. --host must stay the profile's
         # configured bind_host: --network host drops the -p bind_host:port:port
         # translation, so _server_args' 0.0.0.0 default would otherwise expose
         # the head API on every interface on the LAN.
-        return _run_level_args(profile, detach=True, connection="", network_host=True) \
-            + _server_args(profile, catalog, host=profile.runtime.bind_host) \
+        return (
+            _run_level_args(profile, detach=True, connection="", network_host=True)
+            + _server_args(profile, catalog, host=profile.runtime.bind_host)
             + ["--rpc", rpc_endpoints]
-    return _run_level_args(profile, detach=detach, connection=connection) \
-        + _server_args(profile, catalog)
+        )
+    return _run_level_args(
+        profile, detach=detach, connection=connection
+    ) + _server_args(profile, catalog)
 
 
-def build_rpc_endpoints(workers: list[RpcWorker],
-                        resolve: Callable[[RpcWorker], int]) -> str:
+def build_rpc_endpoints(
+    workers: list[RpcWorker], resolve: Callable[[RpcWorker], int]
+) -> str:
     """`--rpc` value: comma-joined 127.0.0.1:<port> for each worker.
 
     `resolve(worker) -> int` gives the head-facing port (local worker's own port,

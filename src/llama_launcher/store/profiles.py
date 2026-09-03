@@ -3,11 +3,16 @@ import os
 from dataclasses import asdict
 from pathlib import Path
 
-from llama_launcher.store._io import write_private
-
 from llama_launcher.core.spec import (
-    Profile, Mount, LoraRef, Runtime, RouterMember, RpcWorker, slugify,
+    LoraRef,
+    Mount,
+    Profile,
+    RouterMember,
+    RpcWorker,
+    Runtime,
+    slugify,
 )
+from llama_launcher.store._io import write_private
 
 
 def default_base_dir() -> Path:
@@ -38,7 +43,7 @@ def profile_from_dict(d: dict) -> Profile:
         model=d.get("model", ""),
         mmproj=d.get("mmproj"),
         draft_model=d.get("draft_model"),
-        loras=[LoraRef(**l) for l in d.get("loras", [])],
+        loras=[LoraRef(**item) for item in d.get("loras", [])],
         settings=dict(d.get("settings", {})),
         raw_args=d.get("raw_args", ""),
         mode=d.get("mode", "server"),
@@ -66,7 +71,7 @@ def save_profile(p: Profile, base_dir: Path) -> Path:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as f:
         f.write(data)
-    os.chmod(path, 0o600)          # tighten a pre-existing wider file too
+    os.chmod(path, 0o600)  # tighten a pre-existing wider file too
     return path
 
 
@@ -115,7 +120,7 @@ def load_config(base_dir: Path) -> dict:
     try:
         data = json.loads(path.read_text())
     except (OSError, ValueError):
-        return {}                       # a corrupt config must not crash startup
+        return {}  # a corrupt config must not crash startup
     return data if isinstance(data, dict) else {}
 
 

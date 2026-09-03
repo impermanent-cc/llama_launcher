@@ -18,8 +18,13 @@ def test_base_url_and_auth_headers():
 
 
 def test_list_adapters_parses_the_payload(monkeypatch):
-    monkeypatch.setattr(lora_api.requests, "get", lambda *a, **kw: FakeResponse(
-        payload=[{"id": 0, "path": "a.gguf", "scale": 0.5}]))
+    monkeypatch.setattr(
+        lora_api.requests,
+        "get",
+        lambda *a, **kw: FakeResponse(
+            payload=[{"id": 0, "path": "a.gguf", "scale": 0.5}]
+        ),
+    )
     got = lora_api.list_adapters("127.0.0.1", 8080, "sk-x")
     assert [(a.id, a.scale) for a in got] == [(0, 0.5)]
 
@@ -47,14 +52,16 @@ def test_list_adapters_none_when_unreachable_but_empty_when_up(monkeypatch):
     monkeypatch.setattr(lora_api.requests, "get", boom)
     assert lora_api.list_adapters("127.0.0.1", 8080, None) is None
 
-    monkeypatch.setattr(lora_api.requests, "get",
-                        lambda *a, **kw: FakeResponse(payload=[]))
+    monkeypatch.setattr(
+        lora_api.requests, "get", lambda *a, **kw: FakeResponse(payload=[])
+    )
     assert lora_api.list_adapters("127.0.0.1", 8080, None) == []
 
 
 def test_list_adapters_none_on_non_200(monkeypatch):
-    monkeypatch.setattr(lora_api.requests, "get",
-                        lambda *a, **kw: FakeResponse(status_code=401))
+    monkeypatch.setattr(
+        lora_api.requests, "get", lambda *a, **kw: FakeResponse(status_code=401)
+    )
     assert lora_api.list_adapters("127.0.0.1", 8080, None) is None
 
 
@@ -76,17 +83,23 @@ def test_set_scales_posts_every_id_with_an_explicit_scale(monkeypatch):
 
 def test_set_scales_coerces_types(monkeypatch):
     seen = {}
-    monkeypatch.setattr(lora_api.requests, "post",
-                        lambda url, headers=None, json=None, timeout=None, **kw:
-                        (seen.update(json=json), FakeResponse())[1])
+    monkeypatch.setattr(
+        lora_api.requests,
+        "post",
+        lambda url, headers=None, json=None, timeout=None, **kw: (
+            seen.update(json=json),
+            FakeResponse(),
+        )[1],
+    )
     lora_api.set_scales("h", 9, None, {0: 1})
     assert seen["json"] == [{"id": 0, "scale": 1.0}]
     assert isinstance(seen["json"][0]["scale"], float)
 
 
 def test_set_scales_false_on_failure(monkeypatch):
-    monkeypatch.setattr(lora_api.requests, "post",
-                        lambda *a, **kw: FakeResponse(status_code=500))
+    monkeypatch.setattr(
+        lora_api.requests, "post", lambda *a, **kw: FakeResponse(status_code=500)
+    )
     assert lora_api.set_scales("h", 9, None, {0: 1.0}) is False
 
     def boom(*a, **kw):

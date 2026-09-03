@@ -39,7 +39,9 @@ def _ghcr_repo(repo: str) -> str:
 
 def fetch_latest(repo: str, prefix: str, timeout: float = 10.0) -> str | None:
     api_repo = _ghcr_repo(repo)
-    token = requests.get(_TOKEN_URL.format(repo=api_repo), timeout=timeout).json()["token"]
+    token = requests.get(_TOKEN_URL.format(repo=api_repo), timeout=timeout).json()[
+        "token"
+    ]
     headers = {"Authorization": f"Bearer {token}"}
     url = _TAGS_URL.format(repo=api_repo)
     all_tags: list[str] = []

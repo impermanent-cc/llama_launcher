@@ -43,7 +43,9 @@ def test_no_em_or_en_dashes(tracked_files: list[Path], repo_root: Path) -> None:
         for line_no, line in enumerate(text.splitlines(), start=1):
             if EM_DASH in line or EN_DASH in line:
                 offenses.append(f"{path.relative_to(repo_root)}:{line_no}")
-    assert not offenses, "em or en dash found; use a comma, colon or hyphen:\n" + "\n".join(offenses)
+    assert not offenses, (
+        "em or en dash found; use a comma, colon or hyphen:\n" + "\n".join(offenses)
+    )
 
 
 def test_no_double_hyphen_prose(tracked_files: list[Path], repo_root: Path) -> None:
@@ -56,5 +58,7 @@ def test_no_double_hyphen_prose(tracked_files: list[Path], repo_root: Path) -> N
             continue
         for line_no, line in _prose_lines(path, text):
             if DOUBLE_HYPHEN_PROSE.search(line):
-                offenses.append(f"{path.relative_to(repo_root)}:{line_no}: {line.strip()[:80]}")
+                offenses.append(
+                    f"{path.relative_to(repo_root)}:{line_no}: {line.strip()[:80]}"
+                )
     assert not offenses, "doubled hyphen used as punctuation:\n" + "\n".join(offenses)

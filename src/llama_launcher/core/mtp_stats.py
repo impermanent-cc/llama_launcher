@@ -62,6 +62,7 @@ class SpecCounters:
     Unlike the log-scraped acceptance line, they can be fetched per-model in
     router mode via /metrics?model=<id>.
     """
+
     draft_tokens: float
     accepted: float
     drafts: float
@@ -85,12 +86,17 @@ def spec_counters(text: str) -> SpecCounters | None:
         return None
 
     per_pos = parse_labeled_metric(
-        text, _SPEC_PREFIX + "accepted_tokens_per_pos_total", "position")
+        text, _SPEC_PREFIX + "accepted_tokens_per_pos_total", "position"
+    )
     ordered = tuple(
         per_pos[k] for k in sorted(per_pos, key=lambda s: int(s) if s.isdigit() else 0)
     )
-    return SpecCounters(draft_tokens=draft_tokens, accepted=accepted,
-                        drafts=drafts, per_position=ordered)
+    return SpecCounters(
+        draft_tokens=draft_tokens,
+        accepted=accepted,
+        drafts=drafts,
+        per_position=ordered,
+    )
 
 
 def spec_delta(prev: SpecCounters, cur: SpecCounters) -> DraftStats | None:

@@ -1,19 +1,32 @@
 from PySide6.QtCore import (
-    QObject, QRunnable, QThread, QThreadPool, QTimer, Signal,
+    QObject,
+    QRunnable,
+    QThread,
+    QThreadPool,
+    QTimer,
+    Signal,
 )
-from PySide6.QtWidgets import QMessageBox, QInputDialog
+from PySide6.QtWidgets import QInputDialog, QMessageBox
 
-from llama_launcher.core.command_builder import build_command
 from llama_launcher.core import vram
+from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.nodes import connection_for
 from llama_launcher.core.spec import profile_port
-from llama_launcher.services import runtime, terminal, registry, model_info, gpu, native, rpc
-from llama_launcher.services import pool_preflight
-from llama_launcher.services import benchmark_store
-from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.services import api_key as api_key_store
-from llama_launcher.store.profiles import default_base_dir, load_config
+from llama_launcher.services import (
+    benchmark_store,
+    gpu,
+    model_info,
+    native,
+    pool_preflight,
+    registry,
+    rpc,
+    runtime,
+    terminal,
+)
+from llama_launcher.services.registry import split_image, variant_prefix
 from llama_launcher.store.nodes import get_node, gpu_ssh_target
+from llama_launcher.store.profiles import default_base_dir, load_config
 
 
 class _UpdateWorker(QThread):
@@ -30,7 +43,7 @@ class _UpdateWorker(QThread):
             tag = registry.fetch_latest(self._repo, self._prefix)
             if tag:
                 self.found.emit(tag)
-        except Exception as e:            # noqa: BLE001 - surfaced to the user
+        except Exception as e:  # surfaced to the user
             self.failed.emit(str(e))
 
 
@@ -39,6 +52,7 @@ class _PoolSignaller(QObject):
     pool thread and emits `done`; because the signaller lives on the UI thread,
     Qt queues the emit and the connected slot runs on the UI thread -- safe for
     QMessageBox / update_status."""
+
     done = Signal(object)
 
 
@@ -48,6 +62,7 @@ class _PoolWorker(QRunnable):
     (not a persistent QThread) sidesteps the C++-object-deleted-mid-run abort a
     long-lived worker risks on window teardown -- same reason MonitorController
     gathers on the pool rather than a persistent thread."""
+
     def __init__(self, work, signaller):
         super().__init__()
         self._work = work
@@ -56,7 +71,7 @@ class _PoolWorker(QRunnable):
     def run(self):
         try:
             res = self._work()
-        except Exception as e:            # noqa: BLE001 - worker must never raise
+        except Exception as e:  # worker must never raise
             res = rpc.PoolResult(False, str(e))
         try:
             self._signaller.done.emit(res)
@@ -101,6 +116,7 @@ class LaunchController:
         # only created when the user hasn't opted out via config.
         self._update_timer = None
         from llama_launcher.ui.main_window import base_dir
+
         if load_config(base_dir()).get("update_check", True):
             self._update_timer = QTimer(self.window)
             self._update_timer.setSingleShot(True)
@@ -118,11 +134,12 @@ class LaunchController:
             self._update_timer.stop()
 
         from PySide6.QtCore import QCoreApplication
+
         for _attr in ("_fetch_worker", "_update_worker"):
             w = getattr(self, _attr, None)
             if w is None or not w.isRunning():
                 continue
-            for _ in range(100):            # ~2s ceiling
+            for _ in range(100):  # ~2s ceiling
                 if w.wait(20):
                     break
                 QCoreApplication.processEvents()
@@ -158,11 +175,14 @@ class LaunchController:
             # registry entry, invisible and unstoppable from the UI.
             live = native.list_native_instances(default_base_dir())
             name = native.native_name(p.name)
-            if any(row.get("name") == name or row.get("profile") == p.name
-                   for row in live):
+            if any(
+                row.get("name") == name or row.get("profile") == p.name for row in live
+            ):
                 self._report_launch_error(
                     f"A native server for profile '{p.name}' is already "
-                    f"running. Stop it first.", show_dialog=True)
+                    f"running. Stop it first.",
+                    show_dialog=True,
+                )
                 return
 
             self.window.monitor_panel.reset()
@@ -170,10 +190,13 @@ class LaunchController:
             self.window.monitor_panel.set_endpoints(
                 profile_port(p),
                 bool(p.settings.get("embeddings")),
-                bool(p.settings.get("reranking")))
+                bool(p.settings.get("reranking")),
+            )
             from datetime import datetime
-            res = native.launch_native(p, default_base_dir(),
-                                       now_iso=datetime.now().isoformat())
+
+            res = native.launch_native(
+                p, default_base_dir(), now_iso=datetime.now().isoformat()
+            )
             if not res.ok:
                 self._report_launch_error(res.error, show_dialog=True)
             else:
@@ -187,11 +210,17 @@ class LaunchController:
             # `run` collides on the still-live `llama-<slug>-rpc0` container
             # name and fails -- leaving a healthy pool degraded with a
             # confusing error instead of a clean refusal.
-            if runtime.container_state(self.window._container_name(),
-                                       p.runtime.binary, connection="") == "running":
+            if (
+                runtime.container_state(
+                    self.window._container_name(), p.runtime.binary, connection=""
+                )
+                == "running"
+            ):
                 self._report_launch_error(
                     f"An RPC pool for profile '{p.name}' is already "
-                    f"running. Stop it before relaunching.", show_dialog=True)
+                    f"running. Stop it before relaunching.",
+                    show_dialog=True,
+                )
                 return
             if p.model:
                 self._preflight_pool_fit(p)
@@ -202,18 +231,29 @@ class LaunchController:
         if p.mode == "router":
             router_host_dir, warnings = self.window.prepare_router_files()
             if warnings and not self._warn_and_confirm(
-                    "Preset warnings", "\n".join(warnings)):
+                "Preset warnings", "\n".join(warnings)
+            ):
                 return
-            argv = build_command(p, router_host_dir=router_host_dir, connection=connection)
+            argv = build_command(
+                p, router_host_dir=router_host_dir, connection=connection
+            )
             # Relaunching over a LIVE router would drop a resident model and any
             # in-flight harness requests, so confirm before tearing it down.
-            if runtime.container_state(self.window._container_name(),
-                                       p.runtime.binary, connection=connection) == "running":
+            if (
+                runtime.container_state(
+                    self.window._container_name(),
+                    p.runtime.binary,
+                    connection=connection,
+                )
+                == "running"
+            ):
                 answer = QMessageBox.question(
-                    self.window, "Router already running",
+                    self.window,
+                    "Router already running",
                     "This router is already running. Relaunching stops it, "
                     "unloading any resident model and dropping in-flight "
-                    "requests. Continue?")
+                    "requests. Continue?",
+                )
                 if answer != QMessageBox.Yes:
                     return
 
@@ -224,21 +264,28 @@ class LaunchController:
             self.window.monitor_panel.reset()
             self.window.benchmark_panel.reset()
             self.window.benchmark_panel.set_benchmark_history(
-                benchmark_store.load(default_base_dir(), p.name))
+                benchmark_store.load(default_base_dir(), p.name)
+            )
             self.window._monitor._spec_prev = None
             self.window._monitor._decode_prev = None
             self.window._monitor._prompt_prev = None
             self.window._monitor._props = None
             self.window._monitor._props_model = None
             self._spawn_async(
-                runtime.rm_argv(self.window._container_name(), p.runtime.binary,
-                                connection=connection),
+                runtime.rm_argv(
+                    self.window._container_name(),
+                    p.runtime.binary,
+                    connection=connection,
+                ),
                 on_done=lambda: self._spawn_async(
-                    argv, on_done=self.window._monitor.update_status,
+                    argv,
+                    on_done=self.window._monitor.update_status,
                     # Detached means no terminal, so a bad image ref or a CDI
                     # failure would otherwise produce nothing but a status label
                     # stuck on "stopped".
-                    on_error=self._report_launch_error))
+                    on_error=self._report_launch_error,
+                ),
+            )
             self.window.refresh_router_panel_header()
             return
 
@@ -248,7 +295,8 @@ class LaunchController:
         self.window.monitor_panel.reset()
         self.window.benchmark_panel.reset()
         self.window.benchmark_panel.set_benchmark_history(
-            benchmark_store.load(default_base_dir(), p.name))
+            benchmark_store.load(default_base_dir(), p.name)
+        )
         self.window.monitor_panel.set_endpoints(
             profile_port(p),
             bool(p.settings.get("embeddings")),
@@ -263,12 +311,19 @@ class LaunchController:
             # at launch time, so a later profile/mode switch before the error
             # fires can't change it.
             self._spawn_async(
-                runtime.rm_argv(self.window._container_name(), p.runtime.binary,
-                                connection=connection),
+                runtime.rm_argv(
+                    self.window._container_name(),
+                    p.runtime.binary,
+                    connection=connection,
+                ),
                 on_done=lambda: self._spawn_async(
-                    argv, on_done=self.window._monitor.update_status,
+                    argv,
+                    on_done=self.window._monitor.update_status,
                     on_error=lambda e=None: self._report_launch_error(
-                        e, show_dialog=True)))
+                        e, show_dialog=True
+                    ),
+                ),
+            )
         else:
             argv = build_command(p, connection=connection)
             # A `terminal` config value overrides detection; otherwise auto-detect
@@ -300,20 +355,22 @@ class LaunchController:
         def work():
             try:
                 donations = pool_preflight.gather_donations(
-                    p, base,
+                    p,
+                    base,
                     gpus=pool_preflight.default_gpus_reader(base),
-                    ram=pool_preflight.default_ram_reader(base))
+                    ram=pool_preflight.default_ram_reader(base),
+                )
                 fit = vram.pooled_fit(estimate_bytes, donations)
                 if fit.fits:
                     return None
                 return pool_preflight.headline(estimate_bytes, donations)
-            except Exception:            # noqa: BLE001 - fail-open
+            except Exception:  # fail-open
                 return None
 
         def done(headline):
             self._fit_gate_inflight = False
             if headline and not self._warn_and_confirm("Pool fit", headline):
-                self.window._monitor.update_status()   # restore idle status text
+                self.window._monitor.update_status()  # restore idle status text
                 return
             self._launch_pool(p)
 
@@ -358,7 +415,7 @@ class LaunchController:
         # a worker still blocked on a slow/unreachable node past the drain ceiling.
         signaller = _PoolSignaller()
         signaller.done.connect(on_done)
-        self._pool_signaller = signaller     # keep alive until the emit lands
+        self._pool_signaller = signaller  # keep alive until the emit lands
         QThreadPool.globalInstance().start(_PoolWorker(work, signaller))
 
     def _spawn_async(self, argv: list[str], on_done=None, on_error=None):
@@ -371,17 +428,25 @@ class LaunchController:
         began would report nothing whatsoever.
         """
         from PySide6.QtCore import QProcess
+
         proc = QProcess(self.window)
         if on_done is not None:
             proc.finished.connect(lambda *_: on_done())
         if on_error is not None:
+
             def _finished(code, _status):
                 if code != 0:
-                    err = bytes(proc.readAllStandardError()).decode(errors="replace").strip()
+                    err = (
+                        bytes(proc.readAllStandardError())
+                        .decode(errors="replace")
+                        .strip()
+                    )
                     on_error(err or f"{argv[0]} exited {code}")
+
             proc.finished.connect(_finished)
             proc.errorOccurred.connect(
-                lambda _e: on_error(f"could not run {argv[0]}: {proc.errorString()}"))
+                lambda _e: on_error(f"could not run {argv[0]}: {proc.errorString()}")
+            )
         proc.start(argv[0], argv[1:])
         return proc
 
@@ -396,7 +461,9 @@ class LaunchController:
         self._pool_inflight = True
         self.window.status_label.setText("\u25cf stopping pool\u2026")
         base = self.window.base_dir()
-        self._run_pool_async(lambda: rpc.stop_pool(profile, base), self._on_pool_stopped)
+        self._run_pool_async(
+            lambda: rpc.stop_pool(profile, base), self._on_pool_stopped
+        )
         return True
 
     def on_stop(self):
@@ -411,17 +478,27 @@ class LaunchController:
         self.window._monitor._stop_log_follower()
         connection = self._connection_for_profile(p)
         self.window.status_label.setText("\u25cf stopping\u2026")
-        argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary,
-                                 timeout=p.runtime.stop_timeout, connection=connection)
-        self._stop_proc = self._spawn_async(argv, on_done=self.window._monitor.update_status)
+        argv = runtime.stop_argv(
+            self.window._container_name(),
+            p.runtime.binary,
+            timeout=p.runtime.stop_timeout,
+            connection=connection,
+        )
+        self._stop_proc = self._spawn_async(
+            argv, on_done=self.window._monitor.update_status
+        )
 
     def on_restart(self):
         self.window._monitor._stop_log_follower()
         p = self.window._configure_panel.current_profile()
         connection = self._connection_for_profile(p)
         self.window.status_label.setText("\u25cf restarting\u2026")
-        argv = runtime.stop_argv(self.window._container_name(), p.runtime.binary,
-                                 timeout=p.runtime.stop_timeout, connection=connection)
+        argv = runtime.stop_argv(
+            self.window._container_name(),
+            p.runtime.binary,
+            timeout=p.runtime.stop_timeout,
+            connection=connection,
+        )
         # Launch only after the stop completes, so the new container's --name/port
         # don't collide with the one being torn down.
         self._stop_proc = self._spawn_async(argv, on_done=self.on_launch)
@@ -437,8 +514,12 @@ class LaunchController:
         when the user already suspects it won't fit, they shouldn't have to
         watch it OOM before trying a different configuration."""
         answer = QMessageBox.warning(
-            self.window, title, text + "\n\nLaunch anyway?",
-            QMessageBox.Abort | QMessageBox.Ignore, QMessageBox.Abort)
+            self.window,
+            title,
+            text + "\n\nLaunch anyway?",
+            QMessageBox.Abort | QMessageBox.Ignore,
+            QMessageBox.Abort,
+        )
         return answer == QMessageBox.Ignore
 
     def _validate_or_warn(self) -> bool:
@@ -450,41 +531,60 @@ class LaunchController:
         issues = self.window._configure_panel.router_issues()
         errors = [i for i in issues if i.level == "error"]
         if errors:
-            QMessageBox.critical(self.window, "Cannot launch",
-                                 "\n".join(i.message for i in errors))
+            QMessageBox.critical(
+                self.window, "Cannot launch", "\n".join(i.message for i in errors)
+            )
             return False
         warns = [i for i in issues if i.level == "warning"]
         if warns:
-            return self._warn_and_confirm("Warnings", "\n".join(i.message for i in warns))
+            return self._warn_and_confirm(
+                "Warnings", "\n".join(i.message for i in warns)
+            )
         return True
 
     def vram_check(self) -> str | None:
         p = self.window._configure_panel.current_profile()
-        meta, weights, _caps = model_info.inspect_model(p.model, self.window._configure_panel.mounts_panel.mounts()) if p.model else (None, None, None)
+        meta, weights, _caps = (
+            model_info.inspect_model(
+                p.model, self.window._configure_panel.mounts_panel.mounts()
+            )
+            if p.model
+            else (None, None, None)
+        )
         # Judge against the GPUs of the node the profile will LAUNCH on -- a
         # remote-node profile checked against the local cards gets a wrong answer
         # in both directions.
         gpus = gpu.query_gpus(gpu_ssh_target(self.window.base_dir(), p.runtime.node))
         mib = 1024 * 1024
-        s = vram.fit_summary(meta, weights, settings=p.settings,
-                             free_bytes_per_gpu=[g.mem_free_mib * mib for g in gpus])
+        s = vram.fit_summary(
+            meta,
+            weights,
+            settings=p.settings,
+            free_bytes_per_gpu=[g.mem_free_mib * mib for g in gpus],
+        )
         if s is None or s.fits:
             return None
-        gib = 1024 ** 3
+        gib = 1024**3
         # Show the per-GPU breakdown when the budget spans multiple cards, so the
         # "free" number is transparent (e.g. "14.7 + 7.3 = 22.0 GiB across 2 GPUs").
         if len(s.free_per_gpu) > 1 and p.settings.get("split-mode", "layer") != "none":
-            parts = " + ".join(f"{b/gib:.1f}" for b in s.free_per_gpu)
-            free_txt = (f"~{s.free_bytes/gib:.1f} GiB ({parts} across "
-                        f"{len(s.free_per_gpu)} GPUs)")
+            parts = " + ".join(f"{b / gib:.1f}" for b in s.free_per_gpu)
+            free_txt = (
+                f"~{s.free_bytes / gib:.1f} GiB ({parts} across "
+                f"{len(s.free_per_gpu)} GPUs)"
+            )
         else:
-            free_txt = f"~{s.free_bytes/gib:.1f} GiB"
-        return (f"Estimated VRAM need ~{s.est_bytes/gib:.1f} GiB exceeds free "
-                f"{free_txt} by ~{-s.margin/gib:.1f} GiB. It may not fit; "
-                f"consider quantized KV cache (-ctk/-ctv q8_0) or a higher --n-cpu-moe. "
-                f"(Estimate is conservative; --n-cpu-moe/-ngl reduce actual GPU use.)")
+            free_txt = f"~{s.free_bytes / gib:.1f} GiB"
+        return (
+            f"Estimated VRAM need ~{s.est_bytes / gib:.1f} GiB exceeds free "
+            f"{free_txt} by ~{-s.margin / gib:.1f} GiB. It may not fit; "
+            f"consider quantized KV cache (-ctk/-ctv q8_0) or a higher --n-cpu-moe. "
+            f"(Estimate is conservative; --n-cpu-moe/-ngl reduce actual GPU use.)"
+        )
 
-    def _report_launch_error(self, text: str = None, *, show_dialog: bool = False) -> None:
+    def _report_launch_error(
+        self, text: str | None = None, *, show_dialog: bool = False
+    ) -> None:
         """Show why a detached launch -- router or server -- failed to start.
         Routed to the status banners (non-modal: this fires from a QProcess
         signal, which tests drive); a detached SERVER launch also pops a
@@ -498,8 +598,9 @@ class LaunchController:
         or flipped the mode combo -- current_profile() at that moment would
         no longer describe the launch that actually failed."""
         self.window.status_label.setText("\u25cf failed to start")
-        reason = (f"launch failed: {text.splitlines()[-1][:200]}"
-                  if text else "launch failed")
+        reason = (
+            f"launch failed: {text.splitlines()[-1][:200]}" if text else "launch failed"
+        )
         self.window._set_router_error(reason)
         if show_dialog:
             QMessageBox.critical(self.window, "Launch failed", reason)
@@ -514,9 +615,11 @@ class LaunchController:
         repo, tag = split_image(self.window._configure_panel.image_edit.text())
         if not repo:
             QMessageBox.information(
-                self.window, "No image",
+                self.window,
+                "No image",
                 "Set or Detect an image first. Fetch latest looks up the newest "
-                "build for the image's repository.")
+                "build for the image's repository.",
+            )
             return
         prefix = variant_prefix(tag) if tag else "server-cuda12"
         self._fetch_repo = repo
@@ -527,7 +630,7 @@ class LaunchController:
         worker = _UpdateWorker(repo, prefix, parent=self.window)
         worker.found.connect(self._on_fetch_found)
         worker.failed.connect(self._on_fetch_failed)
-        worker.finished.connect(self._on_fetch_finished)   # QThread built-in
+        worker.finished.connect(self._on_fetch_finished)  # QThread built-in
         self._fetch_worker = worker
         worker.start()
 
@@ -536,14 +639,17 @@ class LaunchController:
         image = f"{self._fetch_repo}:{tag}"
         self.window._configure_panel.image_edit.setText(image)
         QMessageBox.information(
-            self.window, "Latest build",
+            self.window,
+            "Latest build",
             f"Image set to {image}.\n\nThis only updates the tag; the build is NOT "
-            f"downloaded. Pull it with:\n  podman pull {image}\n(or docker pull).")
+            f"downloaded. Pull it with:\n  podman pull {image}\n(or docker pull).",
+        )
 
     def _on_fetch_failed(self, msg: str) -> None:
         self._fetch_got_result = True
         QMessageBox.warning(
-            self.window, "Fetch failed", f"Couldn't fetch the latest build:\n{msg}")
+            self.window, "Fetch failed", f"Couldn't fetch the latest build:\n{msg}"
+        )
 
     def _on_fetch_finished(self) -> None:
         self.window._configure_panel.fetch_btn.setEnabled(True)
@@ -551,26 +657,32 @@ class LaunchController:
         self.window._configure_panel.update_badge.setEnabled(True)
         if not self._fetch_got_result:
             QMessageBox.information(
-                self.window, "Latest build", "No newer build found for this image.")
+                self.window, "Latest build", "No newer build found for this image."
+            )
 
     def detect_image(self):
         binary = self.window._configure_panel.binary_combo.currentText()
         engine = self.window._configure_panel.engine_combo.currentData() or "llama.cpp"
         images = runtime.list_local_images(binary, engine)
         if not images:
-            example = ("ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
-                       if engine == "ik_llama.cpp"
-                       else "ghcr.io/ggml-org/llama.cpp:server")
+            example = (
+                "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
+                if engine == "ik_llama.cpp"
+                else "ghcr.io/ggml-org/llama.cpp:server"
+            )
             QMessageBox.information(
-                self.window, "Detect image",
+                self.window,
+                "Detect image",
                 f"No local {engine} images found for '{binary}'.\n"
-                f"Pull one (e.g. {binary} pull {example}) or type the image yourself.")
+                f"Pull one (e.g. {binary} pull {example}) or type the image yourself.",
+            )
             return
         if len(images) == 1:
             self.window._configure_panel.image_edit.setText(images[0])
             return
         choice, ok = QInputDialog.getItem(
-            self.window, "Detect image", f"Local {engine} images:", images, 0, False)
+            self.window, "Detect image", f"Local {engine} images:", images, 0, False
+        )
         if ok and choice:
             self.window._configure_panel.image_edit.setText(choice)
 
@@ -579,12 +691,13 @@ class LaunchController:
             return
         images = runtime.list_local_images(
             self.window._configure_panel.binary_combo.currentText(),
-            self.window._configure_panel.engine_combo.currentData() or "llama.cpp")
+            self.window._configure_panel.engine_combo.currentData() or "llama.cpp",
+        )
         if len(images) == 1:
             self.window._configure_panel.image_edit.setText(images[0])
 
     def check_for_update(self, tags: list[str]) -> str | None:
-        repo, tag = split_image(self.window._configure_panel.image_edit.text())
+        _repo, tag = split_image(self.window._configure_panel.image_edit.text())
         if not tag:
             return None
         prefix = variant_prefix(tag)
@@ -604,7 +717,9 @@ class LaunchController:
             if latest != current_tag:
                 m = registry._BUILD_RE.match(latest)
                 build_id = f"b{m.group('num')}" if m else latest
-                self.window._configure_panel.update_badge.setText(f"newer build {build_id} available")
+                self.window._configure_panel.update_badge.setText(
+                    f"newer build {build_id} available"
+                )
                 self.window._configure_panel.update_badge.setVisible(True)
 
         worker = _UpdateWorker(repo, prefix, parent=self.window)

@@ -1,7 +1,12 @@
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QHBoxLayout, QLabel, QPushButton, QTableWidget, QTableWidgetItem,
-    QVBoxLayout, QWidget,
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from llama_launcher.ui.widgets.info_button import InfoButton
@@ -46,7 +51,7 @@ class RouterModelsTable(QWidget):
         # keeps sizing itself to content.
         set_resizable_columns(self.table, (170, 110), content_cols=(2,))
         self.table.verticalHeader().setVisible(False)
-        self.table.setMaximumHeight(140)   # ~3-4 rows, own scrollbar past that
+        self.table.setMaximumHeight(140)  # ~3-4 rows, own scrollbar past that
         root.addWidget(self.table)
 
     def set_models(self, models: list) -> None:
@@ -63,10 +68,12 @@ class RouterModelsTable(QWidget):
 
             load_btn = QPushButton("Load")
             load_btn.clicked.connect(
-                lambda _checked=False, mid=model.id: self.load_requested.emit(mid))
+                lambda _checked=False, mid=model.id: self.load_requested.emit(mid)
+            )
             unload_btn = QPushButton("Unload")
             unload_btn.clicked.connect(
-                lambda _checked=False, mid=model.id: self.unload_requested.emit(mid))
+                lambda _checked=False, mid=model.id: self.unload_requested.emit(mid)
+            )
 
             load_btn.setEnabled(model.status in ("unloaded", "sleeping"))
             unload_btn.setEnabled(model.status in ("loaded", "sleeping", "loading"))

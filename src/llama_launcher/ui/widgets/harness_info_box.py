@@ -11,7 +11,7 @@ class HarnessInfoBox(QWidget):
         root.addWidget(QLabel("Harness setup"))
         self.harness_text = QPlainTextEdit()
         self.harness_text.setReadOnly(True)
-        self.harness_text.setMaximumHeight(90)   # ~3-4 lines
+        self.harness_text.setMaximumHeight(90)  # ~3-4 lines
         root.addWidget(self.harness_text)
 
     def set_endpoint(self, base_url: str, model_ids: list) -> None:

@@ -4,8 +4,9 @@ from llama_launcher.core.router_events import RouterEvent, parse_sse_event
 def test_parses_model_status_event():
     block = 'data: {"model": "qwen", "event": "model_status", "data": {"status": "loading"}}'
     ev = parse_sse_event(block)
-    assert ev == RouterEvent(model="qwen", event="model_status",
-                             data={"status": "loading"})
+    assert ev == RouterEvent(
+        model="qwen", event="model_status", data={"status": "loading"}
+    )
 
 
 def test_parses_multiline_data_block():

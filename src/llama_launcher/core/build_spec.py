@@ -1,30 +1,30 @@
-from dataclasses import dataclass, field, fields, asdict
+from dataclasses import asdict, dataclass, field, fields
 
 
 @dataclass
 class BuildConfig:
     name: str = ""
-    engine: str = "llama.cpp"        # "llama.cpp" | "ik_llama.cpp"
-    target: str = "native"           # "native" | "container"
-    git_ref: str = ""                # "" = engine's default branch
-    source_dir: str = ""             # native target: user's checkout
-    builder_image: str = ""          # container target
+    engine: str = "llama.cpp"  # "llama.cpp" | "ik_llama.cpp"
+    target: str = "native"  # "native" | "container"
+    git_ref: str = ""  # "" = engine's default branch
+    source_dir: str = ""  # native target: user's checkout
+    builder_image: str = ""  # container target
     runtime_image: str = ""
     tag_override: str = ""
-    options: dict = field(default_factory=dict)   # non-default catalog values
-    raw_defines: str = ""            # extra -D defines, raw-args-style escape hatch
+    options: dict = field(default_factory=dict)  # non-default catalog values
+    raw_defines: str = ""  # extra -D defines, raw-args-style escape hatch
 
 
 @dataclass
 class BuildOutput:
     id: str
-    kind: str                        # "tag" | "binary"
-    identifier: str                  # image tag, or absolute binary path
+    kind: str  # "tag" | "binary"
+    identifier: str  # image tag, or absolute binary path
     config_name: str
     engine: str
     git_ref: str
     options: dict
-    created: str                     # ISO date
+    created: str  # ISO date
     notes: str = ""
 
 

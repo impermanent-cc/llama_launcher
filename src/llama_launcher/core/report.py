@@ -24,8 +24,8 @@ def redact_secrets(text: str, known=None) -> str:
     text = _REDACTIONS[0].sub(r"\1***", text)
     text = _REDACTIONS[1].sub(r"\1***\3", text)
     text = _REDACTIONS[2].sub(r"\1***", text)
-    text = _SK_TOKEN.sub("***", text)      # same marker as the rules above
-    for secret in (known or ()):
+    text = _SK_TOKEN.sub("***", text)  # same marker as the rules above
+    for secret in known or ():
         if secret and secret.strip():
             text = text.replace(secret, "***")
     return text
@@ -37,11 +37,21 @@ def build_report(data: dict, sections: dict) -> str:
         lines += [f"_Generated: {data['generated_at']}_", ""]
 
     if sections.get("command"):
-        lines += ["## Command & profile", "",
-                  "```", redact_secrets(data.get("command", "")), "```", "",
-                  "<details><summary>Profile</summary>", "",
-                  "```json", redact_secrets(data.get("profile", "")), "```",
-                  "</details>", ""]
+        lines += [
+            "## Command & profile",
+            "",
+            "```",
+            redact_secrets(data.get("command", "")),
+            "```",
+            "",
+            "<details><summary>Profile</summary>",
+            "",
+            "```json",
+            redact_secrets(data.get("profile", "")),
+            "```",
+            "</details>",
+            "",
+        ]
     if sections.get("validation"):
         lines += ["## Validation & status", ""]
         for v in data.get("validation", []) or ["(none)"]:
@@ -49,13 +59,25 @@ def build_report(data: dict, sections: dict) -> str:
         hist = " \u2192 ".join(data.get("status_history", []))
         lines += ["", f"Status history: {hist}", ""]
     if sections.get("runtime"):
-        lines += ["## Runtime / GPU / host", "",
-                  "```", data.get("runtime", ""), "```", ""]
+        lines += [
+            "## Runtime / GPU / host",
+            "",
+            "```",
+            data.get("runtime", ""),
+            "```",
+            "",
+        ]
     if sections.get("metrics"):
-        lines += ["## Metrics", "",
-                  "```", data.get("metrics", ""), "```", ""]
+        lines += ["## Metrics", "", "```", data.get("metrics", ""), "```", ""]
     if sections.get("logs"):
-        lines += ["## Image & recent logs", "",
-                  f"Image: `{data.get('image', '')}`", "",
-                  "```", redact_secrets(data.get("logs", "")), "```", ""]
+        lines += [
+            "## Image & recent logs",
+            "",
+            f"Image: `{data.get('image', '')}`",
+            "",
+            "```",
+            redact_secrets(data.get("logs", "")),
+            "```",
+            "",
+        ]
     return "\n".join(lines)

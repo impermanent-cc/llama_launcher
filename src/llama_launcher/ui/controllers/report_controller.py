@@ -1,17 +1,17 @@
+import datetime
 import os
 import shlex
 import subprocess
-import datetime
 from pathlib import Path
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
-from llama_launcher.core.spec import Profile, profile_port
-from llama_launcher.core.validation import validate, dial_host
-from llama_launcher.store.profiles import profile_to_dict, load_config, save_config
-from llama_launcher.services import runtime, gpu, metrics, native
-from llama_launcher.services import api_key as api_key_store
 from llama_launcher.core import report as report_mod
+from llama_launcher.core.spec import Profile, profile_port
+from llama_launcher.core.validation import dial_host, validate
+from llama_launcher.services import api_key as api_key_store
+from llama_launcher.services import gpu, metrics, native, runtime
+from llama_launcher.store.profiles import load_config, profile_to_dict, save_config
 from llama_launcher.ui.dialogs.report_dialog import ReportDialog
 
 
@@ -40,8 +40,12 @@ class ReportController:
         self.window = window
 
     def _on_export_sh(self):
-        path, _ = QFileDialog.getSaveFileName(self.window, "Export shell script", "run.sh",
-                                              "Shell scripts (*.sh);;All files (*)")
+        path, _ = QFileDialog.getSaveFileName(
+            self.window,
+            "Export shell script",
+            "run.sh",
+            "Shell scripts (*.sh);;All files (*)",
+        )
         if path:
             self.export_sh(path)
 
@@ -49,10 +53,16 @@ class ReportController:
         p = self.window._configure_panel.current_profile()
         port = profile_port(p)
         try:
-            subprocess.Popen(["xdg-open", f"http://{dial_host(p.runtime.bind_host)}:{port}"],
-                             start_new_session=True)
+            subprocess.Popen(
+                ["xdg-open", f"http://{dial_host(p.runtime.bind_host)}:{port}"],
+                start_new_session=True,
+            )
         except OSError:
-            QMessageBox.warning(self.window, "Open Web UI", "Could not open browser (xdg-open not found).")
+            QMessageBox.warning(
+                self.window,
+                "Open Web UI",
+                "Could not open browser (xdg-open not found).",
+            )
 
     def export_sh(self, path: str):
         # shlex.join, not " ".join: a profile field with a space or shell
@@ -64,40 +74,61 @@ class ReportController:
         os.chmod(path, 0o700)
 
     def gather_report_data(self) -> dict:
-        import platform, json as _json
+        import json as _json
+        import platform
+
         p = self.window._configure_panel.current_profile()
         cmd = " ".join(self.window._configure_panel.build_current_command(p))
         # Pass the router context, or the report claims a healthy router has no
         # members and is exposed without a key -- in the one artifact users
         # paste when asking for help.
-        issues = validate(p, binary_found=runtime.binary_available(p.runtime.binary),
-                          members=self.window._configure_panel.member_pairs(),
-                          api_key_present=bool(
-                              api_key_store.resolve_api_key(self.window.router_base_dir(), p))
-                          if p.mode == "router" else False,
-                          native_binary_ok=native.native_binary_ok_for(p))
+        issues = validate(
+            p,
+            binary_found=runtime.binary_available(p.runtime.binary),
+            members=self.window._configure_panel.member_pairs(),
+            api_key_present=bool(
+                api_key_store.resolve_api_key(self.window.router_base_dir(), p)
+            )
+            if p.mode == "router"
+            else False,
+            native_binary_ok=native.native_binary_ok_for(p),
+        )
         gpus = gpu.query_gpus()
-        gpu_txt = "\n".join(f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, "
-                            f"util {g.util_pct}%, {g.temp_c}C" for g in gpus) or "(no nvidia-smi)"
-        runtime_txt = (f"binary={p.runtime.binary} gpu_mode={p.runtime.gpu_mode}\n"
-                       f"rootless={runtime.is_rootless(p.runtime.binary)}\n"
-                       f"{gpu_txt}\nOS={platform.platform()}")
+        gpu_txt = (
+            "\n".join(
+                f"{g.name}: {g.mem_used_mib}/{g.mem_total_mib} MiB, "
+                f"util {g.util_pct}%, {g.temp_c}C"
+                for g in gpus
+            )
+            or "(no nvidia-smi)"
+        )
+        runtime_txt = (
+            f"binary={p.runtime.binary} gpu_mode={p.runtime.gpu_mode}\n"
+            f"rootless={runtime.is_rootless(p.runtime.binary)}\n"
+            f"{gpu_txt}\nOS={platform.platform()}"
+        )
         ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         # Redact the profile's own key by value too, so one containing a space or
         # lacking the sk- prefix (which the pattern rules would miss) is caught in
         # every section of the report users paste for help.
-        known = [str(p.settings.get("api-key", "")),
-                 api_key_store.resolve_api_key(self.window.router_base_dir(), p) or ""]
+        known = [
+            str(p.settings.get("api-key", "")),
+            api_key_store.resolve_api_key(self.window.router_base_dir(), p) or "",
+        ]
         return {
             "generated_at": ts,
             "command": report_mod.redact_secrets(cmd, known=known),
-            "profile": report_mod.redact_secrets(_json.dumps(profile_to_dict(p), indent=2), known=known),
+            "profile": report_mod.redact_secrets(
+                _json.dumps(profile_to_dict(p), indent=2), known=known
+            ),
             "validation": [f"[{i.level}] {i.message}" for i in issues],
             "status_history": [self.window.status_label.text()],
             "runtime": runtime_txt,
             "metrics": self._metrics_report_text(p),
             "image": p.image,
-            "logs": report_mod.redact_secrets(self.window.monitor_panel.log_view.toPlainText()[-4000:], known=known),
+            "logs": report_mod.redact_secrets(
+                self.window.monitor_panel.log_view.toPlainText()[-4000:], known=known
+            ),
         }
 
     def _metrics_report_text(self, p: Profile) -> str:
@@ -107,10 +138,13 @@ class ReportController:
         report explains why throughput is missing instead of silently omitting it.
         """
         from llama_launcher.services.metrics import kv_ratio
+
         port = profile_port(p)
         if not p.settings.get("metrics"):
-            return ("(--metrics not enabled in this profile; turn it on and relaunch "
-                    "to capture tok/s and KV-cache usage here)")
+            return (
+                "(--metrics not enabled in this profile; turn it on and relaunch "
+                "to capture tok/s and KV-cache usage here)"
+            )
         # Mirror collect_monitor_data's host/key/scope derivation: /metrics needs
         # the API key, and on a router it is per-model (?model=id) reached via the
         # router host. Without these the fetch 401s (or returns nothing) and the
@@ -124,10 +158,15 @@ class ReportController:
         m = metrics.fetch_metrics(port, model=model_scope, api_key=key, host=host)
         slots = metrics.fetch_slots(port, model=model_scope, api_key=key, host=host)
         if not m and not slots:
-            scope = " (no model currently loaded on the router)" if (
-                p.mode == "router" and model_scope is None) else ""
-            return (f"(no metrics returned from http://{host}:{port}/metrics{scope}; "
-                    "generate the report while the server is running with --metrics)")
+            scope = (
+                " (no model currently loaded on the router)"
+                if (p.mode == "router" and model_scope is None)
+                else ""
+            )
+            return (
+                f"(no metrics returned from http://{host}:{port}/metrics{scope}; "
+                "generate the report while the server is running with --metrics)"
+            )
         lines = []
         gen = m.get("llamacpp:predicted_tokens_seconds")
         if gen is not None:
@@ -146,6 +185,7 @@ class ReportController:
 
     def _save_report(self, md: str, ts: str | None = None) -> Path:
         from llama_launcher.ui.main_window import base_dir
+
         if ts is None:
             ts = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
         reports_dir = base_dir() / "reports"
@@ -156,8 +196,11 @@ class ReportController:
 
     def on_generate_report(self):
         from llama_launcher.ui.main_window import base_dir
+
         cfg = load_config(base_dir())
-        initial = cfg.get("report_sections", {s: True for s in report_mod.REPORT_SECTIONS})
+        initial = cfg.get(
+            "report_sections", {s: True for s in report_mod.REPORT_SECTIONS}
+        )
         dlg = ReportDialog(initial, self.window)
         if not dlg.exec():
             return
@@ -167,6 +210,9 @@ class ReportController:
         data = self.gather_report_data()
         md = report_mod.build_report(data, sections)
         from PySide6.QtWidgets import QApplication
+
         QApplication.clipboard().setText(md)
         saved = self._save_report(md, data.get("generated_at"))
-        QMessageBox.information(self.window, "Report saved", f"Report saved to:\n{saved}")
+        QMessageBox.information(
+            self.window, "Report saved", f"Report saved to:\n{saved}"
+        )

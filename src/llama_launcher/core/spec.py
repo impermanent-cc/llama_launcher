@@ -18,9 +18,9 @@ DEFAULT_PORT = 8080
 class Mount:
     host: str
     container: str
-    role: str = "custom"          # "model" | "workspace" | "custom"
-    mode: str = "ro"              # "ro" | "rw"
-    selinux: str | None = None    # None | "z" | "Z"
+    role: str = "custom"  # "model" | "workspace" | "custom"
+    mode: str = "ro"  # "ro" | "rw"
+    selinux: str | None = None  # None | "z" | "Z"
     workdir: bool = False
 
 
@@ -33,9 +33,9 @@ class LoraRef:
 @dataclass(frozen=True)
 class RpcWorker:
     node: str
-    device: str = "CPU"      # "CPU" | "CUDA0" | "CUDA1" | ...
-    mem_mb: int = 0          # --mem budget (0 = let rpc-server decide)
-    port: int = 50052        # rpc-server port on the worker host
+    device: str = "CPU"  # "CPU" | "CUDA0" | "CUDA1" | ...
+    mem_mb: int = 0  # --mem budget (0 = let rpc-server decide)
+    port: int = 50052  # rpc-server port on the worker host
 
 
 @dataclass
@@ -46,6 +46,7 @@ class RouterMember:
     section. `model_id` is what a harness puts in the request's "model" field;
     empty means "derive it from the profile name".
     """
+
     profile: str
     model_id: str = ""
     load_on_startup: bool = False
@@ -57,18 +58,20 @@ class RouterMember:
 
 @dataclass
 class Runtime:
-    binary: str = "podman"        # "podman" | "docker"
-    gpu_mode: str = "cdi"         # "cdi" | "gpus-all" | "none"
+    binary: str = "podman"  # "podman" | "docker"
+    gpu_mode: str = "cdi"  # "cdi" | "gpus-all" | "none"
     selinux_label_disable: bool = False
     extra_run_args: str = ""
     bind_host: str = "127.0.0.1"  # publish address; non-loopback exposes the port
-    detached: bool = False        # GUI server launch: no terminal, Monitor-driven
+    detached: bool = False  # GUI server launch: no terminal, Monitor-driven
     router_key_mode: str = "global"  # "global" (shared key) | "own" (per-profile key)
-    engine: str = "llama.cpp"     # "llama.cpp" | "ik_llama.cpp"
+    engine: str = "llama.cpp"  # "llama.cpp" | "ik_llama.cpp"
     stop_timeout: int = DEFAULT_STOP_TIMEOUT  # `podman stop -t` grace before SIGKILL
-    launch_mode: str = "container"  # "container" (podman/docker) | "native" (subprocess) | "rpc"
-    native_binary: str = ""         # abs path to a prebuilt llama-server (native mode)
-    node: str = "local"             # which registered node this profile launches on
+    launch_mode: str = (
+        "container"  # "container" (podman/docker) | "native" (subprocess) | "rpc"
+    )
+    native_binary: str = ""  # abs path to a prebuilt llama-server (native mode)
+    node: str = "local"  # which registered node this profile launches on
     rpc_workers: list[RpcWorker] = field(default_factory=list)  # RPC mode only
 
 
@@ -84,7 +87,7 @@ class Profile:
     loras: list[LoraRef] = field(default_factory=list)
     settings: dict = field(default_factory=dict)
     raw_args: str = ""
-    mode: str = "server"                                # "server" | "router"
+    mode: str = "server"  # "server" | "router"
     members: list[RouterMember] = field(default_factory=list)
 
 

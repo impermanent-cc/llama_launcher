@@ -2,8 +2,14 @@ import os
 
 from PySide6.QtCore import Signal
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QTableWidget,
-    QTableWidgetItem, QCheckBox, QFileDialog
+    QCheckBox,
+    QFileDialog,
+    QHBoxLayout,
+    QPushButton,
+    QTableWidget,
+    QTableWidgetItem,
+    QVBoxLayout,
+    QWidget,
 )
 
 from llama_launcher.core.spec import Mount
@@ -23,16 +29,19 @@ class MountsPanel(QWidget):
         layout = QVBoxLayout(self)
         self.table = QTableWidget(0, 6)
         self.table.setHorizontalHeaderLabels(
-            ["Host", "Container", "Role", "Mode", "SELinux", "Workdir"])
-        for _col, _tip in enumerate((
-            "Folder on the host, e.g. /mnt/storage/AI/Models.",
-            "Where it appears inside the container, e.g. /models. Reference model "
-            "paths by this container path.",
-            "Marks this mount's purpose (e.g. models) for the launcher's path mapping.",
-            "Mount mode: ro (read-only) or rw (read-write).",
-            "SELinux relabel flag (z/Z) for hosts that enforce SELinux.",
-            "Set this mount as the container working directory.",
-        )):
+            ["Host", "Container", "Role", "Mode", "SELinux", "Workdir"]
+        )
+        for _col, _tip in enumerate(
+            (
+                "Folder on the host, e.g. /mnt/storage/AI/Models.",
+                "Where it appears inside the container, e.g. /models. Reference model "
+                "paths by this container path.",
+                "Marks this mount's purpose (e.g. models) for the launcher's path mapping.",
+                "Mount mode: ro (read-only) or rw (read-write).",
+                "SELinux relabel flag (z/Z) for hosts that enforce SELinux.",
+                "Set this mount as the container working directory.",
+            )
+        ):
             item = self.table.horizontalHeaderItem(_col)
             if item is not None:
                 item.setToolTip(_tip)
@@ -47,7 +56,8 @@ class MountsPanel(QWidget):
         rm = QPushButton("- Remove")
         add.clicked.connect(self._add_folder)
         rm.clicked.connect(self._remove_selected)
-        row.addWidget(add); row.addWidget(rm)
+        row.addWidget(add)
+        row.addWidget(rm)
         layout.addLayout(row)
         self.table.itemChanged.connect(lambda *_: self.changed.emit())
 
@@ -58,11 +68,17 @@ class MountsPanel(QWidget):
             self.table.insertRow(r)
             self.table.setItem(r, 0, QTableWidgetItem(m.host))
             self.table.setItem(r, 1, QTableWidgetItem(m.container))
-            role = NoWheelComboBox(); role.addItems(_ROLES); role.setCurrentText(m.role)
-            mode = NoWheelComboBox(); mode.addItems(_MODES); mode.setCurrentText(m.mode)
-            selinux = NoWheelComboBox(); selinux.addItems(_SELINUX)
+            role = NoWheelComboBox()
+            role.addItems(_ROLES)
+            role.setCurrentText(m.role)
+            mode = NoWheelComboBox()
+            mode.addItems(_MODES)
+            mode.setCurrentText(m.mode)
+            selinux = NoWheelComboBox()
+            selinux.addItems(_SELINUX)
             selinux.setCurrentText(m.selinux or "")
-            workdir = QCheckBox(); workdir.setChecked(m.workdir)
+            workdir = QCheckBox()
+            workdir.setChecked(m.workdir)
             for w in (role, mode, selinux):
                 w.currentTextChanged.connect(lambda *_: self.changed.emit())
             workdir.toggled.connect(lambda *_: self.changed.emit())
@@ -79,8 +95,14 @@ class MountsPanel(QWidget):
         d = QFileDialog.getExistingDirectory(self, "Add folder")
         if not d:
             return
-        self._add_row(Mount(host=d, container="/" + os.path.basename(d.rstrip("/")),
-                            role="custom", mode="ro"))
+        self._add_row(
+            Mount(
+                host=d,
+                container="/" + os.path.basename(d.rstrip("/")),
+                role="custom",
+                mode="ro",
+            )
+        )
 
     def _remove_selected(self):
         rows = sorted({i.row() for i in self.table.selectedIndexes()}, reverse=True)
@@ -103,12 +125,16 @@ class MountsPanel(QWidget):
         for r in range(self.table.rowCount()):
             if self.table.cellWidget(r, 2) is None:
                 continue  # row still mid-construction
-            out.append(Mount(
-                host=self.table.item(r, 0).text() if self.table.item(r, 0) else "",
-                container=self.table.item(r, 1).text() if self.table.item(r, 1) else "",
-                role=self.table.cellWidget(r, 2).currentText(),
-                mode=self.table.cellWidget(r, 3).currentText(),
-                selinux=self.table.cellWidget(r, 4).currentText() or None,
-                workdir=self.table.cellWidget(r, 5).isChecked(),
-            ))
+            out.append(
+                Mount(
+                    host=self.table.item(r, 0).text() if self.table.item(r, 0) else "",
+                    container=self.table.item(r, 1).text()
+                    if self.table.item(r, 1)
+                    else "",
+                    role=self.table.cellWidget(r, 2).currentText(),
+                    mode=self.table.cellWidget(r, 3).currentText(),
+                    selinux=self.table.cellWidget(r, 4).currentText() or None,
+                    workdir=self.table.cellWidget(r, 5).isChecked(),
+                )
+            )
         return out

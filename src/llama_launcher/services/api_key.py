@@ -68,7 +68,7 @@ def _write_key(base_dir: Path, router_name: str, key: str) -> str:
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as fh:
         fh.write(key + "\n")
-    path.chmod(0o600)          # in case the file already existed with a wider mode
+    path.chmod(0o600)  # in case the file already existed with a wider mode
     return key
 
 
@@ -120,8 +120,9 @@ def write_global_key(base_dir: Path, key: str) -> str:
     """Persist the shared key 0600, creating base_dir/router 0700."""
     path = global_key_path(base_dir)
     path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    path.parent.chmod(0o700)   # in case it already existed wider (mkdir -p leaves
-                                # an intermediate dir made by router_dir() at ~0755)
+    # The directory may already exist wider: mkdir -p leaves an intermediate
+    # directory made by router_dir() at about 0755.
+    path.parent.chmod(0o700)
     fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
     with os.fdopen(fd, "w") as fh:
         fh.write(key + "\n")
@@ -158,5 +159,5 @@ def prepare_launch_key(base_dir: Path, profile: Profile) -> str:
         return ensure_api_key(base_dir, name)
     key = read_global_key(base_dir)
     if key is None:
-        return ensure_api_key(base_dir, name)   # legacy: generate + persist per-profile
+        return ensure_api_key(base_dir, name)  # legacy: generate + persist per-profile
     return set_profile_key(base_dir, name, key)

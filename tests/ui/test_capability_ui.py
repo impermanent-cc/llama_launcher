@@ -1,33 +1,69 @@
 import struct
 from pathlib import Path
-from llama_launcher.core.spec import Profile, Mount, Runtime
+
+from llama_launcher.core.spec import Mount, Profile, Runtime
 from llama_launcher.ui.main_window import MainWindow
 
 
 def _write_moe_mtp_gguf(path):
     def kv_str(k, v):
         kb, vb = k.encode(), v.encode()
-        return struct.pack("<Q", len(kb)) + kb + struct.pack("<I", 8) + struct.pack("<Q", len(vb)) + vb
+        return (
+            struct.pack("<Q", len(kb))
+            + kb
+            + struct.pack("<I", 8)
+            + struct.pack("<Q", len(vb))
+            + vb
+        )
+
     def kv_u32(k, v):
         kb = k.encode()
-        return struct.pack("<Q", len(kb)) + kb + struct.pack("<I", 4) + struct.pack("<I", v)
-    kvs = [kv_str("general.architecture", "qwen35moe"),
-           kv_u32("qwen35moe.block_count", 40),
-           kv_u32("qwen35moe.embedding_length", 2048),
-           kv_u32("qwen35moe.expert_count", 256),
-           kv_u32("qwen35moe.nextn_predict_layers", 1)]
-    blob = b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0) + struct.pack("<Q", len(kvs)) + b"".join(kvs)
+        return (
+            struct.pack("<Q", len(kb))
+            + kb
+            + struct.pack("<I", 4)
+            + struct.pack("<I", v)
+        )
+
+    kvs = [
+        kv_str("general.architecture", "qwen35moe"),
+        kv_u32("qwen35moe.block_count", 40),
+        kv_u32("qwen35moe.embedding_length", 2048),
+        kv_u32("qwen35moe.expert_count", 256),
+        kv_u32("qwen35moe.nextn_predict_layers", 1),
+    ]
+    blob = (
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", 0)
+        + struct.pack("<Q", len(kvs))
+        + b"".join(kvs)
+    )
     Path(path).write_bytes(blob)
 
 
 def _write_plain_gguf(path, arch="llama"):
     """A GGUF with no in-file MTP head (has_mtp_infile stays False), used to
     isolate the mtp_sibling suggestion branch from the in-file one."""
+
     def kv_str(k, v):
         kb, vb = k.encode(), v.encode()
-        return struct.pack("<Q", len(kb)) + kb + struct.pack("<I", 8) + struct.pack("<Q", len(vb)) + vb
+        return (
+            struct.pack("<Q", len(kb))
+            + kb
+            + struct.pack("<I", 8)
+            + struct.pack("<Q", len(vb))
+            + vb
+        )
+
     kvs = [kv_str("general.architecture", arch)]
-    blob = b"GGUF" + struct.pack("<I", 3) + struct.pack("<Q", 0) + struct.pack("<Q", len(kvs)) + b"".join(kvs)
+    blob = (
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", 0)
+        + struct.pack("<Q", len(kvs))
+        + b"".join(kvs)
+    )
     Path(path).write_bytes(blob)
 
 
@@ -35,10 +71,16 @@ def test_moe_mtp_model_marks_dots_suggested(qtbot, tmp_path):
     _write_moe_mtp_gguf(tmp_path / "m.gguf")
     w = MainWindow()
     qtbot.addWidget(w)
-    p = Profile(name="t", image="img",
-                runtime=Runtime(binary="podman", gpu_mode="cdi"),
-                mounts=[Mount(host=str(tmp_path), container="/models", role="model", mode="ro")],
-                model="/models/m.gguf", settings={"port": 8080})
+    p = Profile(
+        name="t",
+        image="img",
+        runtime=Runtime(binary="podman", gpu_mode="cdi"),
+        mounts=[
+            Mount(host=str(tmp_path), container="/models", role="model", mode="ro")
+        ],
+        model="/models/m.gguf",
+        settings={"port": 8080},
+    )
     w._configure_panel.load_profile(p)
     # in-file MTP head -> a concrete suggestion fires on spec-type, so its
     # dot is suggested and mentions MTP in the click-apply reason.
@@ -55,22 +97,33 @@ def test_moe_mtp_model_marks_dots_suggested(qtbot, tmp_path):
     # no SWA -> muted.
     swa_dot = w._configure_panel._widgets["swa-full"]._dot
     assert swa_dot.text() == "\u25cb"
-    assert "MoE" in w._configure_panel.model_meta_label.text() and "MTP" in w._configure_panel.model_meta_label.text()
+    assert (
+        "MoE" in w._configure_panel.model_meta_label.text()
+        and "MTP" in w._configure_panel.model_meta_label.text()
+    )
 
 
 def test_clicking_suggestion_dot_applies_it(qtbot, tmp_path):
     _write_moe_mtp_gguf(tmp_path / "m.gguf")
     w = MainWindow()
     qtbot.addWidget(w)
-    p = Profile(name="t", image="img",
-                runtime=Runtime(binary="podman", gpu_mode="cdi"),
-                mounts=[Mount(host=str(tmp_path), container="/models", role="model", mode="ro")],
-                model="/models/m.gguf", settings={"port": 8080, "spec-type": "none"})
+    p = Profile(
+        name="t",
+        image="img",
+        runtime=Runtime(binary="podman", gpu_mode="cdi"),
+        mounts=[
+            Mount(host=str(tmp_path), container="/models", role="model", mode="ro")
+        ],
+        model="/models/m.gguf",
+        settings={"port": 8080, "spec-type": "none"},
+    )
     w._configure_panel.load_profile(p)
     dot = w._configure_panel._widgets["spec-type"]._dot
     assert dot.text() == "\u25cf"
     dot.click()
-    assert w._configure_panel._widgets["spec-type"].value() == "draft-mtp"   # in-file MTP suggestion applied
+    assert (
+        w._configure_panel._widgets["spec-type"].value() == "draft-mtp"
+    )  # in-file MTP suggestion applied
 
 
 def test_mtp_sibling_suggestion_fans_out_to_both_dots(qtbot, tmp_path):
@@ -83,10 +136,16 @@ def test_mtp_sibling_suggestion_fans_out_to_both_dots(qtbot, tmp_path):
     (tmp_path / "m-mtp.gguf").write_bytes(b"")
     w = MainWindow()
     qtbot.addWidget(w)
-    p = Profile(name="t", image="img",
-                runtime=Runtime(binary="podman", gpu_mode="cdi"),
-                mounts=[Mount(host=str(tmp_path), container="/models", role="model", mode="ro")],
-                model="/models/m.gguf", settings={"port": 8080})
+    p = Profile(
+        name="t",
+        image="img",
+        runtime=Runtime(binary="podman", gpu_mode="cdi"),
+        mounts=[
+            Mount(host=str(tmp_path), container="/models", role="model", mode="ro")
+        ],
+        model="/models/m.gguf",
+        settings={"port": 8080},
+    )
     w._configure_panel.load_profile(p)
 
     spec_dot = w._configure_panel._widgets["spec-type"]._dot
@@ -94,9 +153,9 @@ def test_mtp_sibling_suggestion_fans_out_to_both_dots(qtbot, tmp_path):
     assert spec_dot.text() == "\u25cf"
     assert draft_dot.text() == "\u25cf"
     assert "m-mtp.gguf" in spec_dot.toolTip()
-    assert spec_dot.toolTip() == draft_dot.toolTip()   # same Suggestion.text
+    assert spec_dot.toolTip() == draft_dot.toolTip()  # same Suggestion.text
 
-    draft_dot.click()   # clicking the OTHER key's dot applies the WHOLE suggestion
+    draft_dot.click()  # clicking the OTHER key's dot applies the WHOLE suggestion
     assert w._configure_panel._widgets["spec-type"].value() == "draft-mtp"
     assert w._configure_panel.draft_model_edit.text() == "/models/m-mtp.gguf"
 
@@ -119,5 +178,6 @@ def test_tier_qss_and_chip_strip_are_gone(qtbot):
     assert not hasattr(w, "family_combo")
     assert not hasattr(w, "save_preset_btn")
     from llama_launcher.ui.widgets import setting_widgets
+
     assert not hasattr(setting_widgets, "TIER_QSS")
     assert not hasattr(setting_widgets.SettingWidget, "set_relevance")

@@ -6,12 +6,13 @@ controllers exist as separate objects on MainWindow (`w._configure_panel`,
 owns _spawn_async, and MainWindow's own teardown orchestration reaches all
 three worker-owning controllers.
 """
+
+from llama_launcher.ui.controllers.benchmark_controller import BenchmarkController
+from llama_launcher.ui.controllers.launch_controller import LaunchController
+from llama_launcher.ui.controllers.monitor_controller import MonitorController
+from llama_launcher.ui.controllers.report_controller import ReportController
 from llama_launcher.ui.main_window import MainWindow
 from llama_launcher.ui.panels.configure_panel import ConfigurePanel
-from llama_launcher.ui.controllers.monitor_controller import MonitorController
-from llama_launcher.ui.controllers.launch_controller import LaunchController
-from llama_launcher.ui.controllers.benchmark_controller import BenchmarkController
-from llama_launcher.ui.controllers.report_controller import ReportController
 
 
 def test_configure_panel_and_controllers_exist(qtbot):

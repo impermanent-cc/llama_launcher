@@ -4,6 +4,7 @@ These run the real script against fixture changelogs via the CHANGELOG override,
 so they don't break every time the repo's own CHANGELOG.md gains an entry -- with
 one exception at the bottom that deliberately checks the real file.
 """
+
 import subprocess
 from pathlib import Path
 
@@ -39,7 +40,8 @@ First release, described in prose.
 def _run(changelog: Path, *args: str) -> subprocess.CompletedProcess:
     return subprocess.run(
         [str(SCRIPT), *args],
-        capture_output=True, text=True,
+        capture_output=True,
+        text=True,
         env={"PATH": "/usr/bin:/bin", "CHANGELOG": str(changelog)},
     )
 
@@ -83,7 +85,9 @@ def test_unknown_version_fails(changelog: Path):
 
 
 def test_missing_version_argument_fails(changelog: Path):
-    r = _run(changelog, )
+    r = _run(
+        changelog,
+    )
     assert r.returncode != 0
     assert "usage:" in r.stderr
 

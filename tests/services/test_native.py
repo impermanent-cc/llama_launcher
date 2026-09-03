@@ -7,9 +7,15 @@ from llama_launcher.services import native
 
 
 def test_write_and_read_entry_round_trips(tmp_path):
-    entry = {"pid": 111, "profile": "Gen", "port": 8080, "host": "127.0.0.1",
-             "started_at": "2026-08-19T00:00:00", "binary": "/opt/llama-server",
-             "log": str(tmp_path / "native" / "gen.log")}
+    entry = {
+        "pid": 111,
+        "profile": "Gen",
+        "port": 8080,
+        "host": "127.0.0.1",
+        "started_at": "2026-08-19T00:00:00",
+        "binary": "/opt/llama-server",
+        "log": str(tmp_path / "native" / "gen.log"),
+    }
     native.write_entry(tmp_path, entry)
     got = native.read_entries(tmp_path)
     assert got == [entry]
@@ -32,6 +38,7 @@ def _await_exec(pid: int, timeout: float = 5.0) -> None:
     posix_spawn has a pid, which can precede the child's execve; the binary
     guard can only be asserted once the cmdline actually exists."""
     import time
+
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
         try:
@@ -46,6 +53,7 @@ def _await_exec(pid: int, timeout: float = 5.0) -> None:
 
 def test_is_alive_true_for_self():
     import sys
+
     # Spawn a child launched by ABSOLUTE path so its cmdline argv[0] == sys.executable,
     # matching how launch_native spawns a server by absolute native_binary path.
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
@@ -71,6 +79,7 @@ def test_is_alive_true_immediately_after_spawn():
     rarely lands inside it.
     """
     import sys
+
     for _ in range(40):
         proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
         try:
@@ -85,6 +94,7 @@ def test_is_alive_false_for_a_zombie():
     dead, so the state fallback must reject it rather than keep its entry."""
     import sys
     import time
+
     proc = subprocess.Popen([sys.executable, "-c", ""])
     try:
         deadline = time.monotonic() + 5.0
@@ -101,6 +111,7 @@ def test_proc_state_survives_a_comm_containing_spaces_and_parens(tmp_path):
     binary named 'sl (x) eep' lands spaces AND parens inside field 2 -- a naive
     split()-by-index parse reads the wrong field there."""
     import shutil
+
     src = shutil.which("sleep")
     assert src, "no sleep(1) on PATH"
     weird = tmp_path / "sl (x) eep"
@@ -108,8 +119,9 @@ def test_proc_state_survives_a_comm_containing_spaces_and_parens(tmp_path):
     proc = subprocess.Popen([str(weird), "30"])
     try:
         _await_exec(proc.pid)
-        assert Path(f"/proc/{proc.pid}/stat").read_text().count(")") > 1, \
+        assert Path(f"/proc/{proc.pid}/stat").read_text().count(")") > 1, (
             "comm did not actually embed a paren; test would prove nothing"
+        )
         assert native._proc_state(proc.pid) in ("R", "S", "D")
         assert native.is_alive(proc.pid, str(weird)) is True
     finally:
@@ -118,19 +130,33 @@ def test_proc_state_survives_a_comm_containing_spaces_and_parens(tmp_path):
 
 
 def test_proc_state_none_for_a_pid_that_cannot_exist():
-    assert native._proc_state(2 ** 31 - 1) is None
+    assert native._proc_state(2**31 - 1) is None
 
 
 def test_list_native_instances_shape_and_prune(tmp_path):
     import sys
+
     # Spawn a child launched by ABSOLUTE path so its cmdline argv[0] matches the binary.
     proc = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
     try:
-        alive = {"pid": proc.pid, "profile": "Gen", "port": 8080, "host": "127.0.0.1",
-                 "started_at": "t", "binary": sys.executable,
-                 "log": str(tmp_path / "native" / "gen.log")}
-        dead = {"pid": 999999, "profile": "Dead", "port": 8081, "host": "127.0.0.1",
-                "started_at": "t", "binary": "/opt/gone", "log": "x"}
+        alive = {
+            "pid": proc.pid,
+            "profile": "Gen",
+            "port": 8080,
+            "host": "127.0.0.1",
+            "started_at": "t",
+            "binary": sys.executable,
+            "log": str(tmp_path / "native" / "gen.log"),
+        }
+        dead = {
+            "pid": 999999,
+            "profile": "Dead",
+            "port": 8081,
+            "host": "127.0.0.1",
+            "started_at": "t",
+            "binary": "/opt/gone",
+            "log": "x",
+        }
         native.write_entry(tmp_path, alive)
         native.write_entry(tmp_path, dead)
         rows = native.list_native_instances(tmp_path)
@@ -148,13 +174,17 @@ def test_list_native_instances_shape_and_prune(tmp_path):
 
 def test_launch_native_spawns_and_registers(tmp_path, monkeypatch):
     from llama_launcher.core.spec import Profile, Runtime
+
     # Point build_command at a real, harmless long-lived process instead of a
     # llama-server: patch it to return a `sleep` argv so the smoke is hermetic.
-    monkeypatch.setattr(native, "build_command",
-                        lambda p, **k: ["sleep", "30"])
-    p = Profile(name="Gen", runtime=Runtime(launch_mode="native",
-                native_binary="sleep", bind_host="127.0.0.1"),
-                settings={"port": 8080})
+    monkeypatch.setattr(native, "build_command", lambda p, **k: ["sleep", "30"])
+    p = Profile(
+        name="Gen",
+        runtime=Runtime(
+            launch_mode="native", native_binary="sleep", bind_host="127.0.0.1"
+        ),
+        settings={"port": 8080},
+    )
     res = native.launch_native(p, tmp_path, now_iso="2026-08-19T00:00:00")
     try:
         assert res.ok and res.pid and res.name == "llama-gen"
@@ -171,9 +201,15 @@ def test_stop_native_swallows_missing_pid():
 
 
 def test_remove_native_deletes_registry_and_log(tmp_path):
-    entry = {"pid": 1, "profile": "Gen", "port": 8080, "host": "127.0.0.1",
-             "started_at": "t", "binary": "x",
-             "log": str(native.native_log_path(tmp_path, "Gen"))}
+    entry = {
+        "pid": 1,
+        "profile": "Gen",
+        "port": 8080,
+        "host": "127.0.0.1",
+        "started_at": "t",
+        "binary": "x",
+        "log": str(native.native_log_path(tmp_path, "Gen")),
+    }
     native.write_entry(tmp_path, entry)
     native.native_log_path(tmp_path, "Gen").parent.mkdir(parents=True, exist_ok=True)
     native.native_log_path(tmp_path, "Gen").write_text("log")
@@ -192,6 +228,7 @@ def test_proc_stats_none_for_missing_pid():
 
 def test_proc_stats_reports_for_self():
     import os
+
     st = native.proc_stats(os.getpid(), interval=0.0)
     assert st is not None
     assert st["mem_usage"].endswith(" MiB")
@@ -226,13 +263,16 @@ def test_native_binary_ok_for_ignores_container_profiles():
 
 
 def test_native_binary_ok_for_stats_native_profile(tmp_path):
-    missing = Profile(name="n", runtime=Runtime(launch_mode="native",
-                       native_binary="/no/such/llama-server"))
+    missing = Profile(
+        name="n",
+        runtime=Runtime(launch_mode="native", native_binary="/no/such/llama-server"),
+    )
     assert native.native_binary_ok_for(missing) is False
 
     exe = tmp_path / "llama-server"
     exe.write_text("#!/bin/sh\n")
     exe.chmod(0o755)
-    present = Profile(name="n", runtime=Runtime(launch_mode="native",
-                       native_binary=str(exe)))
+    present = Profile(
+        name="n", runtime=Runtime(launch_mode="native", native_binary=str(exe))
+    )
     assert native.native_binary_ok_for(present) is True

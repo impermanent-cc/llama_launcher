@@ -131,10 +131,11 @@ def test_tools_multiselect_all_disables_individual(qtbot):
 def test_numa_off_sentinel_is_not_set(qtbot):
     from llama_launcher.core.settings_catalog import CATALOG
     from llama_launcher.ui.widgets.setting_widgets import make_widget
+
     w = make_widget(CATALOG["numa"])
     qtbot.addWidget(w)
     w.set_value("off")
-    assert w.is_set() is False        # equals default -> not stored/emitted
+    assert w.is_set() is False  # equals default -> not stored/emitted
     w.set_value("distribute")
     assert w.is_set() is True
 
@@ -144,7 +145,7 @@ def test_set_enum_choices_extends_and_reverts(qtbot):
     qtbot.addWidget(w)
     base = list(CATALOG["cache-type-k"].enum)
 
-    w.set_enum_choices(base + ["q6_0", "q8_KV"])
+    w.set_enum_choices([*base, "q6_0", "q8_KV"])
     w.set_value("q6_0")
     assert w.value() == "q6_0"
 
@@ -162,17 +163,19 @@ def test_set_enum_choices_noop_on_non_enum(qtbot):
 
 def test_api_key_widget_is_password_masked(qtbot):
     from PySide6.QtWidgets import QLineEdit
+
     w = make_widget(CATALOG["api-key"])
     w.set_value("sk-secret")
     assert w._editor.echoMode() == QLineEdit.Password
-    assert w.value() == "sk-secret"          # value still readable programmatically
+    assert w.value() == "sk-secret"  # value still readable programmatically
 
 
 def test_bool_widget_initializes_to_setting_default(qtbot):
     # The build catalog has default-True bools; an unchecked box for a
     # default-ON option would read as "explicitly OFF".
     from llama_launcher.core.build_catalog import BUILD_CATALOG
-    w = make_widget(BUILD_CATALOG["cuda-fa"])   # GGML_CUDA_FA, default True
+
+    w = make_widget(BUILD_CATALOG["cuda-fa"])  # GGML_CUDA_FA, default True
     qtbot.addWidget(w)
     assert w.value() is True
     assert w.is_set() is False
@@ -186,6 +189,7 @@ def test_string_widget_initializes_to_setting_default(qtbot):
     # wildcard-CORS warning unfireable from UI-saved profiles.
     from llama_launcher.core.build_catalog import BUILD_CATALOG
     from llama_launcher.core.settings_catalog import CATALOG
+
     for setting in (BUILD_CATALOG["blas-vendor"], CATALOG["cors-origins"]):
         w = make_widget(setting)
         qtbot.addWidget(w)

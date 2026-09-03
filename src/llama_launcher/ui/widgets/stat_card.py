@@ -1,5 +1,5 @@
 from PySide6.QtCore import Signal
-from PySide6.QtWidgets import QFrame, QVBoxLayout, QHBoxLayout, QLabel, QPushButton
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout
 
 _DOT = {"ready": "\u25cf", "starting": "\u25d0", "loading": "\u25d0"}
 
@@ -14,6 +14,7 @@ class StatCard(QFrame):
     stopped -> \u2715 emits `remove_requested` (podman rm a dead container). Reused
     across ticks -- the owning panel calls update_row() to refresh labels in place.
     """
+
     selected = Signal(str)
     stop_requested = Signal(str)
     remove_requested = Signal(str)
@@ -24,7 +25,7 @@ class StatCard(QFrame):
         self._running = True
         self.setFrameShape(QFrame.StyledPanel)
         self.setMinimumWidth(180)
-        self._selected = None       # sentinel: forces the initial paint below
+        self._selected = None  # sentinel: forces the initial paint below
         self.set_selected(False)
         v = QVBoxLayout(self)
         top = QHBoxLayout()
@@ -50,7 +51,9 @@ class StatCard(QFrame):
         return self._stop_btn
 
     def _on_action(self) -> None:
-        (self.stop_requested if self._running else self.remove_requested).emit(self._name)
+        (self.stop_requested if self._running else self.remove_requested).emit(
+            self._name
+        )
 
     def headline_text(self) -> str:
         return self._headline.text()
@@ -68,7 +71,9 @@ class StatCard(QFrame):
         running = row.get("running", True)
         self._running = running
         self._stop_btn.setText("\u25a0" if running else "\u2715")
-        self._stop_btn.setToolTip("Stop this instance" if running else "Remove this stopped container")
+        self._stop_btn.setToolTip(
+            "Stop this instance" if running else "Remove this stopped container"
+        )
         port = row.get("port")
         title = row.get("profile") or self._name
         title = f"{title}  :{port}" if port else title
@@ -84,20 +89,26 @@ class StatCard(QFrame):
             headline = "ready" if health == "ready" else health
         else:
             tok = row.get("tok_s")
-            headline = f"{tok:.0f} tok/s" if tok else ("ready" if health == "ready" else health)
+            headline = (
+                f"{tok:.0f} tok/s"
+                if tok
+                else ("ready" if health == "ready" else health)
+            )
         self._headline.setText(headline)
         kv = row.get("kv_pct")
         self._kv.setText(f"KV {kv * 100:.0f}%" if kv is not None else "")
 
     def set_selected(self, on: bool) -> None:
-        if on == self._selected:      # per-tick restyle guard (set_instance_cards
-            return                    # calls this every poll even when unchanged)
+        if on == self._selected:  # per-tick restyle guard (set_instance_cards
+            return  # calls this every poll even when unchanged)
         self._selected = on
         # Target the class name, not QFrame -- QLabel is a QFrame subclass, so a
         # bare "QFrame { border: ... }" selector cascades onto every child label.
         self.setStyleSheet(
-            "StatCard { border: 2px solid palette(highlight); border-radius: 4px; }" if on
-            else "StatCard { border: 1px solid palette(mid); border-radius: 4px; }")
+            "StatCard { border: 2px solid palette(highlight); border-radius: 4px; }"
+            if on
+            else "StatCard { border: 1px solid palette(mid); border-radius: 4px; }"
+        )
 
     def mousePressEvent(self, ev):
         self.selected.emit(self._name)

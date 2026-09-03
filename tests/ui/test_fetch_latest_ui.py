@@ -19,7 +19,10 @@ def test_fetch_button_has_tooltip(win):
 
 def test_fetch_button_sits_next_to_detect(win):
     # Both act on the Image field, so they share the Image row's parent widget.
-    assert win._configure_panel.fetch_btn.parentWidget() is win._configure_panel.detect_image_btn.parentWidget()
+    assert (
+        win._configure_panel.fetch_btn.parentWidget()
+        is win._configure_panel.detect_image_btn.parentWidget()
+    )
 
 
 def test_fetch_button_relabeled(win):
@@ -29,20 +32,26 @@ def test_fetch_button_relabeled(win):
 def test_no_image_shows_message_and_starts_no_worker(win, monkeypatch):
     win._configure_panel.image_edit.setText("")
     seen = {}
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
-                        lambda *a, **k: seen.setdefault("info", True))
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
+        lambda *a, **k: seen.setdefault("info", True),
+    )
     # If a worker were started, start() would run; stub it to detect that.
     started = {}
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
-                        lambda self: started.setdefault("started", True))
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
+        lambda self: started.setdefault("started", True),
+    )
     win._launch.on_fetch_latest()
     assert seen.get("info") and not started.get("started")
 
 
 def test_click_enters_working_state_and_starts_worker(win, monkeypatch):
     win._configure_panel.image_edit.setText("ghcr.io/ggml-org/llama.cpp:server-cuda12")
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
-                        lambda self: None)          # don't spin a real thread
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
+        lambda self: None,
+    )  # don't spin a real thread
     win._launch.on_fetch_latest()
     assert win._configure_panel.fetch_btn.text() == "Fetching\u2026"
     assert win._configure_panel.fetch_btn.isEnabled() is False
@@ -52,24 +61,35 @@ def test_click_enters_working_state_and_starts_worker(win, monkeypatch):
 
 def test_found_sets_tag_and_notes_not_downloaded(win, monkeypatch):
     win._configure_panel.image_edit.setText("ghcr.io/ggml-org/llama.cpp:server-cuda12")
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
-                        lambda self: None)
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
+        lambda self: None,
+    )
     info = {}
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
-                        lambda *a, **k: info.setdefault("msg", a[2] if len(a) > 2 else ""))
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
+        lambda *a, **k: info.setdefault("msg", a[2] if len(a) > 2 else ""),
+    )
     win._launch.on_fetch_latest()
     win._launch._on_fetch_found("server-cuda12-b9999")
-    assert win._configure_panel.image_edit.text() == "ghcr.io/ggml-org/llama.cpp:server-cuda12-b9999"
-    assert "pull" in str(info.get("msg", "")).lower()   # "not downloaded, pull ..."
+    assert (
+        win._configure_panel.image_edit.text()
+        == "ghcr.io/ggml-org/llama.cpp:server-cuda12-b9999"
+    )
+    assert "pull" in str(info.get("msg", "")).lower()  # "not downloaded, pull ..."
 
 
 def test_failed_shows_warning(win, monkeypatch):
     win._configure_panel.image_edit.setText("ghcr.io/ggml-org/llama.cpp:server-cuda12")
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
-                        lambda self: None)
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
+        lambda self: None,
+    )
     warned = {}
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.warning",
-                        lambda *a, **k: warned.setdefault("w", True))
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller.QMessageBox.warning",
+        lambda *a, **k: warned.setdefault("w", True),
+    )
     win._launch.on_fetch_latest()
     win._launch._on_fetch_failed("connection refused")
     assert warned.get("w")
@@ -77,31 +97,47 @@ def test_failed_shows_warning(win, monkeypatch):
 
 def test_finished_restores_button_and_reports_no_newer(win, monkeypatch):
     win._configure_panel.image_edit.setText("ghcr.io/ggml-org/llama.cpp:server-cuda12")
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
-                        lambda self: None)
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
+        lambda self: None,
+    )
     info = {}
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
-                        lambda *a, **k: info.setdefault("msg", True))
-    win._launch.on_fetch_latest()          # sets _fetch_got_result = False
-    win._launch._on_fetch_finished()       # no found/failed fired -> "no newer build"
-    assert win._configure_panel.fetch_btn.isEnabled() and win._configure_panel.fetch_btn.text() == "Fetch latest"
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
+        lambda *a, **k: info.setdefault("msg", True),
+    )
+    win._launch.on_fetch_latest()  # sets _fetch_got_result = False
+    win._launch._on_fetch_finished()  # no found/failed fired -> "no newer build"
+    assert (
+        win._configure_panel.fetch_btn.isEnabled()
+        and win._configure_panel.fetch_btn.text() == "Fetch latest"
+    )
     assert info.get("msg")
 
 
 def test_finished_after_result_does_not_report_no_newer(win, monkeypatch):
     win._configure_panel.image_edit.setText("ghcr.io/ggml-org/llama.cpp:server-cuda12")
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
-                        lambda self: None)
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
-                        lambda *a, **k: None)
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
+        lambda self: None,
+    )
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
+        lambda *a, **k: None,
+    )
     win._launch.on_fetch_latest()
-    win._launch._on_fetch_found("server-cuda12-b9999")   # a result arrived
+    win._launch._on_fetch_found("server-cuda12-b9999")  # a result arrived
     seen = {}
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
-                        lambda *a, **k: seen.setdefault("msg", True))
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
+        lambda *a, **k: seen.setdefault("msg", True),
+    )
     win._launch._on_fetch_finished()
-    assert win._configure_panel.fetch_btn.isEnabled() and win._configure_panel.fetch_btn.text() == "Fetch latest"
-    assert not seen.get("msg")     # no "no newer build" message when a result came
+    assert (
+        win._configure_panel.fetch_btn.isEnabled()
+        and win._configure_panel.fetch_btn.text() == "Fetch latest"
+    )
+    assert not seen.get("msg")  # no "no newer build" message when a result came
 
 
 class _StubWorker:
@@ -136,7 +172,7 @@ def test_stop_timers_drains_fetch_worker_that_finishes_promptly(win):
     _ensure_no_benchmark(win)
     stub = _StubWorker(wait_returns=True)
     win._launch._fetch_worker = stub
-    win._stop_timers()          # must not raise/hang
+    win._stop_timers()  # must not raise/hang
     assert stub.wait_calls >= 1
     assert stub.terminated is False
 
@@ -145,7 +181,7 @@ def test_stop_timers_terminates_fetch_worker_that_never_finishes(win):
     _ensure_no_benchmark(win)
     stub = _StubWorker(wait_returns=False)
     win._launch._fetch_worker = stub
-    win._stop_timers()          # must return, not hang (100-iteration ceiling)
+    win._stop_timers()  # must return, not hang (100-iteration ceiling)
     # 100 ceiling attempts, plus the post-terminate() backstop wait().
     assert stub.wait_calls >= 100
     assert stub.terminated is True
@@ -153,13 +189,17 @@ def test_stop_timers_terminates_fetch_worker_that_never_finishes(win):
 
 def test_update_badge_disabled_during_fetch_and_reenabled_on_finish(win, monkeypatch):
     win._configure_panel.image_edit.setText("ghcr.io/ggml-org/llama.cpp:server-cuda12")
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
-                        lambda self: None)
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller._UpdateWorker.start",
+        lambda self: None,
+    )
     # No found/failed fires in this test, so _on_fetch_finished's "no newer
     # build" path would pop a real modal dialog and block the test; stub it
     # out.
-    monkeypatch.setattr("llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
-                        lambda *a, **k: None)
+    monkeypatch.setattr(
+        "llama_launcher.ui.controllers.launch_controller.QMessageBox.information",
+        lambda *a, **k: None,
+    )
     win._launch.on_fetch_latest()
     assert win._configure_panel.update_badge.isEnabled() is False
     win._launch._on_fetch_finished()

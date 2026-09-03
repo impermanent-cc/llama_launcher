@@ -46,7 +46,7 @@ RPC pooling across machines.
 | Set up | `python3 -m venv .venv && .venv/bin/pip install -e ".[dev]"` (or `uv sync`) |
 | Test | `QT_QPA_PLATFORM=offscreen .venv/bin/pytest -q` |
 | Guards only | `.venv/bin/pytest -q tests/guard` |
-| Lint | none configured; match the surrounding style |
+| Lint | `ruff check . && ruff format --check .` (ruff on PATH at the version ci.yml pins, 0.16.5; not a project dependency) |
 | Run | `.venv/bin/llama-launcher` |
 | Dry run a profile | `.venv/bin/python -m llama_launcher.app --dry-run --profile NAME` |
 | Local CI | `localci llama-launcher` (mirrored Qt image; keep its apt list in sync with ci.yml) |
@@ -65,6 +65,9 @@ non-ASCII text outside README.md, CHANGELOG.md and RPC.md, which are
 allowlisted until a documentation cycle cleans them. The doubled-hyphen
 check is off (CHECK_DOUBLE_HYPHEN) while the legacy ` -- ` separators in
 comments remain. UI glyphs in code are \u escapes.
+
+`ruff check . && ruff format --check .` must be clean under the ruff
+configuration the repository carries. Do not narrow it.
 
 Preflight and catalog work is verified by running, not asserting: a
 dry-run command against a real profile, or a live launch on the owner's
