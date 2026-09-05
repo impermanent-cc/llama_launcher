@@ -575,3 +575,25 @@ def test_mainline_launch_keeps_layer_tokens():
     p.settings["n-gpu-layers"] = "auto"
     argv = build_command(p)
     assert argv[argv.index("--n-gpu-layers") + 1] == "auto"
+
+
+def test_no_reasoning_preserve_emits_the_negative_flag():
+    p = _golden_profile()
+    p.settings["no-reasoning-preserve"] = True
+    assert "--no-reasoning-preserve" in build_command(p)
+
+
+def test_reasoning_preserve_still_emits_the_positive_flag():
+    # A profile carrying the positive key emits the positive flag; the key
+    # means what it has always meant.
+    p = _golden_profile()
+    p.settings["reasoning-preserve"] = True
+    assert "--reasoning-preserve" in build_command(p)
+
+
+def test_both_halves_of_the_pair_emit_in_catalog_order():
+    p = _golden_profile()
+    p.settings["reasoning-preserve"] = True
+    p.settings["no-reasoning-preserve"] = True
+    argv = build_command(p)
+    assert argv.index("--reasoning-preserve") < argv.index("--no-reasoning-preserve")

@@ -57,6 +57,15 @@ def test_parse_empty_is_empty():
     assert cb._parse_raw_pairs("   ") == []
 
 
+def test_raw_flags_returns_the_flag_spellings_present():
+    assert cb.raw_flags("-ngl 50 --mlock") == frozenset({"-ngl", "--mlock"})
+
+
+def test_raw_flags_empty_for_blank_raw_args():
+    assert cb.raw_flags("") == frozenset()
+    assert cb.raw_flags("   ") == frozenset()
+
+
 PORTCANON = {"--host", "--port"}
 LORACANON = {"--lora", "--lora-scaled"}
 

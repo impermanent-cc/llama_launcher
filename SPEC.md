@@ -20,8 +20,11 @@ catalogued llama-server setting. `--dry-run --profile NAME` prints the
 exact command without launching.
 
 2.2 The settings catalog exposes only flags the chosen engine accepts;
-mainline-only flags never reach an ik launch. Re-audits against upstream
-`common/arg.cpp` and the CMake option lists are periodic maintenance.
+mainline-only flags never reach an ik launch, and options only ik defines
+never reach a mainline build command. Re-audits against upstream
+`common/arg.cpp` and the CMake option lists are periodic maintenance,
+carried out by hand: the flag fixtures are the suite's only upstream
+oracle, and the build catalog has none.
 
 2.3 Before a launch the app reads the GGUF header and estimates VRAM
 against the selected GPU mode and context size, and warns or refuses
@@ -39,12 +42,40 @@ CPU-only workers is experimental and known to crash upstream.
 2.6 The Monitor tab shows every instance as a card with logs and live
 stats; the Stats dock shows CPU, GPU and memory; the Benchmark panel runs
 prompt and generation sweeps and shows deltas against the previous run.
+Each run records a config snapshot of the settings that shape throughput,
+including both CPU offload counts.
 
 2.7 The router API key, LoRA adapter scales and model switching are driven
 through the server's HTTP API, never by restarting the server.
 
 2.8 One default port lives in core.spec.DEFAULT_PORT; no literal port
 numbers elsewhere.
+
+2.9 A setting whose behaviour upstream now enables by default, or that
+upstream has superseded, stays catalogued and marked deprecated so an
+older image keeps the control, and the flag a current build needs for the
+opposite choice is catalogued alongside it.
+
+2.10 Setting both a catalogued flag and its catalogued `--no-` twin raises
+a validation warning, for any such pair rather than a named one: upstream
+resolves the pair by argv order, so the launch would otherwise choose
+silently.
+
+2.11 With `--kv-unified-per-slot N` set and no `ctx-size`, on an engine that
+accepts the flag, the VRAM preflight takes the effective context as
+`parallel * N` where `--parallel` is an explicit positive number, and warns
+that the KV pool size is unknown where `--parallel` is auto.
+
+2.12 Capability relevance follows upstream's own split of a flag pair, which
+is not symmetric: `--n-cpu-moe` is recommended on a MoE model and
+inapplicable on a dense one, which has no experts for it to move;
+`--n-cpu-ffn` is recommended on a dense model and a tuning knob on a MoE
+one, whose non-expert layers still carry dense FFN weights.
+
+2.13 Every catalogued flag that centralizes memory on the head
+(`--cpu-moe`, `--n-cpu-moe`, `--n-cpu-ffn`, `--no-kv-offload`,
+`--override-tensor`) warns on an RPC pool launch, for those of them that
+reach argv for that launch's engine.
 
 ## 3. Constraints
 
@@ -76,3 +107,6 @@ sanity job.
   against the mount-a-local-path model and bypass the VRAM preflight.
 - Two-token flags the catalog cannot express (--spec-replace,
   --control-vector-layer-range) until they get panel plumbing like LoRA.
+- Synthetic speculative acceptance flags (--spec-synth-len,
+  --spec-synth-rates): upstream marks them benchmarking only and they
+  falsify acceptance, so a profile carrying them serves nonsense.

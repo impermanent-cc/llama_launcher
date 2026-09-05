@@ -23,7 +23,7 @@ class Setting:
     # Which engine surfaces this flag: "any" or "ik_llama.cpp"; build_catalog
     # additionally uses "llama.cpp" for mainline-only CMake options.
     engine: str = "any"
-    deprecated: bool = False  # upstream emits DEPRECATED warnings; kept for old images
+    deprecated: bool = False  # superseded or defaulted on upstream; kept for old images
     secret: bool = False  # mask the editor (password field) -- e.g. api-key
 
 
@@ -1345,9 +1345,24 @@ _ALL = [
         False,
         "Server & Tools",
         (),
-        tooltip="Preserve the reasoning trace across the whole history rather than only "
-        "the last assistant message. Needs a template advertising "
+        deprecated=True,
+        tooltip="Legacy: llama.cpp 0.4.0 and newer preserve the reasoning trace "
+        "across the whole history by default, so this changes nothing on a "
+        "current image and is kept for older ones. To switch preservation OFF, "
+        "use --no-reasoning-preserve. Needs a template advertising "
         "'supports_preserve_reasoning'.",
+    ),
+    Setting(
+        "no-reasoning-preserve",
+        "--no-reasoning-preserve",
+        "bool",
+        False,
+        "Server & Tools",
+        (),
+        tooltip="Keep the reasoning trace on the last assistant message only, "
+        "turning off the whole-history preservation llama.cpp 0.4.0 enables by "
+        "default. Setting preserve_reasoning through chat-template-kwargs "
+        "instead makes upstream log a deprecation warning.",
     ),
     # -- Context Extension (RoPE / YaRN) --------------------------------------
     # Stretching a model past its trained context. Every value here defaults to
@@ -1525,6 +1540,22 @@ _ALL = [
         tooltip="Share ONE unified KV buffer across all sequences instead of a "
         "per-slot buffer. Upstream enables this when the slot count is auto. "
         "Usually lowers KV memory with many slots.",
+    ),
+    Setting(
+        "kv-unified-per-slot",
+        "--kv-unified-per-slot",
+        "int",
+        0,
+        "GPU & Memory",
+        (),
+        0,
+        1048576,
+        1024,
+        tooltip="Context limit per parallel slot. 0 means the server's own "
+        "behaviour, unchanged. Set without a ctx-size, the shared "
+        "KV pool is sized to parallel * this value, so the VRAM preflight can "
+        "only size it when parallel is an explicit number rather than auto.",
+        suggestions=(0, 2048, 4096, 8192, 16384, 32768),
     ),
     Setting(
         "no-op-offload",
@@ -1997,6 +2028,44 @@ _ALL = [
         256,
         tooltip="Maximum image tokens encoded per batch (upstream default 1024). "
         "Lower it if encoding a large image runs the GPU out of memory.",
+    ),
+    Setting(
+        "video-fps",
+        "--video-fps",
+        "float",
+        4.0,
+        "Multimodal",
+        (),
+        0.01,
+        60.0,
+        0.1,
+        tooltip="Frames per second sampled from an input video. Higher costs "
+        "more tokens per second of footage.",
+    ),
+    Setting(
+        "video-timestamp-interval",
+        "--video-timestamp-interval",
+        "int",
+        5000,
+        "Multimodal",
+        (),
+        0,
+        600000,
+        100,
+        tooltip="Milliseconds between the text timestamps interleaved with "
+        "video frames.",
+    ),
+    Setting(
+        "video-ffmpeg-dir",
+        "--video-ffmpeg-dir",
+        "string",
+        "",
+        "Multimodal",
+        (),
+        tooltip="Directory holding ffmpeg and ffprobe, as seen INSIDE the "
+        "container. The official server images already carry both on PATH, so "
+        "leave this empty unless a custom or mounted build needs a different "
+        "one.",
     ),
     # -- Embedding -------------------------------------------------------------
     Setting(
@@ -3349,6 +3418,7 @@ MAINLINE_ONLY_FLAGS: frozenset = frozenset(
         "--fit-ctx",
         "--fit-target",
         "--kv-unified",
+        "--kv-unified-per-slot",
         "--lazy-mode",
         "--load-mode",
         "--log-colors",
@@ -3367,6 +3437,7 @@ MAINLINE_ONLY_FLAGS: frozenset = frozenset(
         "--no-log-timestamps",
         "--no-models-autoload",
         "--no-op-offload",
+        "--no-reasoning-preserve",
         "--no-repack",
         "--no-spec-draft-backend-sampling",
         "--no-webui",
@@ -3403,6 +3474,9 @@ MAINLINE_ONLY_FLAGS: frozenset = frozenset(
         "--swa-full",
         "--tags",
         "--tools",
+        "--video-ffmpeg-dir",
+        "--video-fps",
+        "--video-timestamp-interval",
     }
 )
 

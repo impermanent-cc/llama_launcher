@@ -64,3 +64,20 @@ def test_relevance_stays_unchanged():
     plain = relevance(caps)
     described = describe_relevance(caps)
     assert plain == {k: t for k, (t, _) in described.items()}
+
+
+def test_n_cpu_ffn_is_recommended_on_a_dense_model():
+    caps = derive_caps(GgufMeta(arch="llama", ctx_train=4096), [])
+    tier, reason = describe_relevance(caps)["n-cpu-ffn"]
+    assert tier == Tier.RECOMMENDED
+    assert "dense" in reason.lower()
+
+
+def test_n_cpu_ffn_is_a_tuning_knob_on_a_moe_model():
+    # A MoE gguf still carries dense FFN outside its expert layers, so the
+    # flag applies there; it is just not the first thing to reach for.
+    caps = derive_caps(GgufMeta(expert_count=256), [])
+    tier, reason = describe_relevance(caps)["n-cpu-ffn"]
+    assert tier == Tier.TUNE
+    assert "n-cpu-moe" in reason
+    assert describe_relevance(caps)["n-cpu-moe"][0] == Tier.RECOMMENDED

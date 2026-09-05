@@ -1,5 +1,7 @@
 from dataclasses import dataclass
 
+from .settings_catalog import CATALOG
+
 _BYTES_PER_ELEM = {
     "f32": 4.0,
     "f16": 2.0,
@@ -107,6 +109,41 @@ def available_free_bytes(
     return sum(free)
 
 
+def effective_ctx_size(settings: dict, engine: str) -> int | None:
+    """The context the KV estimate should use for a profile's settings.
+
+    An explicit positive ctx-size wins. With no ctx-size and
+    --kv-unified-per-slot N set on an engine that accepts the flag, llama.cpp
+    sizes the shared KV pool to n_parallel * N, which is knowable only when
+    --parallel is an explicit positive number; --parallel -1 leaves the slot
+    count to the server, so the answer is None and the caller falls back to
+    the model's own trained context.
+    """
+    ctx = _positive_int(settings.get("ctx-size"))
+    if ctx:
+        return ctx
+    setting = CATALOG["kv-unified-per-slot"]
+    if setting.engine != "any" and setting.engine != engine:
+        return None
+    per_slot = _positive_int(settings.get("kv-unified-per-slot"))
+    parallel = _positive_int(settings.get("parallel"))
+    if per_slot and parallel:
+        return per_slot * parallel
+    return None
+
+
+def _positive_int(value) -> int | None:
+    """A settings value as a positive int, or None. Profile JSON can carry a
+    string or a bool where a number belongs, and a bool is not a slot count."""
+    if value is None or isinstance(value, bool):
+        return None
+    try:
+        n = int(value)
+    except (TypeError, ValueError, OverflowError):
+        return None
+    return n if n > 0 else None
+
+
 @dataclass
 class FitSummary:
     est_bytes: int
@@ -117,7 +154,12 @@ class FitSummary:
 
 
 def fit_summary(
-    meta, weights_bytes, *, settings: dict, free_bytes_per_gpu
+    meta,
+    weights_bytes,
+    *,
+    settings: dict,
+    free_bytes_per_gpu,
+    engine: str,
 ) -> FitSummary | None:
     """The single estimate-vs-free computation behind every single-node VRAM
     preflight (the launch-time vram_check dialog and the Configure tab's live
@@ -137,7 +179,7 @@ def fit_summary(
     est = estimate_for_model(
         meta,
         weights_bytes,
-        ctx_size=settings.get("ctx-size"),
+        ctx_size=effective_ctx_size(settings, engine),
         k_quant=settings.get("cache-type-k", "f16"),
         v_quant=settings.get("cache-type-v", "f16"),
     )

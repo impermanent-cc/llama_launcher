@@ -70,3 +70,11 @@ def test_repo_constants():
     )
     assert DEFAULT_BRANCH["llama.cpp"] == "master"
     assert DEFAULT_BRANCH["ik_llama.cpp"] == "main"
+
+
+def test_peer_max_batch_size_is_ik_only():
+    # Mainline ggml does not define this cache variable; ik_llama.cpp does.
+    ml = for_engine(BUILD_CATALOG, "llama.cpp")
+    ik = for_engine(BUILD_CATALOG, "ik_llama.cpp")
+    assert "cuda-peer-max-batch-size" in ik
+    assert "cuda-peer-max-batch-size" not in ml

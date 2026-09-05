@@ -99,3 +99,19 @@ def test_build_snapshot_server_reads_profile_settings():
     snap = bm.build_snapshot(p)
     assert snap["model"] == "qwen.gguf" and snap["image"] == "img:tag"
     assert snap["ngl"] == "99" and snap["fa"] == "on" and snap["ctx"] is None
+
+
+def test_snapshot_records_both_cpu_offload_counts():
+    from llama_launcher.core.spec import Profile, Runtime
+
+    p = Profile(
+        name="s",
+        image="img:tag",
+        runtime=Runtime(),
+        mode="server",
+        model="/models/qwen.gguf",
+        settings={"n-cpu-moe": 12, "n-cpu-ffn": 8},
+    )
+    snap = bm.build_snapshot(p)
+    assert snap["ncmoe"] == "12"
+    assert snap["ncffn"] == "8"

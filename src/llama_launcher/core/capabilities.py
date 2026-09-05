@@ -108,8 +108,14 @@ def _rel_moe(caps):
             "n-cpu-moe": Tier.RECOMMENDED,
             "cpu-moe": Tier.TUNE,
             "override-tensor": Tier.TUNE,
+            "n-cpu-ffn": Tier.TUNE,
         }
-    return {k: Tier.NA for k in ("n-cpu-moe", "cpu-moe", "override-tensor")}
+    return {
+        "n-cpu-moe": Tier.NA,
+        "cpu-moe": Tier.NA,
+        "override-tensor": Tier.NA,
+        "n-cpu-ffn": Tier.RECOMMENDED,
+    }
 
 
 def _rel_mtp(caps):
@@ -191,6 +197,7 @@ def relevance(caps: ModelCaps) -> dict:
 # Short, human reasons per setting group. Keyed by membership in the relevance
 # sub-maps so the dot's hover can explain *why* a setting is (not) suggested.
 _MOE_KEYS = ("n-cpu-moe", "cpu-moe", "override-tensor")
+_FFN_KEYS = ("n-cpu-ffn",)
 _MTP_KEYS = (
     "spec-type",
     "spec-draft-n-max",
@@ -209,6 +216,13 @@ def _reason_for(key: str, tier: "Tier", caps) -> str:
         if key in _MTP_KEYS:
             return "Not applicable: model has no MTP/draft head."
         return "Not applicable to this model."
+    if key in _FFN_KEYS:
+        if tier == Tier.RECOMMENDED:
+            return "Dense model: offload dense FFN layers to CPU to fit VRAM."
+        return (
+            "MoE model: prefer n-cpu-moe; dense FFN offload reaches the "
+            "non-expert layers only."
+        )
     if key in _MOE_KEYS:
         return "MoE model: offload experts to CPU to fit VRAM."
     if key in _MTP_KEYS:

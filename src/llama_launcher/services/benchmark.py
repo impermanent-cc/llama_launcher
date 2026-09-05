@@ -86,6 +86,7 @@ _SNAP_FLAGS = {
     "ctv": "cache-type-v",
     "ctx": "ctx-size",
     "ncmoe": "n-cpu-moe",
+    "ncffn": "n-cpu-ffn",
     "sm": "split-mode",
 }
 

@@ -561,6 +561,7 @@ class LaunchController:
             weights,
             settings=p.settings,
             free_bytes_per_gpu=[g.mem_free_mib * mib for g in gpus],
+            engine=p.runtime.engine,
         )
         if s is None or s.fits:
             return None
@@ -578,8 +579,10 @@ class LaunchController:
         return (
             f"Estimated VRAM need ~{s.est_bytes / gib:.1f} GiB exceeds free "
             f"{free_txt} by ~{-s.margin / gib:.1f} GiB. It may not fit; "
-            f"consider quantized KV cache (-ctk/-ctv q8_0) or a higher --n-cpu-moe. "
-            f"(Estimate is conservative; --n-cpu-moe/-ngl reduce actual GPU use.)"
+            f"consider quantized KV cache (-ctk/-ctv q8_0) or a higher "
+            f"--n-cpu-moe on a MoE model, --n-cpu-ffn on a dense one. "
+            f"(Estimate is conservative; --n-cpu-moe/--n-cpu-ffn/-ngl reduce "
+            f"actual GPU use.)"
         )
 
     def _report_launch_error(

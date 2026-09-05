@@ -12,9 +12,46 @@ not on the release page, so the two never drift.
 
 ### Added
 
+- Four llama.cpp 0.4.0 server flags: `--kv-unified-per-slot` (per-slot context
+  limit, under GPU and Memory) and `--video-fps`,
+  `--video-timestamp-interval` and `--video-ffmpeg-dir` (Multimodal). All four
+  are mainline-only and never reach an ik_llama.cpp launch.
+- `--no-reasoning-preserve`, the control for switching reasoning preservation
+  off now that llama.cpp 0.4.0 enables it by default.
+- A warning when a flag and its `--no-` twin would both act on a launch,
+  naming which one llama-server will honour. Derived from the catalog, so it
+  covers any such pair, and it sees a half supplied through raw args.
+- A warning when `--kv-unified-per-slot` is set but the slot count is not an
+  explicit number, since the KV pool size is then unknowable before launch.
+- `--n-cpu-ffn` now reaches everything its MoE sibling reached: the capability
+  dots (recommended on a dense model, worth tuning on a MoE one), the RPC
+  centralizing warning, the benchmark run snapshot and the over-budget VRAM
+  hint.
+
 ### Changed
 
+- `--reasoning-preserve` is marked deprecated: llama.cpp 0.4.0 preserves the
+  reasoning trace by default, so the flag only changes behaviour on an older
+  image. Saved profiles keep their meaning; the key was not repurposed.
+- The VRAM preflight sizes the KV cache from `--kv-unified-per-slot` times the
+  slot count when no context size is set, so the estimate follows the pool the
+  server will actually allocate. Every single-node estimate path now shares
+  that one rule.
+- `GGML_CUDA_PEER_MAX_BATCH_SIZE` is offered for ik_llama.cpp builds only.
+  Mainline ggml no longer defines it, so a mainline build command no longer
+  carries a variable CMake ignores.
+
 ### Fixed
+
+- The RPC centralizing warning, the flag-pair warning and the VRAM preflight
+  no longer fire for a flag the chosen engine never receives, and no longer
+  treat a zero count as an active setting.
+- Turning reasoning preservation off in the form while re-enabling it through
+  raw args now warns instead of silently preserving.
+- The deprecated marker on a settings row no longer claims every such flag was
+  replaced by `--load-mode`, which was true of the load flags only.
+- The `--video-ffmpeg-dir` help no longer claims the official server images
+  ship without ffmpeg; they carry ffmpeg and ffprobe on PATH.
 
 ## [0.1.1] - 2026-09-03
 

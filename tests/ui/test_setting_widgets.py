@@ -6,6 +6,7 @@ def test_row_label_plain_for_normal_setting(qtbot):
     lbl = make_row_label(CATALOG["ctx-size"])
     qtbot.addWidget(lbl)
     assert lbl.text() == "--ctx-size"
+    assert lbl.toolTip() == ""
 
 
 def test_row_label_marks_deprecated_setting(qtbot):
@@ -13,8 +14,8 @@ def test_row_label_marks_deprecated_setting(qtbot):
     qtbot.addWidget(lbl)
     assert "--no-mmap" in lbl.text()
     assert "*deprecated" in lbl.text()
-    # the replacement is discoverable on hover
-    assert "load-mode" in lbl.toolTip()
+    # the on-hover text says the flag still matters on an older image
+    assert "still matters on an older image" in lbl.toolTip()
 
 
 def test_bool_widget_roundtrip(qtbot):

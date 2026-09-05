@@ -553,6 +553,13 @@ def _router_server_args(profile: Profile) -> list[str]:
     return argv
 
 
+def raw_flags(raw_args: str) -> frozenset:
+    """The flag spellings present in a profile's raw args, as they will reach
+    argv. Lets a caller ask whether a flag arrives by that route as well as
+    from the settings form."""
+    return frozenset(flag for flag, _value in _parse_raw_pairs(raw_args))
+
+
 def raw_arg_warnings(profile: Profile, catalog: dict = CATALOG) -> list[str]:
     """Collisions between profile.raw_args and the flags the launcher emits.
 
