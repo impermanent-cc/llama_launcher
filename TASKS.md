@@ -2,12 +2,8 @@
 
 ## Current phase
 
-Branch chore/upstream-0-4-0-audit, complete and committed, held back from
-merge and push on purpose: llama.cpp 0.4.0 was tagged 2026-09-04 but ghcr
-has not yet published a server image carrying it (the floating :server tag
-was still b10795 during the cycle), so the smoke below cannot run. When an
-image past b10816 appears, run it, then merge with --no-ff and push. The
-pre-push hook runs a full localci again on the way out.
+Idle: no cycle open. The llama.cpp 0.4.0 audit branch landed on main on
+2026-09-05 after the b10818 image smoke passed.
 
 ## Open items
 
@@ -44,11 +40,17 @@ pre-push hook runs a full localci again on the way out.
 
 ## Pending owner smokes
 
-- [ ] Smoke the new flags against a real llama.cpp 0.4.0 image once ghcr
-      publishes a server tag past b10816: a --dry-run profile carrying
-      --kv-unified-per-slot, --no-reasoning-preserve and the --video-*
-      flags, then a launch that reaches the ready state. The branch is not
-      pushed until this passes.
+- [x] Smoke the new flags against a real llama.cpp 0.4.0 image. Done
+      2026-09-05 against ghcr.io/ggml-org/llama.cpp:server-b10818 (version
+      0.4.0-dev, build 10818), the first server tag past b10795; the
+      floating :server tag was still b10795 that morning. A profile carrying
+      --parallel 2, --kv-unified-per-slot 2048, --no-reasoning-preserve,
+      --video-fps 2.0, --video-timestamp-interval 1000 and
+      --video-ffmpeg-dir /usr/bin plus the e2b mmproj: --dry-run emitted all
+      of them with no validation issue and exit 0; --launch --wait reached
+      "ready", /health returned ok, /props reported build b10818 with two
+      slots of 2048, and the server log carried no unknown-argument line.
+      --stop exited 0.
 - [x] Launch a real profile and confirm the UI text renders unchanged.
       Done 2026-09-03 on KDE/Wayland through XWayland (QT_QPA_PLATFORM=xcb):
       the e2b profile loaded through the profile combo's activated signal,
