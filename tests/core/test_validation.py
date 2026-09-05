@@ -1,6 +1,7 @@
-from llama_launcher.core.command_builder import raw_arg_warnings
+from llama_launcher.core.command_builder import build_command, raw_arg_warnings
+from llama_launcher.core.settings_catalog import CATALOG
 from llama_launcher.core.spec import Mount, Profile, RouterMember, RpcWorker, Runtime
-from llama_launcher.core.validation import validate
+from llama_launcher.core.validation import NEGATION_PAIRS, validate
 
 
 def _ok_profile():
@@ -611,6 +612,35 @@ def test_rpc_cpu_moe_centralizing_warning():
     assert "warning" in _levels(issues, "centralizes")
 
 
+def test_n_cpu_moe_zero_does_not_warn_on_an_rpc_pool():
+    issues = validate(
+        _rpc([RpcWorker(node="local")], settings={"n-cpu-moe": 0}),
+        worker_image_present={"local": True},
+    )
+    assert "warning" not in _levels(issues, "centralizes")
+
+
+def test_n_cpu_ffn_warns_on_an_rpc_pool():
+    p = _ok_profile()
+    p.runtime = Runtime(launch_mode="rpc", rpc_workers=[RpcWorker(node="n1")])
+    p.settings["n-cpu-ffn"] = 8
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert any("centraliz" in i.message.lower() for i in warns)
+
+
+def test_centralizing_flag_does_not_warn_on_an_engine_that_lacks_it():
+    # --n-cpu-ffn is mainline only, so an ik pool never receives it.
+    p = _ok_profile()
+    p.runtime = Runtime(
+        engine="ik_llama.cpp",
+        launch_mode="rpc",
+        rpc_workers=[RpcWorker(node="n1")],
+    )
+    p.settings["n-cpu-ffn"] = 8
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert not any("centraliz" in i.message.lower() for i in warns)
+
+
 def test_rpc_router_mode_is_error():
     # RPC pooling does not support router mode (GUI-only server-head pools).
     p = _rpc([RpcWorker(node="local")])
@@ -691,3 +721,128 @@ def test_server_inert_draft_warning_still_fires():
     )
     issues = validate(p)
     assert any("never used" in m for m in _warnings(issues))
+
+
+def test_flag_and_its_negation_together_warn():
+    p = _ok_profile()
+    p.settings["reasoning-preserve"] = True
+    p.settings["no-reasoning-preserve"] = True
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert any(
+        "--reasoning-preserve" in i.message and "--no-reasoning-preserve" in i.message
+        for i in warns
+    )
+    assert [i for i in validate(p) if i.level == "error"] == []
+
+
+def test_flag_and_its_negation_warn_when_the_negation_is_a_raw_arg():
+    p = _ok_profile()
+    p.settings["no-reasoning-preserve"] = True
+    p.raw_args = "--reasoning-preserve"
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert any(
+        "--reasoning-preserve" in i.message and "--no-reasoning-preserve" in i.message
+        for i in warns
+    )
+
+
+def test_one_half_of_a_pair_alone_is_quiet():
+    p = _ok_profile()
+    p.settings["no-reasoning-preserve"] = True
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert not any("no-reasoning-preserve" in i.message for i in warns)
+
+
+def test_negation_pairs_are_derived_from_the_catalog():
+    assert ("reasoning-preserve", "no-reasoning-preserve") in NEGATION_PAIRS
+    for pos, neg in NEGATION_PAIRS:
+        assert CATALOG[neg].flag == "--no-" + CATALOG[pos].flag[2:]
+
+
+def test_cross_engine_pair_does_not_warn():
+    # --webui is ik-only and --no-webui is mainline only, so a profile
+    # carrying both keys still emits at most one of them.
+    p = _ok_profile()
+    p.settings["webui"] = "none"
+    p.settings["no-webui"] = True
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert not any("--no-webui" in i.message for i in warns)
+
+
+def test_a_bool_left_false_does_not_count_as_set():
+    p = _ok_profile()
+    p.settings["reasoning-preserve"] = True
+    p.settings["no-reasoning-preserve"] = False
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert not any("no-reasoning-preserve" in i.message for i in warns)
+
+
+def test_pair_warning_fires_exactly_when_both_flags_are_emitted():
+    # The warning mirrors the command builder rather than the settings dict,
+    # so it must agree with the argv the same profile produces.
+    for positive, negative in NEGATION_PAIRS:
+        p = _ok_profile()
+        p.settings[positive] = True if CATALOG[positive].type == "bool" else "none"
+        p.settings[negative] = True
+        argv = build_command(p)
+        both_emitted = CATALOG[positive].flag in argv and CATALOG[negative].flag in argv
+        warned = any(
+            CATALOG[negative].flag in i.message
+            for i in validate(p)
+            if i.level == "warning"
+        )
+        assert warned == both_emitted, (positive, negative)
+
+
+def test_pair_warning_fires_when_the_negative_arrives_as_a_raw_arg():
+    # A raw arg reaches argv verbatim regardless of the engine gate, so the
+    # parity contract must hold for that route too, not only the settings form.
+    for positive, negative in NEGATION_PAIRS:
+        p = _ok_profile()
+        p.settings[positive] = True if CATALOG[positive].type == "bool" else "none"
+        p.raw_args = CATALOG[negative].flag
+        argv = build_command(p)
+        both_emitted = CATALOG[positive].flag in argv and CATALOG[negative].flag in argv
+        warned = any(
+            CATALOG[negative].flag in i.message
+            for i in validate(p)
+            if i.level == "warning"
+        )
+        assert warned == both_emitted, (positive, negative)
+
+
+def test_negation_pairs_are_exactly_the_two_catalogued_pairs():
+    assert NEGATION_PAIRS == (
+        ("reasoning-preserve", "no-reasoning-preserve"),
+        ("webui", "no-webui"),
+    )
+
+
+def test_per_slot_context_with_auto_parallel_warns():
+    p = _ok_profile()
+    p.settings["kv-unified-per-slot"] = 4096
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert any("kv-unified-per-slot" in i.message for i in warns)
+
+
+def test_per_slot_context_zero_is_quiet():
+    p = _ok_profile()
+    p.settings["kv-unified-per-slot"] = 0
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert not any("kv-unified-per-slot" in i.message for i in warns)
+
+
+def test_per_slot_context_with_explicit_parallel_is_quiet():
+    p = _ok_profile()
+    p.settings["kv-unified-per-slot"] = 4096
+    p.settings["parallel"] = 4
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert not any("kv-unified-per-slot" in i.message for i in warns)
+
+
+def test_per_slot_context_is_quiet_on_ik():
+    p = _ok_profile()
+    p.runtime = Runtime(engine="ik_llama.cpp")
+    p.settings["kv-unified-per-slot"] = 4096
+    warns = [i for i in validate(p) if i.level == "warning"]
+    assert not any("kv-unified-per-slot" in i.message for i in warns)

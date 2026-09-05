@@ -6,11 +6,13 @@ from .command_builder import (
     dangerous_run_args,
     is_sensitive_host_path,
     raw_arg_warnings,
+    raw_flags,
     run_args_expose,
 )
 from .router_preset import convert_raw_args
 from .settings_catalog import CATALOG
 from .spec import DEFAULT_PORT, Profile, member_model_id, profile_port
+from .vram import effective_ctx_size
 
 # A model id becomes an INI section header ([id]) in a router preset and is sent
 # by harnesses in the request "model" field, so keep it to a safe charset -- a
@@ -289,6 +291,34 @@ def validate(
     # single-server warning below would be a false alarm there. New warnings
     # of this class belong INSIDE this block.
     if profile.mode != "router":
+        if _is_active(profile, "kv-unified-per-slot") and (
+            effective_ctx_size(profile.settings, profile.runtime.engine) is None
+        ):
+            issues.append(
+                Issue(
+                    "warning",
+                    "kv-unified-per-slot sizes the KV pool to parallel * N, "
+                    "and that product is unknown unless both are explicit "
+                    "positive numbers, so the VRAM preflight estimates against "
+                    "the model's trained context instead. Set parallel and "
+                    "kv-unified-per-slot to numbers, or set a ctx-size, for a "
+                    "fit check that matches what the server will allocate.",
+                )
+            )
+
+        for positive, negative in NEGATION_PAIRS:
+            if _is_active(profile, positive) and _is_active(profile, negative):
+                last = max((positive, negative), key=_CATALOG_ORDER.get)
+                issues.append(
+                    Issue(
+                        "warning",
+                        f"{CATALOG[positive].flag} and {CATALOG[negative].flag} "
+                        f"are both set; llama-server honours whichever comes "
+                        f"last on the command line, which is "
+                        f"{CATALOG[last].flag} here. Clear one.",
+                    )
+                )
+
         # MTP speculative decoding (--spec-type draft-mtp) has two known
         # limitations in llama.cpp: it ignores the multimodal projector and
         # only supports a single slot. Warn (don't block); these run but
@@ -389,7 +419,55 @@ def validate(
     return issues
 
 
-_CENTRALIZING = ("cpu-moe", "n-cpu-moe", "no-kv-offload", "override-tensor")
+_CENTRALIZING = (
+    "cpu-moe",
+    "n-cpu-moe",
+    "n-cpu-ffn",
+    "no-kv-offload",
+    "override-tensor",
+)
+
+
+def _negation_pairs() -> tuple:
+    """Catalogued flags that have a catalogued `--no-` twin, as
+    (positive_key, negative_key). Upstream resolves such a pair by argv
+    order, so a profile that sets both has no defined outcome."""
+    by_flag = {s.flag: k for k, s in CATALOG.items()}
+    pairs = []
+    for key, setting in CATALOG.items():
+        if not setting.flag.startswith("--no-"):
+            continue
+        positive = by_flag.get("--" + setting.flag[len("--no-") :])
+        if positive is not None:
+            pairs.append((positive, key))
+    return tuple(sorted(pairs))
+
+
+NEGATION_PAIRS: tuple = _negation_pairs()
+
+_CATALOG_ORDER = {key: i for i, key in enumerate(CATALOG)}
+
+
+def _is_active(profile: Profile, key: str) -> bool:
+    """True when a setting will act on this launch: named in the raw args, or
+    set in the form to a value that does something on an engine that accepts
+    the flag. A False bool, a blank string and a zero count do nothing.
+
+    Deliberately not the whole emit rule in command_builder: it does not model
+    the load-mode suppression of no-mmap and mlock, nor the engine_value SKIP
+    that drops an enum left at its own default.
+    """
+    setting = CATALOG[key]
+    if setting.flag in raw_flags(profile.raw_args):
+        return True
+    if setting.engine != "any" and setting.engine != profile.runtime.engine:
+        return False
+    if key not in profile.settings:
+        return False
+    value = profile.settings[key]
+    if setting.type in ("bool", "int"):
+        return bool(value)
+    return bool(str(value).strip())
 
 
 def _validate_rpc(
@@ -419,13 +497,13 @@ def _validate_rpc(
                     f"free; more than the node has risks the head crashing mid-upload.",
                 )
             )
-    if any(profile.settings.get(k) for k in _CENTRALIZING):
+    if any(_is_active(profile, k) for k in _CENTRALIZING):
         issues.append(
             Issue(
                 "warning",
-                "A memory-centralizing flag (cpu-moe/n-cpu-moe/no-kv-offload/"
-                "override-tensor) centralizes on the head; prefer -ngl spread across "
-                "the pool for RPC.",
+                "A memory-centralizing flag (cpu-moe/n-cpu-moe/n-cpu-ffn/"
+                "no-kv-offload/override-tensor) centralizes on the head; prefer "
+                "-ngl spread across the pool for RPC.",
             )
         )
     return issues

@@ -276,8 +276,8 @@ def make_widget(setting: Setting) -> SettingWidget:
 
 def make_row_label(setting: Setting) -> QLabel:
     """Form-row label for a setting: the flag name, plus a muted '*deprecated'
-    marker for flags upstream is retiring (kept working for older images). The
-    tooltip points at the replacement so users know where to go."""
+    marker for flags upstream has superseded or defaulted on, which still work
+    on an older image. The tooltip says as much."""
     label = QLabel(setting.flag)
     if setting.deprecated:
         label.setText(
@@ -285,7 +285,8 @@ def make_row_label(setting: Setting) -> QLabel:
             "<span style='color: palette(mid); font-size: 90%;'>*deprecated</span>"
         )
         label.setToolTip(
-            "Deprecated upstream in favor of --load-mode; still works on older "
-            "images. See this row's control for details."
+            "Superseded or enabled by default upstream; still works, and "
+            "still matters on an older image. See this row's control for "
+            "details."
         )
     return label

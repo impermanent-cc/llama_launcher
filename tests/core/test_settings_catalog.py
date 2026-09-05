@@ -121,7 +121,7 @@ def test_legacy_load_flags_are_marked_deprecated():
 
 def test_most_settings_are_not_deprecated():
     deprecated = [k for k, s in CATALOG.items() if s.deprecated]
-    assert set(deprecated) == {"no-mmap", "mlock"}
+    assert set(deprecated) == {"no-mmap", "mlock", "reasoning-preserve"}
 
 
 def test_mmproj_device_present():
@@ -544,3 +544,31 @@ def test_catalog_flags_and_aliases_are_unique():
         for spelling in (s.flag, *s.aliases):
             assert spelling not in seen, f"{spelling}: {seen.get(spelling)} vs {s.key}"
             seen[spelling] = s.key
+
+
+def test_reasoning_preserve_pair():
+    # Upstream enables preserve by default, so the positive flag only changes
+    # behaviour on an older image and the negative is the live off switch.
+    pos = CATALOG["reasoning-preserve"]
+    neg = CATALOG["no-reasoning-preserve"]
+    assert pos.deprecated is True
+    assert neg.deprecated is False
+    assert neg.flag == "--no-reasoning-preserve"
+    assert neg.type == "bool"
+    assert neg.default is False
+    assert pos.group == neg.group
+
+
+def test_zero_four_zero_flags_are_catalogued_with_upstream_defaults():
+    # Upstream defaults, from llama-server --help: unset per-slot limit,
+    # 4.0 fps, a 5000 ms timestamp interval, ffmpeg found on PATH.
+    assert CATALOG["kv-unified-per-slot"].flag == "--kv-unified-per-slot"
+    assert CATALOG["kv-unified-per-slot"].default == 0
+    assert CATALOG["kv-unified-per-slot"].group == "GPU & Memory"
+    assert CATALOG["video-fps"].default == 4.0
+    assert CATALOG["video-fps"].minimum == 0.01
+    assert CATALOG["video-timestamp-interval"].default == 5000
+    assert CATALOG["video-timestamp-interval"].maximum == 600000
+    assert CATALOG["video-ffmpeg-dir"].default == ""
+    for key in ("video-fps", "video-timestamp-interval", "video-ffmpeg-dir"):
+        assert CATALOG[key].group == "Multimodal"

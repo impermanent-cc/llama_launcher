@@ -731,7 +731,7 @@ class ConfigurePanel(QWidget):
         return vram.estimate_for_model(
             meta,
             weights,
-            ctx_size=p.settings.get("ctx-size"),
+            ctx_size=vram.effective_ctx_size(p.settings, p.runtime.engine),
             k_quant=p.settings.get("cache-type-k", "f16"),
             v_quant=p.settings.get("cache-type-v", "f16"),
         )
@@ -1319,7 +1319,9 @@ class ConfigurePanel(QWidget):
                 vram.estimate_for_model(
                     meta,
                     weights or 0,
-                    ctx_size=prof.settings.get("ctx-size"),
+                    ctx_size=vram.effective_ctx_size(
+                        prof.settings, prof.runtime.engine
+                    ),
                     k_quant=prof.settings.get("cache-type-k", "f16"),
                     v_quant=prof.settings.get("cache-type-v", "f16"),
                 )
@@ -1378,6 +1380,7 @@ class ConfigurePanel(QWidget):
                 self._fit_weights or 0,
                 settings=self.current_profile().settings,
                 free_bytes_per_gpu=free,
+                engine=self.current_profile().runtime.engine,
             )
             note = ""
         if s is None:

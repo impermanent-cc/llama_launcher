@@ -181,8 +181,8 @@ pooling, or fail subtly mid-load. Use these signals to tell the difference.
 Pooling is **slower than single-box**: it is a capacity feature, not a speed
 feature; each token serializes tensors over the link. Catastrophic slowness
 usually means the interconnect (LAN bandwidth) is the bottleneck; RPC is
-bandwidth-sensitive. Avoid `--cpu-moe` / `--no-kv-offload` (they centralize
-work on the head; the launcher warns about them).
+bandwidth-sensitive. Avoid `--cpu-moe` / `--n-cpu-ffn` / `--no-kv-offload`
+(they centralize work on the head; the launcher warns about them).
 
 ### In the GUI
 

@@ -303,9 +303,11 @@ _ALL = [
         0,
         4096,
         1,
-        tooltip="Batch-size threshold for using peer-to-peer GPU copies (the "
-        "two repos' help text disagree on min vs max, so treat this as "
-        "a tuning knob rather than a precise cutoff). Default 128.",
+        engine="ik_llama.cpp",
+        tooltip="Batch-size threshold for using peer-to-peer GPU copies "
+        "(ik_llama.cpp only; its CMake help text reads 'min batch size for "
+        "GPU offload', which does not match the variable name, so treat this "
+        "as a tuning knob rather than a precise cutoff). Default 128.",
     ),
     Setting(
         "cuda-compression-mode",

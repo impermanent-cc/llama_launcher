@@ -49,6 +49,7 @@ def test_vram_check_warns_when_over(qtbot, monkeypatch):
     w._configure_panel.load_profile(_profile(131072))
     msg = w._launch.vram_check()
     assert msg is not None and "VRAM" in msg
+    assert "--n-cpu-moe" in msg and "--n-cpu-ffn" in msg
 
 
 def test_vram_check_none_when_unknown(qtbot, monkeypatch):
@@ -205,3 +206,52 @@ def test_vram_check_uses_profile_nodes_gpus(main_window, monkeypatch):
     main_window._configure_panel.load_profile(p)
     assert main_window._launch.vram_check() is not None
     assert seen["ssh"] == "me@10.0.0.2"
+
+
+def test_check_fit_estimate_honours_per_slot_context_and_engine(qtbot, monkeypatch):
+    # _model_estimate_bytes backs the pooled "Check fit" readout; it must
+    # follow the same effective-context rule as the launch-time preflight
+    # (parallel * kv-unified-per-slot on an engine that accepts the flag,
+    # the model's trained context otherwise) rather than reading ctx-size raw.
+    monkeypatch.setattr(
+        mw.model_info,
+        "read_gguf_meta",
+        lambda path: GgufMeta(
+            arch="llama",
+            n_layers=2,
+            n_head=8,
+            n_head_kv=4,
+            n_embd=64,
+            ctx_train=4096,
+            quant="Q8_0",
+        ),
+    )
+    monkeypatch.setattr(mw.model_info, "file_size", lambda path: 1000)
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    panel = w._configure_panel
+
+    explicit = _profile(16384)
+    per_slot = _profile(None, **{"kv-unified-per-slot": 4096, "parallel": 4})
+    on_ik = Profile(
+        name="v",
+        image="img",
+        runtime=Runtime(binary="podman", engine="ik_llama.cpp"),
+        mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
+        model="/models/m.gguf",
+        settings={"port": 8080, "kv-unified-per-slot": 4096, "parallel": 4},
+    )
+    trained_ctx = _profile(None)
+
+    panel.load_profile(explicit)
+    explicit_bytes = panel._model_estimate_bytes(explicit)
+    panel.load_profile(per_slot)
+    per_slot_bytes = panel._model_estimate_bytes(per_slot)
+    panel.load_profile(on_ik)
+    ik_bytes = panel._model_estimate_bytes(on_ik)
+    panel.load_profile(trained_ctx)
+    trained_bytes = panel._model_estimate_bytes(trained_ctx)
+
+    assert per_slot_bytes == explicit_bytes
+    assert ik_bytes == trained_bytes
+    assert per_slot_bytes != ik_bytes

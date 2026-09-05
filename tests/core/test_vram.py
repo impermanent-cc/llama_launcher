@@ -3,8 +3,10 @@ from types import SimpleNamespace
 from llama_launcher.core.vram import (
     VramEstimate,
     bytes_per_elem,
+    effective_ctx_size,
     estimate,
     estimate_for_model,
+    fit_summary,
     fits,
     kv_cache_bytes,
     pooled_fit,
@@ -147,7 +149,11 @@ def test_fit_summary_fits_with_margin():
 
     est = estimate_for_model(_meta(), 1000, ctx_size=100)
     s = fit_summary(
-        _meta(), 1000, settings={"ctx-size": 100}, free_bytes_per_gpu=[est + 5, est + 5]
+        _meta(),
+        1000,
+        settings={"ctx-size": 100},
+        free_bytes_per_gpu=[est + 5, est + 5],
+        engine="llama.cpp",
     )
     assert s.fits and s.margin == est + 10 and s.est_bytes == est
     assert s.free_bytes == 2 * est + 10
@@ -158,7 +164,11 @@ def test_fit_summary_over_budget_negative_margin():
 
     est = estimate_for_model(_meta(), 10_000, ctx_size=100)
     s = fit_summary(
-        _meta(), 10_000, settings={"ctx-size": 100}, free_bytes_per_gpu=[est - 7]
+        _meta(),
+        10_000,
+        settings={"ctx-size": 100},
+        free_bytes_per_gpu=[est - 7],
+        engine="llama.cpp",
     )
     assert not s.fits and s.margin == -7
 
@@ -172,6 +182,7 @@ def test_fit_summary_split_none_uses_main_gpu_only():
         0,
         settings={"ctx-size": 100, "split-mode": "none", "main-gpu": 1},
         free_bytes_per_gpu=[0, est + 3],
+        engine="llama.cpp",
     )
     assert s.fits and s.free_bytes == est + 3
 
@@ -180,13 +191,18 @@ def test_fit_summary_honors_kv_quant():
     from llama_launcher.core.vram import fit_summary
 
     f16 = fit_summary(
-        _meta(), 0, settings={"ctx-size": 4096}, free_bytes_per_gpu=[10**12]
+        _meta(),
+        0,
+        settings={"ctx-size": 4096},
+        free_bytes_per_gpu=[10**12],
+        engine="llama.cpp",
     )
     q8 = fit_summary(
         _meta(),
         0,
         settings={"ctx-size": 4096, "cache-type-k": "q8_0", "cache-type-v": "q8_0"},
         free_bytes_per_gpu=[10**12],
+        engine="llama.cpp",
     )
     assert q8.est_bytes < f16.est_bytes
 
@@ -194,12 +210,28 @@ def test_fit_summary_honors_kv_quant():
 def test_fit_summary_none_when_unknowable():
     from llama_launcher.core.vram import fit_summary
 
-    assert fit_summary(None, 1000, settings={}, free_bytes_per_gpu=[10**9]) is None
     assert (
-        fit_summary(_meta(n_layers=0), 1000, settings={}, free_bytes_per_gpu=[10**9])
+        fit_summary(
+            None, 1000, settings={}, free_bytes_per_gpu=[10**9], engine="llama.cpp"
+        )
         is None
     )
-    assert fit_summary(_meta(), 1000, settings={}, free_bytes_per_gpu=[]) is None
+    assert (
+        fit_summary(
+            _meta(n_layers=0),
+            1000,
+            settings={},
+            free_bytes_per_gpu=[10**9],
+            engine="llama.cpp",
+        )
+        is None
+    )
+    assert (
+        fit_summary(
+            _meta(), 1000, settings={}, free_bytes_per_gpu=[], engine="llama.cpp"
+        )
+        is None
+    )
 
 
 def test_router_fit_sums_k_largest():
@@ -224,3 +256,63 @@ def test_router_fit_none_when_unknowable():
     assert router_fit_summary([], models_max=4, free_bytes_per_gpu=[10**9]) is None
     assert router_fit_summary([0, 0], models_max=4, free_bytes_per_gpu=[10**9]) is None
     assert router_fit_summary([100], models_max=4, free_bytes_per_gpu=[]) is None
+
+
+# -- effective_ctx_size: the context the KV estimate should use -------------
+
+
+def test_effective_ctx_size_prefers_an_explicit_ctx_size():
+    s = {"ctx-size": 8192, "kv-unified-per-slot": 4096, "parallel": 4}
+    assert effective_ctx_size(s, "llama.cpp") == 8192
+
+
+def test_effective_ctx_size_multiplies_slots_by_the_per_slot_limit():
+    s = {"kv-unified-per-slot": 4096, "parallel": 4}
+    assert effective_ctx_size(s, "llama.cpp") == 16384
+
+
+def test_effective_ctx_size_is_unknown_when_slots_are_auto():
+    # --parallel -1 means the server picks the slot count at load time.
+    s = {"kv-unified-per-slot": 4096, "parallel": -1}
+    assert effective_ctx_size(s, "llama.cpp") is None
+    assert effective_ctx_size({"kv-unified-per-slot": 4096}, "llama.cpp") is None
+
+
+def test_effective_ctx_size_without_the_per_slot_flag_is_the_ctx_size():
+    assert effective_ctx_size({"ctx-size": 2048}, "llama.cpp") == 2048
+    assert effective_ctx_size({}, "llama.cpp") is None
+
+
+def test_effective_ctx_size_ignores_the_flag_on_an_engine_that_lacks_it():
+    s = {"kv-unified-per-slot": 4096, "parallel": 4}
+    assert effective_ctx_size(s, "ik_llama.cpp") is None
+
+
+def test_effective_ctx_size_rejects_values_that_are_not_slot_counts():
+    neg = {"kv-unified-per-slot": -1, "parallel": 4}
+    assert effective_ctx_size(neg, "llama.cpp") is None
+    bool_parallel = {"kv-unified-per-slot": 4096, "parallel": True}
+    assert effective_ctx_size(bool_parallel, "llama.cpp") is None
+    zero_ctx = {"ctx-size": "0", "kv-unified-per-slot": 4096, "parallel": 4}
+    assert effective_ctx_size(zero_ctx, "llama.cpp") == 16384
+
+
+def test_fit_summary_uses_the_per_slot_context():
+    # The estimate follows the KV pool the server will allocate (parallel * N),
+    # not the model's trained context.
+    meta = _meta()
+    explicit = fit_summary(
+        meta,
+        1000,
+        settings={"ctx-size": 16384},
+        free_bytes_per_gpu=[10**10],
+        engine="llama.cpp",
+    )
+    per_slot = fit_summary(
+        meta,
+        1000,
+        settings={"kv-unified-per-slot": 4096, "parallel": 4},
+        free_bytes_per_gpu=[10**10],
+        engine="llama.cpp",
+    )
+    assert per_slot.est_bytes == explicit.est_bytes
