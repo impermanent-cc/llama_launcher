@@ -32,7 +32,7 @@ builds produce.
 
 ![Configure tab: building a llama-server launch command](assets/screenshots/config.png)
 
-*The Configure tab: choose engine, image, model, and GPU mode; the exact command and a live VRAM-fit estimate update as you edit.*
+*The Configure tab: choose engine, image, model, and GPU mode; the exact command and a live memory estimate per card and for RAM update as you edit.*
 
 After installing (below), the GUI opens on the **Configure** tab:
 
@@ -40,7 +40,8 @@ After installing (below), the GUI opens on the **Configure** tab:
    directory holding your `.gguf` files (e.g. `/home/you/models`) and whose *container* path
    is something like `/models`. This makes the host directory visible inside the container.
 2. **Pick a model.** Use the **Model** row's **Browse…** to select a `.gguf` under that mount.
-   The launcher reads its metadata and shows a live VRAM-fit estimate.
+   The launcher reads its metadata and shows a live memory estimate per card and
+   for RAM (see [`VRAM.md`](VRAM.md)).
 3. **Set the image.** Click **Detect** to list llama.cpp images you've already pulled, or type
    one, e.g. `ghcr.io/ggml-org/llama.cpp:server-cuda` (GPU) or a CPU-tagged build for
    CPU-only (see [Running without a GPU](#running-without-a-gpu)). **Fetch latest** asks
@@ -330,39 +331,49 @@ once. Changing a key takes effect the next time the router launches.
 Drive a profile without the GUI (for test harnesses). Runs on the host with
 podman + the GPU; the harness connects in over the network.
 
-    llama-launcher --launch --profile PROFILE [--wait[=SECONDS]]
-    llama-launcher --stop   --profile PROFILE
-    llama-launcher --health --profile PROFILE
+    llama-launcher --launch   --profile PROFILE [--wait[=SECONDS]]
+    llama-launcher --stop     --profile PROFILE
+    llama-launcher --health   --profile PROFILE
+    llama-launcher --estimate --profile PROFILE [--json]
 
 `--profile` falls back to the last-used profile. `--launch --wait` blocks until
 the server answers `/health` (default 60s; models still load on demand).
+`--estimate` prints the memory estimate per card and for RAM plus any
+messages, without launching anything; see [`VRAM.md`](VRAM.md) for what it
+counts.
 
 Works for **router** and single-model **server** profiles. A validation error
 (including a bind past loopback with no API key) is refused (exit 2) before
 anything starts. A headless server launch runs **detached and persistent**
 (`-d`, no `--rm`), unlike the GUI's foreground `--rm` server, so `--stop` and
-`--health` can address it by container name.
+`--health` can address it by container name. `--estimate` needs a profile
+with a model of its own, so point it at a router member rather than the
+router itself.
 
 **Native** (self-built binary) and **RPC pool** profiles are GUI-only in this
-version and are refused headlessly (exit 1) with an explanatory message. See
-[`RPC.md`](RPC.md) for building the `GGML_RPC=ON` image an RPC pool needs.
+version and `--launch`, `--stop` and `--health` refuse them headlessly
+(exit 1) with an explanatory message; `--estimate` still works on either
+kind of profile once it has a model of its own. See [`RPC.md`](RPC.md) for
+building the `GGML_RPC=ON` image an RPC pool needs.
 
 Exit codes:
 
-| code | `--launch` | `--stop` | `--health` |
-|------|-----------|----------|-----------|
-| 0 | started (ready, with `--wait`) | stopped / already stopped | ready |
-| 1 | container run failed | stop failed | n/a |
-| 2 | usage/config error | usage/config error | usage/config error |
-| 3 | n/a | n/a | loading |
-| 4 | n/a | n/a | down / stopped |
-| 5 | `--wait` timed out (started, not ready) | n/a | n/a |
+| code | `--launch` | `--stop` | `--health` | `--estimate` |
+|------|-----------|----------|-----------|-----------|
+| 0 | started (ready, with `--wait`) | stopped / already stopped | ready | every card fits |
+| 1 | container run failed | stop failed | n/a | n/a |
+| 2 | usage/config error | usage/config error | usage/config error | usage/config error, no model of its own, no GPU visible, or metadata too thin |
+| 3 | n/a | n/a | loading | a card is over budget |
+| 4 | n/a | n/a | down / stopped | n/a |
+| 5 | `--wait` timed out (started, not ready) | n/a | n/a | n/a |
 
 ### JSON output
 
-Add `--json` to any of the three commands to get one JSON object on stdout
+Add `--json` to any of the four commands to get one JSON object on stdout
 (and nothing on stderr) instead of a human-readable line, for scripting and
-test harnesses:
+test harnesses. `--estimate --json` prints the same envelope as the other
+three plus an `estimate` object whose keys are listed in
+[`VRAM.md`](VRAM.md):
 
     llama-launcher --launch --profile ROUTER --json
 
@@ -375,12 +386,13 @@ The process exit code is unchanged (there is no `exit` field; `ok` mirrors it):
 
 | field | meaning |
 |-------|---------|
-| `action` | `"launch"`, `"stop"`, or `"health"` |
+| `action` | `"launch"`, `"stop"`, `"health"`, or `"estimate"` |
 | `ok` | `true` iff the process exit code is 0 |
-| `status` | launch: `"started"` / `"ready"`; stop: `"stopped"`; health: `"ready"` / `"loading"` / raw state; `null` on failure |
-| `name` / `host` / `port` | container name and address when known, else `null` |
+| `status` | launch: `"started"` / `"ready"`; stop: `"stopped"`; health: `"ready"` / `"loading"` / raw state; `null` for estimate and on failure |
+| `name` / `host` / `port` | container name and address when known, else `null` (`host` and `port` are always `null` for estimate) |
 | `warnings` | preset/router warnings (empty list when none) |
 | `error` | failure or gate-refusal message, else `null` |
+| `estimate` | present only for `"estimate"`: the memory estimate object, see [`VRAM.md`](VRAM.md) |
 
 ## Troubleshooting
 

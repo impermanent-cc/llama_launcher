@@ -4,9 +4,11 @@ import shlex
 from collections.abc import Callable
 
 from .settings_catalog import (
+    BARE,
     CATALOG,
     ROUTER_ONLY_KEYS,
     SKIP,
+    accepts,
     engine_value,
     router_catalog,
 )
@@ -430,6 +432,8 @@ def _run_level_args(
 
 
 def _render_setting(setting, value) -> list[str]:
+    if value is BARE:
+        return [setting.flag]
     if setting.type == "bool":
         return [setting.flag] if value else []
     # An empty/blank value is meaningless as a flag argument -- emit nothing,
@@ -487,7 +491,7 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
         # Engine-gated flags (ik_llama.cpp) must never reach a mainline launch.
         # current_profile() filters the UI path; this mirrors it for the
         # headless/CLI path, which feeds profile.settings straight from JSON.
-        if setting.engine != "any" and setting.engine != profile.runtime.engine:
+        if not accepts(setting, profile.runtime.engine):
             continue
         if key in profile.settings:
             # Per-engine VALUE rules (ik-only quants, spec-type renames, layer
@@ -512,7 +516,16 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
 _SERVER_PROTECTED = {"--host", "--port"}
 # --logit-bias is repeatable upstream (one token per occurrence), and its
 # catalog tooltip tells the user to add extra entries as raw args.
-_REPEATABLE = {"--lora", "--lora-scaled", "--logit-bias"}
+# --override-tensor and --spec-draft-override-tensor are likewise applied
+# per occurrence by llama-server, matching how raw_arg_values accumulates
+# their repeated raw spellings for the estimate.
+_REPEATABLE = {
+    "--lora",
+    "--lora-scaled",
+    "--logit-bias",
+    "--override-tensor",
+    "--spec-draft-override-tensor",
+}
 
 
 def _server_args(profile: Profile, catalog: dict, host: str = "0.0.0.0") -> list[str]:
@@ -558,6 +571,40 @@ def raw_flags(raw_args: str) -> frozenset:
     argv. Lets a caller ask whether a flag arrives by that route as well as
     from the settings form."""
     return frozenset(flag for flag, _value in _parse_raw_pairs(raw_args))
+
+
+_KEY_BY_FLAG = {s.flag: k for k, s in CATALOG.items()}
+
+# llama-server applies every repeated --override-tensor and
+# --spec-draft-override-tensor flag rather than only the last one, so their
+# raw values accumulate in argv order instead of the later-wins rule every
+# other key follows.
+ACCUMULATING_KEYS = {"override-tensor", "spec-draft-override-tensor"}
+
+
+def raw_arg_values(raw_args: str) -> dict:
+    """Catalog key -> value for every raw arg that spells a catalogued flag,
+    aliases folded to the long form; a flag given without a value maps to
+    True. A flag written as --name= with nothing after it maps to the empty
+    string. Later occurrences win, as they do in argv, except
+    --override-tensor and --spec-draft-override-tensor, whose repeated raw
+    values join with commas in order since the server applies every one."""
+    out: dict = {}
+    for flag, value in _parse_raw_pairs(raw_args):
+        key = _KEY_BY_FLAG.get(_canonical_flag(flag))
+        if key is None:
+            continue
+        value = True if value is None else value
+        prior = out.get(key)
+        if (
+            key in ACCUMULATING_KEYS
+            and isinstance(prior, str)
+            and isinstance(value, str)
+        ):
+            out[key] = f"{prior},{value}"
+        else:
+            out[key] = value
+    return out
 
 
 def raw_arg_warnings(profile: Profile, catalog: dict = CATALOG) -> list[str]:

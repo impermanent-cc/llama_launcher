@@ -10,6 +10,7 @@ import pytest
 import llama_launcher.services.gpu as _gpu
 import llama_launcher.services.health as _health
 import llama_launcher.services.metrics as _metrics
+import llama_launcher.services.pool_preflight as _pool_preflight
 import llama_launcher.services.registry as _registry
 import llama_launcher.services.router_api as _router_api
 import llama_launcher.services.runtime as _runtime
@@ -45,6 +46,7 @@ def _hermetic_ui_boundaries(monkeypatch):
     )
     monkeypatch.setattr(_health, "probe_health", lambda port, timeout=1.0, **kw: "down")
     monkeypatch.setattr(_gpu, "query_gpus", lambda ssh_target="": [])
+    monkeypatch.setattr(_pool_preflight, "free_ram_bytes", lambda ssh_target="": None)
     monkeypatch.setattr(_metrics, "fetch_metrics", lambda port, timeout=1.0, **kw: {})
     monkeypatch.setattr(_metrics, "fetch_slots", lambda port, timeout=1.0, **kw: [])
     monkeypatch.setattr(

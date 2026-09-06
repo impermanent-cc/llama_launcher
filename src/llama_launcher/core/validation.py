@@ -10,7 +10,7 @@ from .command_builder import (
     run_args_expose,
 )
 from .router_preset import convert_raw_args
-from .settings_catalog import CATALOG
+from .settings_catalog import CATALOG, accepts
 from .spec import DEFAULT_PORT, Profile, member_model_id, profile_port
 from .vram import effective_ctx_size
 
@@ -460,7 +460,7 @@ def _is_active(profile: Profile, key: str) -> bool:
     setting = CATALOG[key]
     if setting.flag in raw_flags(profile.raw_args):
         return True
-    if setting.engine != "any" and setting.engine != profile.runtime.engine:
+    if not accepts(setting, profile.runtime.engine):
         return False
     if key not in profile.settings:
         return False

@@ -1,6 +1,6 @@
 import struct
 
-from llama_launcher.core.gguf import parse_gguf_header
+from llama_launcher.core.gguf import parse_gguf_header, tensor_nbytes
 
 
 def _kv_str(key, val):
@@ -155,19 +155,17 @@ def test_array_head_counts_collapse_to_scalar():
     assert m.n_layers == 4 and m.n_embd == 4096 and m.ctx_train == 8192
 
 
-def test_array_head_counts_feed_vram_estimate_without_crash():
-    # The collapsed scalar head counts feed vram.estimate() without raising.
+def test_array_head_counts_feed_kv_cache_bytes_without_crash():
+    # The collapsed scalar head counts feed the KV-cache byte math without
+    # raising.
     from llama_launcher.core import vram
 
     m = parse_gguf_header(_arr_head_gguf())
-    est = vram.estimate(
-        n_layers=m.n_layers,
-        n_head=m.n_head or 1,
-        n_head_kv=m.n_head_kv or m.n_head or 1,
-        n_embd=m.n_embd,
-        ctx=m.ctx_train,
+    head_dim = m.n_embd // (m.n_head or 1)
+    kv = vram.kv_cache_bytes(
+        m.n_layers, m.n_head_kv or m.n_head or 1, head_dim, m.ctx_train
     )
-    assert est.total_bytes > 0
+    assert kv > 0
 
 
 def test_parses_pooling_type():
@@ -186,3 +184,131 @@ def test_parses_pooling_type():
 def test_pooling_type_absent_is_none():
     m = parse_gguf_header(_synthetic_gguf())
     assert m.pooling_type is None
+
+
+def _tensor(name, dims, ggml_type):
+    nb = name.encode()
+    out = struct.pack("<Q", len(nb)) + nb + struct.pack("<I", len(dims))
+    out += b"".join(struct.pack("<Q", d) for d in dims)
+    return out + struct.pack("<I", ggml_type) + struct.pack("<Q", 0)
+
+
+def _blob(kvs, tensors=()):
+    return (
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", len(tensors))
+        + struct.pack("<Q", len(kvs))
+        + b"".join(kvs)
+        + b"".join(tensors)
+    )
+
+
+def _kv_u16(key, val):
+    kb = key.encode()
+    return (
+        struct.pack("<Q", len(kb)) + kb + struct.pack("<I", 2) + struct.pack("<H", val)
+    )
+
+
+def _kv_arr_str(key, vals):
+    kb = key.encode()
+    out = struct.pack("<Q", len(kb)) + kb
+    out += struct.pack("<I", 9) + struct.pack("<I", 8) + struct.pack("<Q", len(vals))
+    for v in vals:
+        vb = v.encode()
+        out += struct.pack("<Q", len(vb)) + vb
+    return out
+
+
+def test_tensor_nbytes_by_type():
+    assert tensor_nbytes(1024, 0) == 4096  # f32
+    assert tensor_nbytes(1024, 1) == 2048  # f16
+    assert tensor_nbytes(1024, 2) == 32 * 18  # q4_0: 32 elements per 18 bytes
+    assert tensor_nbytes(1024, 12) == 4 * 144  # q4_K: 256 elements per 144 bytes
+    assert tensor_nbytes(1000, 2) == 32 * 18  # partial block rounds up
+    assert tensor_nbytes(1024, 99) == 2048  # unknown type counts two bytes each
+
+
+def test_parse_tensor_table():
+    kvs = [
+        _kv_str("general.architecture", "llama"),
+        _kv_u32("llama.block_count", 2),
+        _kv_u32("llama.feed_forward_length", 512),
+        _kv_u32("llama.vocab_size", 1000),
+    ]
+    tensors = [
+        _tensor("token_embd.weight", [64, 1000], 1),
+        _tensor("blk.0.attn_q.weight", [64, 64], 2),
+        _tensor("blk.0.ffn_up.weight", [64, 512], 12),
+    ]
+    m = parse_gguf_header(_blob(kvs, tensors))
+    assert [t.name for t in m.tensors] == [
+        "token_embd.weight",
+        "blk.0.attn_q.weight",
+        "blk.0.ffn_up.weight",
+    ]
+    assert m.tensors[0].n_elements == 64000
+    assert m.tensors[0].nbytes == 128000
+    assert m.tensors[1].ggml_type == 2
+    assert m.tensors[2].nbytes == (64 * 512 // 256) * 144
+    assert m.n_ff == 512
+    assert m.n_vocab == 1000
+    assert m.split_count == 1
+
+
+def test_truncated_tensor_table_yields_kv_only():
+    kvs = [_kv_str("general.architecture", "llama"), _kv_u32("llama.block_count", 2)]
+    tensors = [_tensor("blk.0.attn_q.weight", [64, 64], 2)] * 3
+    blob = _blob(kvs, tensors)
+    m = parse_gguf_header(blob[:-20])
+    assert m.n_layers == 2
+    assert m.tensors == ()
+
+
+def test_vocab_from_token_array_beats_vocab_size_key():
+    kvs = [
+        _kv_str("general.architecture", "llama"),
+        _kv_u32("llama.vocab_size", 5),
+        _kv_arr_str("tokenizer.ggml.tokens", ["a", "b", "c"]),
+    ]
+    assert parse_gguf_header(_blob(kvs)).n_vocab == 3
+
+
+def test_moe_hparams_and_split_count():
+    kvs = [
+        _kv_str("general.architecture", "qwen3moe"),
+        _kv_u32("qwen3moe.expert_count", 128),
+        _kv_u32("qwen3moe.expert_used_count", 8),
+        _kv_u32("qwen3moe.expert_feed_forward_length", 768),
+        _kv_u32("qwen3moe.feed_forward_length", 6144),
+        _kv_u16("split.count", 3),
+    ]
+    m = parse_gguf_header(_blob(kvs))
+    assert m.n_expert_used == 8
+    assert m.n_ff_exp == 768
+    assert m.n_ff == 6144
+    assert m.split_count == 3
+
+
+def test_absurd_dim_count_yields_no_tensors():
+    kvs = [_kv_str("general.architecture", "llama"), _kv_u32("llama.block_count", 2)]
+    tensors = [_tensor("blk.0.attn_q.weight", [1] * 9, 2)]
+    m = parse_gguf_header(_blob(kvs, tensors))
+    assert m.tensors == ()
+    assert m.n_layers == 2
+
+
+def test_implausible_tensor_count_yields_no_tensors():
+    kvs = [_kv_str("general.architecture", "llama"), _kv_u32("llama.block_count", 2)]
+    kvs_body = b"".join(kvs)
+    blob = (
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", 2**64 - 1)
+        + struct.pack("<Q", len(kvs))
+        + kvs_body
+    )
+    m = parse_gguf_header(blob)
+    assert m.tensors == ()
+    assert m.n_layers == 2

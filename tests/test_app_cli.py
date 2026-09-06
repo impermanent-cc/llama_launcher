@@ -1,3 +1,4 @@
+import dataclasses
 import json
 
 import llama_launcher.app as app
@@ -491,6 +492,122 @@ def test_json_health_down(monkeypatch, capsys):
     assert app.main(["--health", "--profile", "r", "--json"]) == 4
     obj = json.loads(capsys.readouterr().out)
     assert obj["ok"] is False and obj["status"] == "stopped"
+
+
+def _estimate_env(monkeypatch, free_mib=(30000,), ram=64 * 1024**3):
+    from llama_launcher.core.gguf import GgufMeta, TensorInfo
+    from llama_launcher.services import gpu, model_info, pool_preflight
+
+    ts = [TensorInfo("token_embd.weight", 1, 0, 1024**2)]
+    for i in range(4):
+        ts.append(TensorInfo(f"blk.{i}.attn_q.weight", 1, 0, 256 * 1024**2))
+        ts.append(TensorInfo(f"blk.{i}.ffn_up.weight", 1, 0, 256 * 1024**2))
+    ts.append(TensorInfo("output.weight", 1, 0, 1024**2))
+    meta = GgufMeta(
+        arch="llama",
+        n_layers=4,
+        n_head=8,
+        n_head_kv=8,
+        n_embd=64,
+        ctx_train=4096,
+        n_ff=256,
+        n_vocab=1000,
+        tensors=tuple(ts),
+    )
+    monkeypatch.setattr(model_info, "read_model", lambda host: (meta, 2 * 1024**3))
+    monkeypatch.setattr(model_info, "inspect_file", lambda path, mounts: (None, 0))
+    monkeypatch.setattr(model_info, "sibling_ggufs", lambda host: [])
+    from llama_launcher.services.gpu import GpuStat
+
+    monkeypatch.setattr(
+        gpu,
+        "query_gpus",
+        lambda ssh_target="": [GpuStat("g", 0, f, f, 0, 40) for f in free_mib],
+    )
+    monkeypatch.setattr(pool_preflight, "free_ram_bytes", lambda ssh_target="": ram)
+    monkeypatch.setattr(app, "gpu_ssh_target", lambda base, node: "")
+    monkeypatch.setattr(app, "binary_available", lambda b: True)
+
+
+def test_estimate_prints_lines_and_exits_0(monkeypatch, capsys):
+    _profiles(monkeypatch, [_server("s")])
+    _estimate_env(monkeypatch)
+    assert app.main(["--estimate", "--profile", "s"]) == 0
+    out = capsys.readouterr().out
+    assert "GPU0" in out and "RAM" in out
+    assert "<span" not in out
+    assert out.isascii()
+
+
+def test_estimate_json(monkeypatch, capsys):
+    _profiles(monkeypatch, [_server("s")])
+    _estimate_env(monkeypatch)
+    assert app.main(["--estimate", "--profile", "s", "--json"]) == 0
+    obj = json.loads(capsys.readouterr().out)
+    assert obj["action"] == "estimate" and obj["ok"] is True
+    assert obj["estimate"]["cards"][0]["fits"] is True
+    assert obj["status"] is None and obj["host"] is None and obj["port"] is None
+    assert obj["warnings"] == [] and obj["error"] is None
+
+
+def test_estimate_exit_3_when_over(monkeypatch, capsys):
+    _profiles(monkeypatch, [_server("s", **{"fit": "off"})])
+    _estimate_env(monkeypatch, free_mib=(512,))
+    assert app.main(["--estimate", "--profile", "s"]) == 3
+    out = capsys.readouterr().out
+    assert "exceeds" in out
+    assert "<span" not in out
+    assert "&gt;" not in out
+    assert ">" in out
+
+
+def test_estimate_exit_2_without_gpus(monkeypatch, capsys):
+    _profiles(monkeypatch, [_server("s")])
+    _estimate_env(monkeypatch, free_mib=())
+    assert app.main(["--estimate", "--profile", "s"]) == 2
+    assert "no GPU" in capsys.readouterr().err
+
+
+def test_estimate_router_without_own_model_exits_2(monkeypatch, capsys):
+    _ready_router(monkeypatch)
+    assert app.main(["--estimate", "--profile", "r"]) == 2
+    assert "no model of its own" in capsys.readouterr().err
+
+
+def test_estimate_json_draft_increases_card_estimate(monkeypatch, capsys):
+    from llama_launcher.core.gguf import GgufMeta, TensorInfo
+    from llama_launcher.services import model_info
+
+    draft_ts = [TensorInfo("token_embd.weight", 1, 0, 1024**2)]
+    for i in range(2):
+        draft_ts.append(TensorInfo(f"blk.{i}.attn_q.weight", 1, 0, 64 * 1024**2))
+    draft_meta = GgufMeta(
+        arch="llama",
+        n_layers=2,
+        n_head=8,
+        n_head_kv=8,
+        n_embd=64,
+        ctx_train=4096,
+        n_ff=256,
+        n_vocab=1000,
+        tensors=tuple(draft_ts),
+    )
+    profile = dataclasses.replace(_server("s"), draft_model="/models/draft.gguf")
+    _profiles(monkeypatch, [profile])
+    _estimate_env(monkeypatch)
+    assert app.main(["--estimate", "--profile", "s", "--json"]) == 0
+    baseline = json.loads(capsys.readouterr().out)["estimate"]["cards"][0]["est"]
+
+    monkeypatch.setattr(
+        model_info,
+        "inspect_file",
+        lambda path, mounts: (
+            (draft_meta, 128 * 1024**2) if path == "/models/draft.gguf" else (None, 0)
+        ),
+    )
+    assert app.main(["--estimate", "--profile", "s", "--json"]) == 0
+    with_draft = json.loads(capsys.readouterr().out)["estimate"]["cards"][0]["est"]
+    assert with_draft > baseline
 
 
 def test_gate_treats_global_key_as_present_for_health(tmp_path, monkeypatch):

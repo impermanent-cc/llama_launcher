@@ -89,3 +89,26 @@ def test_build_tab_present(qtbot):
     qtbot.addWidget(w)
     labels = [w.tabs.tabText(i) for i in range(w.tabs.count())]
     assert "Build" in labels
+
+
+def test_bottom_strip_wraps_the_readout_instead_of_widening(main_window):
+    panel = main_window._configure_panel
+    before = panel._config_bottom.minimumSizeHint().height()
+    window_width_before = main_window.minimumSizeHint().width()
+    panel.model_meta_label.setText(
+        "<br>".join(
+            [
+                "meta",
+                "GPU0: est ~13.1 / ~15.1 GiB free (weights 9.6, KV 2.4, "
+                "compute ~0.6, overhead 0.5) margin 2.0 GiB",
+                "GPU1: est ~11.0 / ~11.4 GiB free (weights 7.2, KV 2.6, "
+                "compute ~0.6, overhead 0.5) margin 0.4 GiB",
+                "RAM line",
+            ]
+        )
+    )
+    after = panel._config_bottom.minimumSizeHint().height()
+    line = panel.model_meta_label.fontMetrics().lineSpacing()
+    assert after - before <= 3 * line + 4
+    assert panel.model_meta_label.sizeHint().width() < 300
+    assert main_window.minimumSizeHint().width() == window_width_before

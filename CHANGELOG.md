@@ -27,6 +27,22 @@ not on the release page, so the two never drift.
   dots (recommended on a dense model, worth tuning on a MoE one), the RPC
   centralizing warning, the benchmark run snapshot and the over-budget VRAM
   hint.
+- The VRAM preflight reads the GGUF tensor table and places every tensor
+  the way the engine does: per card under `--tensor-split` or free-memory
+  proportions, or in RAM under `--n-gpu-layers`, `--cpu-moe`, `--n-cpu-moe`,
+  `--n-cpu-ffn` and `--override-tensor`. The Configure readout shows one line
+  per card and one for RAM; the launch dialog and the new
+  `llama-launcher --estimate --profile NAME [--json]` show the same
+  breakdown. Draft models, projectors and split models are counted. A new
+  root document, `VRAM.md`, describes the estimate and how to calibrate it.
+- A compute-buffer term scaled by `--ubatch-size` and flash attention, and a
+  RAM check against the launch node's available memory (a warning, never a
+  refusal).
+- Shortfall messages name the smallest `--n-cpu-moe` or `--n-cpu-ffn` that
+  fits, or the equivalent `--override-tensor` pattern where the engine lacks
+  the flag; with `--fit` active the message says what llama.cpp will shrink.
+- The draft offload rows accept upstream's `--override-tensor-draft`,
+  `--n-cpu-moe-draft` and `--cpu-moe-draft` spellings as aliases.
 
 ### Changed
 
@@ -52,6 +68,9 @@ not on the release page, so the two never drift.
   replaced by `--load-mode`, which was true of the load flags only.
 - The `--video-ffmpeg-dir` help no longer claims the official server images
   ship without ffmpeg; they carry ffmpeg and ffprobe on PATH.
+- An ik_llama.cpp profile with `--fit on` emitted `--fit on`, which ik's
+  parser rejects; it now emits the bare `--fit` flag, and `off` emits
+  nothing.
 
 ## [0.1.1] - 2026-09-03
 

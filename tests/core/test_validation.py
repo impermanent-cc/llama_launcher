@@ -1,7 +1,7 @@
 from llama_launcher.core.command_builder import build_command, raw_arg_warnings
 from llama_launcher.core.settings_catalog import CATALOG
 from llama_launcher.core.spec import Mount, Profile, RouterMember, RpcWorker, Runtime
-from llama_launcher.core.validation import NEGATION_PAIRS, validate
+from llama_launcher.core.validation import NEGATION_PAIRS, _is_active, validate
 
 
 def _ok_profile():
@@ -792,6 +792,17 @@ def test_pair_warning_fires_exactly_when_both_flags_are_emitted():
             if i.level == "warning"
         )
         assert warned == both_emitted, (positive, negative)
+
+
+def test_is_active_follows_the_engine_gate():
+    # n-cpu-ffn is mainline-only and _is_active must follow the same gate
+    # that accepts() and the command builder use.
+    p = _ok_profile()
+    p.settings["n-cpu-ffn"] = 8
+    p.runtime = Runtime(engine="ik_llama.cpp")
+    assert _is_active(p, "n-cpu-ffn") is False
+    p.runtime = Runtime(engine="llama.cpp")
+    assert _is_active(p, "n-cpu-ffn") is True
 
 
 def test_pair_warning_fires_when_the_negative_arrives_as_a_raw_arg():

@@ -66,6 +66,49 @@ def test_raw_flags_empty_for_blank_raw_args():
     assert cb.raw_flags("   ") == frozenset()
 
 
+def test_raw_arg_values_map_aliases_to_catalog_keys():
+    vals = cb.raw_arg_values("-ts 60,40 --n-cpu-ffn 8 -fa on --mlock -ngl 40")
+    assert vals["tensor-split"] == "60,40"
+    assert vals["n-cpu-ffn"] == "8"
+    assert vals["flash-attn"] == "on"
+    assert vals["mlock"] is True
+    assert vals["n-gpu-layers"] == "40"
+
+
+def test_raw_arg_values_empty_for_blank_raw_args():
+    assert cb.raw_arg_values("") == {}
+
+
+def test_raw_arg_values_drops_an_unknown_flag():
+    assert cb.raw_arg_values("--totally-made-up 5") == {}
+
+
+def test_raw_arg_values_reads_the_equals_form():
+    assert cb.raw_arg_values("--ctx-size=8192") == {"ctx-size": "8192"}
+
+
+def test_raw_arg_values_repeated_flag_keeps_the_last_value():
+    assert cb.raw_arg_values("--ctx-size 4096 --ctx-size 8192") == {"ctx-size": "8192"}
+
+
+def test_raw_arg_values_bare_flag_maps_to_true():
+    assert cb.raw_arg_values("--mlock") == {"mlock": True}
+
+
+def test_raw_arg_values_repeated_override_tensor_accumulates_with_commas():
+    """llama-server accepts repeated -ot flags and applies every one of
+    them, so the estimate must see them joined in order, not just the last."""
+    vals = cb.raw_arg_values("-ot exps=CPU -ot attn=CUDA0")
+    assert vals["override-tensor"] == "exps=CPU,attn=CUDA0"
+
+
+def test_raw_arg_values_repeated_spec_draft_override_tensor_accumulates():
+    vals = cb.raw_arg_values(
+        "--spec-draft-override-tensor a=CPU --spec-draft-override-tensor b=CPU"
+    )
+    assert vals["spec-draft-override-tensor"] == "a=CPU,b=CPU"
+
+
 PORTCANON = {"--host", "--port"}
 LORACANON = {"--lora", "--lora-scaled"}
 

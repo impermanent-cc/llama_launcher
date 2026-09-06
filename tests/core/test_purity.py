@@ -15,7 +15,14 @@ FORBIDDEN = (
 )
 
 # Modules that are pure-core (no I/O) and must be checked.
-_ENHANCEMENT_MODULES = {"gguf.py", "vram.py", "prometheus.py", "report.py"}
+_ENHANCEMENT_MODULES = {
+    "gguf.py",
+    "vram.py",
+    "prometheus.py",
+    "report.py",
+    "placement.py",
+    "memory_fit.py",
+}
 
 
 def test_core_has_no_io_imports():
@@ -32,7 +39,7 @@ def test_core_has_no_io_imports():
 
 
 def test_enhancement_modules_are_pure():
-    """The 4 core enhancement modules must not contain any file-read or I/O tokens."""
+    """The listed core enhancement modules must not contain any file-read or I/O tokens."""
     core_dir = (
         pathlib.Path(__file__).resolve().parents[2] / "src" / "llama_launcher" / "core"
     )

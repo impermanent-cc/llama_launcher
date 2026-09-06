@@ -11,14 +11,22 @@ settled, then to TASKS.md when a cycle picks them up.
   per flag: add with plumbing, or record as out of scope.
 - Periodic re-audit of both engines: common/arg.cpp against
   settings_catalog, root and ggml CMakeLists.txt against build_catalog.
-- Decide how --fit (upstream default on) interacts with the app's own VRAM
-  preflight, which may now be warning about sizes llama.cpp would shrink.
+- Offload sweep: launch a profile at each n-cpu-ffn or n-cpu-moe count in
+  a range the estimate bounds, run the benchmark sweep at each, record and
+  compare, and offer to write the winner into the profile; read the measured
+  compute buffer from the server's exit-time memory breakdown and show it
+  beside the estimate.
 - Documentation cycle: README, CHANGELOG and RPC.md to ASCII and dash-free
   so they leave the guard allowlist; reword the legacy ` -- ` comment
   separators and turn the doubled-hyphen guard on.
 
 ## Later
 
+- Read a sliding-window model's per-layer window pattern so its KV estimate
+  is exact instead of the labelled upper bound.
+- Reproduce mainline fit's per-card layer distribution for the predicted
+  context after shrinking.
+- Re-audit ik_llama.cpp's fit and split mode graph when they change.
 - Live multi-node testing on a GPU worker; pooled inference across
   CPU-only rpc-servers crashes upstream and cannot be tested here.
 - Server-mode --api-key delivered through a key file (mount plumbing; low

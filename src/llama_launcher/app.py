@@ -3,15 +3,17 @@ import json
 import shlex
 import sys
 
+from llama_launcher.core import memory_fit
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.report import redact_secrets
 from llama_launcher.core.spec import profile_port
 from llama_launcher.core.validation import dial_host, validate
 from llama_launcher.services import api_key as api_key_store
-from llama_launcher.services import headless
+from llama_launcher.services import gpu, headless, model_info, pool_preflight
 from llama_launcher.services.native import native_binary_ok_for
 from llama_launcher.services.runtime import binary_available
 from llama_launcher.services.terminal import DEFAULT_TEMPLATE, build_terminal_argv
+from llama_launcher.store.nodes import gpu_ssh_target
 from llama_launcher.store.profiles import (
     default_base_dir,
     list_profiles,
@@ -272,6 +274,83 @@ def _do_health(p, base_dir, as_json=False):
     )
 
 
+_ESTIMATE_EXIT = {True: 0, False: 3}
+
+
+def _do_estimate(p, base_dir, as_json=False):
+    if not p.model:
+        msg = "profile has no model of its own; estimate a member profile"
+        return _emit(
+            as_json,
+            "estimate",
+            2,
+            name=p.name,
+            error=msg,
+            text_err=f"'{p.name}': {msg}",
+        )
+    mounts = p.mounts
+    meta, weights, _caps = model_info.inspect_model(p.model, mounts)
+    draft_meta, draft_weights = (
+        model_info.inspect_file(p.draft_model, mounts) if p.draft_model else (None, 0)
+    )
+    _mm, mmproj_bytes = (
+        model_info.inspect_file(p.mmproj, mounts) if p.mmproj else (None, 0)
+    )
+    ssh = gpu_ssh_target(base_dir, p.runtime.node)
+    gpus = gpu.query_gpus(ssh)
+    mib = 1024 * 1024
+    if not gpus:
+        return _emit(
+            as_json,
+            "estimate",
+            2,
+            name=p.name,
+            error="no GPU visible on the launch node",
+            text_err=f"'{p.name}': no GPU visible on the launch node",
+        )
+    report = memory_fit.fit_report(
+        meta,
+        weights or 0,
+        settings=p.settings,
+        engine=p.runtime.engine,
+        free_bytes_per_gpu=[g.mem_free_mib * mib for g in gpus],
+        ram_available=pool_preflight.free_ram_bytes(ssh) or None,
+        raw_args=p.raw_args,
+        draft_meta=draft_meta,
+        draft_weights=draft_weights or 0,
+        mmproj_bytes=mmproj_bytes or 0,
+    )
+    if report is None:
+        return _emit(
+            as_json,
+            "estimate",
+            2,
+            name=p.name,
+            error="model metadata too thin for an estimate",
+            text_err=f"'{p.name}': model metadata too thin for an estimate",
+        )
+    code = _ESTIMATE_EXIT[report.fits]
+    if as_json:
+        obj = {
+            "action": "estimate",
+            "ok": report.fits,
+            "status": None,
+            "name": p.name,
+            "host": None,
+            "port": None,
+            "warnings": [],
+            "error": None,
+            "estimate": memory_fit.to_json(report),
+        }
+        print(json.dumps(obj))
+        return code
+    for line in memory_fit.plain_lines(report):
+        print(line)
+    for m in report.messages:
+        print(m.text)
+    return code
+
+
 def main(argv=None) -> int:
     parser = argparse.ArgumentParser(add_help=True)
     parser.add_argument("--dry-run", action="store_true", dest="dry_run")
@@ -281,6 +360,7 @@ def main(argv=None) -> int:
     group.add_argument("--launch", action="store_true")
     group.add_argument("--stop", action="store_true")
     group.add_argument("--health", action="store_true")
+    group.add_argument("--estimate", action="store_true")
     parser.add_argument("--wait", nargs="?", const=60.0, type=float, default=None)
     parser.add_argument("--json", action="store_true")
 
@@ -289,9 +369,17 @@ def main(argv=None) -> int:
     if args.dry_run:
         return dry_run(args.profile)
 
-    if args.launch or args.stop or args.health:
+    if args.launch or args.stop or args.health or args.estimate:
         base = default_base_dir()
-        action = "launch" if args.launch else "stop" if args.stop else "health"
+        action = (
+            "launch"
+            if args.launch
+            else "stop"
+            if args.stop
+            else "health"
+            if args.health
+            else "estimate"
+        )
         p, code, msg = _resolve_and_gate(action, args.profile, base)
         if code is not None:
             return _emit(
@@ -301,7 +389,9 @@ def main(argv=None) -> int:
             return _do_launch(p, base, args.wait, args.json)
         if args.stop:
             return _do_stop(p, base, args.json)
-        return _do_health(p, base, args.json)
+        if args.health:
+            return _do_health(p, base, args.json)
+        return _do_estimate(p, base, args.json)
 
     # GUI path: only import Qt here so that importing app.py never constructs QApplication.
     from PySide6.QtWidgets import QApplication
