@@ -12,6 +12,14 @@ not on the release page, so the two never drift.
 
 ### Added
 
+- An offload sweep in the Benchmark tab: launches the profile once per
+  `--n-cpu-ffn` (dense) or `--n-cpu-moe` (MoE) count over a range the
+  memory estimate prefills, benchmarks each, records the measured model, KV
+  and compute buffers from the server log and shows their per-card total
+  beside the estimate, marks the fastest count and writes it into the
+  profile on Apply. Sweep launches run at log verbosity 4, the level at
+  which llama.cpp 0.4.0 prints the buffer lines, and the parser reads the
+  timestamped 0.4.0 log format.
 - Four llama.cpp 0.4.0 server flags: `--kv-unified-per-slot` (per-slot context
   limit, under GPU and Memory) and `--video-fps`,
   `--video-timestamp-interval` and `--video-ffmpeg-dir` (Multimodal). All four

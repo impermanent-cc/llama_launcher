@@ -20,14 +20,16 @@ RPC pooling across machines.
   llama-server flag the app exposes, per engine), build_catalog and
   build_spec (image build options), command_builder (profile to argv),
   validation, vram, gguf, placement and memory_fit (the memory estimate
-  from the GGUF tensor table, its per-card fit and messages), capabilities
+  from the GGUF tensor table, its per-card fit and messages), sweep (the
+  offload sweep's knob, counts, log parser and winner), capabilities
   (what the chosen engine and build support), instances, nodes, pathmap,
   router_* (router presets, models, events), lora_state, mtp_stats,
   prometheus, report.
 - src/llama_launcher/services/: processes and I/O. runtime (launch, stop,
   grace period), native, terminal (emulator detection), health, metrics,
   stats and sysstat, container_stats, gpu, rpc and pool_preflight, registry
-  and model_info, benchmark and benchmark_store, headless, api_key,
+  and model_info, benchmark and benchmark_store, sweep and sweep_store
+  (the offload sweep runner and its per-profile result), headless, api_key,
   router_api, lora_api.
 - src/llama_launcher/store/: on-disk profiles, builds and nodes with
   atomic writes (_io).

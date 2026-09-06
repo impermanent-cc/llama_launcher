@@ -11,17 +11,21 @@ settled, then to TASKS.md when a cycle picks them up.
   per flag: add with plumbing, or record as out of scope.
 - Periodic re-audit of both engines: common/arg.cpp against
   settings_catalog, root and ggml CMakeLists.txt against build_catalog.
-- Offload sweep: launch a profile at each n-cpu-ffn or n-cpu-moe count in
-  a range the estimate bounds, run the benchmark sweep at each, record and
-  compare, and offer to write the winner into the profile; read the measured
-  compute buffer from the server's exit-time memory breakdown and show it
-  beside the estimate.
 - Documentation cycle: README, CHANGELOG and RPC.md to ASCII and dash-free
   so they leave the guard allowlist; reword the legacy ` -- ` comment
   separators and turn the doubled-hyphen guard on.
 
 ## Later
 
+- After the offload sweep: a ubatch sweep on the same runner, a headless
+  --sweep command, and sweeps on a remote node through the node's podman.
+- Placement sweep on the same runner: vary --override-tensor moves of whole
+  blocks or tensor families across the --tensor-split boundary on a two-card
+  box, score by the fitted context the server logs (n_ctx_slot) and by the
+  graph split count, and rank by per-card capacity (free VRAM over that
+  card's per-token KV cost, minimum across cards); the same rule replaces
+  the summed-budget predicted context. Log lines to add to the parser: RS
+  buffer size, graph splits, n_ctx_slot.
 - Read a sliding-window model's per-layer window pattern so its KV estimate
   is exact instead of the labelled upper bound.
 - Reproduce mainline fit's per-card layer distribution for the predicted

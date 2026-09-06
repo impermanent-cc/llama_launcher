@@ -283,6 +283,31 @@ so changing a flag and re-running tells you immediately whether it helped. Works
 for both single-model **server** and **router** profiles (router scopes the
 request to the loaded model).
 
+The sweep row below the benchmark controls drives an offload sweep: it
+restarts the profile once per count of its CPU offload knob
+(`--n-cpu-moe` on a MoE model, `--n-cpu-ffn` on a dense one), from the
+smallest count that fits up to that plus 8 in steps of 2, plus a ready
+timeout in seconds (default 600, all four fields editable), benchmarking
+each restart with the sizes and settings above and
+reading the model, KV and compute buffer sizes the server log reports for
+each count. A count whose container fails to start or does not answer
+`/health` within the ready timeout is recorded as failed with its last log
+line, and the sweep moves on to the next count; Cancel stops after the
+point in flight and leaves the stored sweep untouched. The latest stored
+sweep of the loaded profile is shown again when the profile loads. The
+table marks the fastest ok count as best; **Apply**
+writes that count into the Configure form and saves the profile, but only
+while the profile the sweep ran is still the one loaded there. Sweep is
+refused, with a one-line reason shown in the panel, for a router profile, a
+native or RPC launch mode, a profile whose node is not local, a profile
+with no model selected, an engine that lacks the sweep's knob (ik_llama.cpp
+has no `--n-cpu-ffn`), raw arguments that carry the knob's flag, and while
+the profile's own instance or a previous sweep container is running
+(checked at start, since the sweep container reuses the port), a benchmark
+or another sweep is already running, or the prompt sizes field above is
+empty. Closing the window mid-sweep removes the sweep's container on the
+way out.
+
 ## Stats dock (live CPU / GPU / memory)
 
 Toggle the **📊 Stats** button in the top bar (or `Ctrl+Shift+S`) to show a dockable live
