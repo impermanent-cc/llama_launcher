@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
-from .settings_catalog import CATALOG
+from . import placement as _pl
+from .settings_catalog import CATALOG, accepts
 
 _BYTES_PER_ELEM = {
     "f32": 4.0,
@@ -19,70 +20,11 @@ def bytes_per_elem(quant: str) -> float:
     return _BYTES_PER_ELEM.get((quant or "").lower(), 2.0)
 
 
-@dataclass
-class VramEstimate:
-    kv_bytes: int
-    weights_bytes: int
-    overhead_bytes: int
-
-    @property
-    def total_bytes(self) -> int:
-        return self.kv_bytes + self.weights_bytes + self.overhead_bytes
-
-
 def kv_cache_bytes(
     n_layers, n_head_kv, head_dim, ctx, k_quant="f16", v_quant="f16"
 ) -> int:
     per = int(n_layers) * int(ctx) * int(n_head_kv) * int(head_dim)
     return int(per * bytes_per_elem(k_quant) + per * bytes_per_elem(v_quant))
-
-
-def estimate(
-    *,
-    n_layers,
-    n_head,
-    n_head_kv,
-    n_embd,
-    ctx,
-    k_quant="f16",
-    v_quant="f16",
-    weights_bytes=0,
-    overhead_bytes=536870912,
-) -> VramEstimate:
-    head_dim = (int(n_embd) // int(n_head)) if n_head else 0
-    kv = kv_cache_bytes(n_layers, n_head_kv, head_dim, ctx, k_quant, v_quant)
-    return VramEstimate(
-        kv_bytes=kv,
-        weights_bytes=int(weights_bytes),
-        overhead_bytes=int(overhead_bytes),
-    )
-
-
-def estimate_for_model(
-    meta, weights_bytes, *, ctx_size=None, k_quant="f16", v_quant="f16"
-) -> int:
-    """Weights+KV total-bytes estimate for a model from its GGUF metadata.
-
-    `meta` is a model_info.inspect_model result (duck-typed: n_layers/n_head/
-    n_head_kv/n_embd/ctx_train). When metadata is too thin for a KV estimate,
-    fall back to the weights size alone. Shared by the single-node preflight
-    (LaunchController.vram_check) and the pooled one (Check fit) so both derive
-    the estimate identically. ctx precedence: explicit ctx_size -> meta.ctx_train
-    -> 4096."""
-    if meta is None or not meta.n_layers or not meta.n_embd:
-        return int(weights_bytes or 0)
-    ctx = ctx_size or meta.ctx_train or 4096
-    est = estimate(
-        n_layers=meta.n_layers,
-        n_head=meta.n_head or 1,
-        n_head_kv=meta.n_head_kv or meta.n_head or 1,
-        n_embd=meta.n_embd,
-        ctx=ctx,
-        k_quant=k_quant,
-        v_quant=v_quant,
-        weights_bytes=weights_bytes or 0,
-    )
-    return est.total_bytes
 
 
 def fits(estimate_bytes: int, free_bytes: int) -> tuple[bool, int]:
@@ -123,7 +65,7 @@ def effective_ctx_size(settings: dict, engine: str) -> int | None:
     if ctx:
         return ctx
     setting = CATALOG["kv-unified-per-slot"]
-    if setting.engine != "any" and setting.engine != engine:
+    if not accepts(setting, engine):
         return None
     per_slot = _positive_int(settings.get("kv-unified-per-slot"))
     parallel = _positive_int(settings.get("parallel"))
@@ -142,55 +84,6 @@ def _positive_int(value) -> int | None:
     except (TypeError, ValueError, OverflowError):
         return None
     return n if n > 0 else None
-
-
-@dataclass
-class FitSummary:
-    est_bytes: int
-    free_bytes: int
-    free_per_gpu: tuple
-    fits: bool
-    margin: int
-
-
-def fit_summary(
-    meta,
-    weights_bytes,
-    *,
-    settings: dict,
-    free_bytes_per_gpu,
-    engine: str,
-) -> FitSummary | None:
-    """The single estimate-vs-free computation behind every single-node VRAM
-    preflight (the launch-time vram_check dialog and the Configure tab's live
-    fit readout), so they can never disagree. `settings` is a profile settings
-    dict; placement (split-mode/main-gpu) picks the free-VRAM budget the same
-    way llama.cpp will place the model. None when the answer is unknowable --
-    metadata too thin for a KV estimate, or no GPU info -- so callers show
-    nothing rather than wrong numbers.
-    """
-    if meta is None or not meta.n_layers or not meta.n_embd or not free_bytes_per_gpu:
-        return None
-    free = available_free_bytes(
-        free_bytes_per_gpu,
-        settings.get("split-mode", "layer"),
-        settings.get("main-gpu", 0),
-    )
-    est = estimate_for_model(
-        meta,
-        weights_bytes,
-        ctx_size=effective_ctx_size(settings, engine),
-        k_quant=settings.get("cache-type-k", "f16"),
-        v_quant=settings.get("cache-type-v", "f16"),
-    )
-    ok, margin = fits(est, free)
-    return FitSummary(
-        est_bytes=est,
-        free_bytes=free,
-        free_per_gpu=tuple(int(b) for b in free_bytes_per_gpu),
-        fits=ok,
-        margin=margin,
-    )
 
 
 @dataclass
@@ -252,3 +145,252 @@ def pooled_fit(estimate_bytes: int, donations: list[tuple[str, int]]) -> PooledF
     total = vram + ram
     margin = total - int(estimate_bytes)
     return PooledFit(fits=margin >= 0, margin=margin, vram_bytes=vram, ram_bytes=ram)
+
+
+# Coefficients of the f32 activation terms the compute buffer holds per
+# micro-batch token; the attention-scores term applies without flash
+# attention. Calibrated against llama.cpp's memory breakdown as VRAM.md
+# describes.
+COMPUTE_TERMS = {"logits": 1.0, "ffn": 3.0, "residual": 8.0, "attn_scores": 1.0}
+# Backend context and allocator pool per visible card.
+CARD_OVERHEAD_BYTES = 512 * 1024 * 1024
+_F32 = 4
+
+
+@dataclass(frozen=True)
+class CardEstimate:
+    weights: int
+    kv: int
+    compute: int
+    overhead: int
+
+    @property
+    def total(self) -> int:
+        return self.weights + self.kv + self.compute + self.overhead
+
+
+@dataclass(frozen=True)
+class RamEstimate:
+    weights: int
+    kv: int
+    buffers: int
+
+    @property
+    def total(self) -> int:
+        return self.weights + self.kv + self.buffers
+
+
+@dataclass(frozen=True)
+class MemoryEstimate:
+    cards: tuple
+    ram: RamEstimate
+    ctx: int
+    kv_upper_bound: bool
+
+    @property
+    def gpu_total(self) -> int:
+        return sum(c.total for c in self.cards)
+
+    @property
+    def model_total(self) -> int:
+        """Weights and KV on every device, the figure a pool or router
+        readout spreads across its budget."""
+        return (
+            sum(c.weights + c.kv for c in self.cards) + self.ram.weights + self.ram.kv
+        )
+
+
+def compute_bytes(meta, *, ubatch: int, ctx: int, flash_attn: bool) -> int:
+    """The per-card compute buffer: f32 activations for one micro-batch,
+    logits, FFN (active experts on a MoE model), residual stream and,
+    without flash attention, the attention scores over the context."""
+    n_ff_exp = int(meta.n_ff_exp) if meta.n_ff_exp else 0
+    n_expert_used = int(meta.n_expert_used) if meta.n_expert_used else 0
+    n_ff = (
+        n_ff_exp * n_expert_used if n_ff_exp and n_expert_used else int(meta.n_ff or 0)
+    )
+    n_vocab = int(meta.n_vocab) if meta.n_vocab else 0
+    n_embd = int(meta.n_embd) if meta.n_embd else 0
+    n_head = int(meta.n_head) if meta.n_head else 0
+    per_token = (
+        COMPUTE_TERMS["logits"] * n_vocab
+        + COMPUTE_TERMS["ffn"] * n_ff
+        + COMPUTE_TERMS["residual"] * n_embd
+    )
+    scores = 0.0 if flash_attn else COMPUTE_TERMS["attn_scores"] * n_head * int(ctx)
+    return int(_F32 * int(ubatch) * (per_token + scores))
+
+
+def _flag_on(settings, engine, key) -> bool:
+    setting = CATALOG.get(key)
+    return bool(setting) and accepts(setting, engine) and bool(settings.get(key))
+
+
+def _model_part(meta, weights_bytes, *, settings, engine, free, ctx, draft):
+    """Per-card (weights, kv), RAM weights and RAM KV for one model."""
+    n_layers = int(meta.n_layers)
+    ngl_key = "spec-draft-ngl" if draft else "n-gpu-layers"
+    ngl_value = (
+        settings.get(ngl_key, "auto") if accepts(CATALOG[ngl_key], engine) else "auto"
+    )
+    devices = _pl.layer_devices(
+        n_layers, _pl.gpu_layer_count(ngl_value, n_layers, engine), engine
+    )
+    ot_key = "spec-draft-override-tensor" if draft else "override-tensor"
+    overrides = (
+        _pl.parse_overrides(settings.get(ot_key))
+        if accepts(CATALOG[ot_key], engine)
+        else []
+    )
+    placed = _pl.place(
+        meta.tensors,
+        n_layers,
+        devices=devices,
+        rules=_pl.cpu_rules(settings, engine, draft=draft),
+        overrides=overrides,
+        weights_fallback=weights_bytes or 0,
+    )
+    dist = _pl.distribute(
+        placed,
+        free_per_card=free,
+        tensor_split=settings.get("tensor-split", ""),
+        split_mode=settings.get("split-mode", "layer"),
+        main_gpu=settings.get("main-gpu", 0),
+        engine=engine,
+    )
+    n_cards = len(free)
+    weights = [0] * n_cards
+    kv = [0] * n_cards
+    layer_bytes = [*list(placed.layer_gpu), placed.output_gpu]
+    split_mode = settings.get("split-mode", "layer")
+    if not meta.tensors and placed.output_gpu and n_cards > 1 and split_mode != "none":
+        # With no tensor table the whole model is one fallback blob; spread it
+        # by the same proportions a real per-layer table would land on, not
+        # onto the single card the last discrete layer position would pick.
+        points = _pl.split_fractions(settings.get("tensor-split", ""), free, n_cards)
+        shares = [points[0]] + [points[i] - points[i - 1] for i in range(1, n_cards)]
+        for card, frac in enumerate(shares):
+            weights[card] += int(placed.output_gpu * frac)
+    else:
+        for il, share in enumerate(dist.weight_share):
+            for card, frac in enumerate(share):
+                weights[card] += int(layer_bytes[il] * frac)
+    n_embd = int(meta.n_embd) if meta.n_embd else 0
+    n_head = int(meta.n_head) if meta.n_head else 0
+    n_head_kv = int(meta.n_head_kv) if meta.n_head_kv else n_head
+    head_dim = (n_embd // n_head) if n_head else 0
+    k_quant = settings.get("cache-type-k", "f16")
+    v_quant = settings.get("cache-type-v", "f16")
+    if draft:
+        if accepts(CATALOG["cache-type-k-draft"], engine):
+            k_quant = settings.get("cache-type-k-draft", k_quant)
+        if accepts(CATALOG["cache-type-v-draft"], engine):
+            v_quant = settings.get("cache-type-v-draft", v_quant)
+    per_layer_kv = kv_cache_bytes(
+        1,
+        n_head_kv or n_head or 1,
+        head_dim,
+        ctx,
+        k_quant,
+        v_quant,
+    )
+    ram_kv = 0
+    kv_in_ram = _flag_on(settings, engine, "no-kv-offload")
+    for il in range(n_layers):
+        card = dist.kv_card[il]
+        if card is None or kv_in_ram:
+            ram_kv += per_layer_kv
+        else:
+            kv[card] += per_layer_kv
+    return weights, kv, placed.cpu_bytes, ram_kv
+
+
+def estimate_memory(
+    meta,
+    weights_bytes,
+    *,
+    settings,
+    engine,
+    free_bytes_per_gpu,
+    raw_args="",
+    draft_meta=None,
+    draft_weights=0,
+    mmproj_bytes=0,
+):
+    """Weights, KV, compute and overhead per card plus weights, KV and host
+    buffers in RAM for a profile, with the draft model placed by its own
+    flags and the projector on --main-gpu unless kept off the card. None
+    when the metadata cannot support an estimate."""
+    if meta is None or not meta.n_layers or not meta.n_embd:
+        return None
+    eff = _pl.effective_settings(settings, raw_args)
+    free = [int(b) for b in free_bytes_per_gpu] or [0]
+    n_cards = len(free)
+    ctx = effective_ctx_size(eff, engine) or meta.ctx_train or 4096
+    batch = _positive_int(eff.get("batch-size")) or int(CATALOG["batch-size"].default)
+    ubatch = _positive_int(eff.get("ubatch-size")) or int(
+        CATALOG["ubatch-size"].default
+    )
+    batch = min(batch, ctx)
+    ubatch = min(ubatch, batch)
+    flash = str(eff.get("flash-attn", "auto")) != "off"
+    weights, kv, ram_w, ram_kv = _model_part(
+        meta,
+        weights_bytes,
+        settings=eff,
+        engine=engine,
+        free=free,
+        ctx=ctx,
+        draft=False,
+    )
+    compute = [0] * n_cards
+    split_mode = eff.get("split-mode", "layer")
+    main_idx = _positive_int(eff.get("main-gpu")) or 0
+    main_idx = main_idx if 0 <= main_idx < n_cards else 0
+    if split_mode == "row":
+        used_cards = {main_idx} if weights[main_idx] or kv[main_idx] else set()
+    else:
+        used_cards = {i for i in range(n_cards) if weights[i] or kv[i]}
+    for i in used_cards:
+        compute[i] += compute_bytes(meta, ubatch=ubatch, ctx=ctx, flash_attn=flash)
+    if draft_meta is not None and draft_meta.n_layers and draft_meta.n_embd:
+        dctx = (
+            _positive_int(eff.get("ctx-size-draft"))
+            if accepts(CATALOG["ctx-size-draft"], engine)
+            else None
+        )
+        dw, dkv, dram_w, dram_kv = _model_part(
+            draft_meta,
+            draft_weights,
+            settings=eff,
+            engine=engine,
+            free=free,
+            ctx=dctx or ctx,
+            draft=True,
+        )
+        for i in range(n_cards):
+            weights[i] += dw[i]
+            kv[i] += dkv[i]
+        if split_mode == "row":
+            draft_used = {main_idx} if dw[main_idx] or dkv[main_idx] else set()
+        else:
+            draft_used = {i for i in range(n_cards) if dw[i] or dkv[i]}
+        for i in draft_used:
+            compute[i] += compute_bytes(
+                draft_meta, ubatch=ubatch, ctx=dctx or ctx, flash_attn=flash
+            )
+        ram_w += dram_w
+        ram_kv += dram_kv
+    if mmproj_bytes:
+        if _flag_on(eff, engine, "no-mmproj-offload"):
+            ram_w += int(mmproj_bytes)
+        else:
+            weights[main_idx] += int(mmproj_bytes)
+    cards = tuple(
+        CardEstimate(weights[i], kv[i], compute[i], CARD_OVERHEAD_BYTES)
+        for i in range(n_cards)
+    )
+    n_vocab = int(meta.n_vocab) if meta.n_vocab else 0
+    buffers = int(n_vocab * batch * _F32)
+    swa = bool(meta.sliding_window) and not _flag_on(eff, engine, "swa-full")
+    return MemoryEstimate(cards, RamEstimate(ram_w, ram_kv, buffers), int(ctx), swa)

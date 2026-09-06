@@ -26,9 +26,11 @@ never reach a mainline build command. Re-audits against upstream
 carried out by hand: the flag fixtures are the suite's only upstream
 oracle, and the build catalog has none.
 
-2.3 Before a launch the app reads the GGUF header and estimates VRAM
-against the selected GPU mode and context size, and warns or refuses
-according to validation, rather than letting the server fail late.
+2.3 Before a launch the app reads the GGUF header, including its tensor
+table, and estimates memory per GPU and for host RAM against the profile's
+placement flags and context size, and warns or refuses according to
+validation, rather than letting the server fail late. Items 2.14 to 2.25
+define the estimate and its messages.
 
 2.4 Launch modes: container via podman or docker, native binary,
 foreground in a detected terminal emulator, or headless control. The stop
@@ -77,6 +79,110 @@ one, whose non-expert layers still carry dense FFN weights.
 `--override-tensor`) warns on an RPC pool launch, for those of them that
 reach argv for that launch's engine.
 
+2.14 The GGUF reader returns, beside the hyperparameters, the tensor table
+of the file: each tensor's name, element count, GGML type and byte size,
+plus the FFN width, the vocabulary size and the experts used per token. A
+split model, whose parts share a directory and carry part-of-total names,
+yields the tables of every part. When the table cannot be read the
+estimate counts the file size as GPU weights, as before.
+
+2.15 A pure placement function in core assigns every tensor to a card or
+to host RAM by applying, in this order, the rules the engine applies:
+`--n-gpu-layers N` places the output layer and the last N minus one block
+layers on cards under llama.cpp, and the last N block layers with the
+output layer only past them under ik_llama.cpp, every other layer staying
+in RAM; `--cpu-moe`, `--n-cpu-moe` and
+`--n-cpu-ffn` expand to upstream's per-layer patterns, using upstream's
+expert and dense FFN regexes verbatim; `--override-tensor` patterns are
+evaluated last, against every tensor no CPU rule claimed, including tensors
+on layers `--n-gpu-layers` keeps in RAM; they are matched in order, first
+match wins, a CPU target means RAM and any other target means a card. A flag participates only when
+the chosen engine accepts it, through the same gate the command builder
+uses. Under ik_llama.cpp the `auto` value of n-gpu-layers means no layer
+is offloaded, matching what the command sends. Token embeddings stay in
+RAM as the input layer; a model without an `output.weight` tensor reuses
+them as its output matrix, and that copy is placed with the output layer.
+
+2.16 GPU layers are distributed across cards by `--tensor-split` when set
+and otherwise in proportion to each card's free VRAM, as both engines do.
+A layer's KV cache is placed with its layer, and `--no-kv-offload` moves
+all of it to RAM. Split mode `row` places weights by the same proportion
+and the KV cache and compute buffer on `--main-gpu`; split mode `none`
+places everything on `--main-gpu`; ik's `graph` mode is placed like
+`layer`.
+
+2.17 A draft model is placed by the same function with the draft twins of
+the offload flags, and carries its own KV cache at the draft context when
+set and the main context otherwise. The draft twins are the catalog's
+existing mainline-only rows `spec-draft-override-tensor`,
+`spec-draft-n-cpu-moe` and `spec-draft-cpu-moe`, which also accept
+upstream's `--override-tensor-draft`, `--n-cpu-moe-draft` and
+`--cpu-moe-draft` spellings as aliases. A projector file adds its size to
+the GPU unless `--no-mmproj-offload` is set.
+
+2.18 The KV cache of a sliding-window model is estimated at full context
+for every layer and labelled as an upper bound wherever it is shown.
+
+2.19 The compute buffer is estimated per card from a formula of ubatch-
+scaled terms (logits, FFN activations, attention scores, residual stream)
+plus a fixed backend constant, with the attention-scores term absent when
+flash attention is on or auto. The term table lives in the VRAM module and
+every rendering of the value marks it approximate. The logical batch size
+adds a host-side output buffer to the RAM total. The calibration procedure
+against llama.cpp's exit-time memory breakdown is documented so the
+constants can be refitted when upstream changes its graphs.
+
+2.20 The fit check compares each card's estimated total (weights, KV,
+compute, overhead) with that card's free VRAM, and the RAM total
+(weights, KV, host buffers) with the available memory of the launch node,
+local or over ssh. A card shortfall names the card and the missing amount.
+A RAM shortfall is a warning and never a refusal; under load-mode `none`
+or `mlock` its wording states the launch fails, otherwise that the server
+pages.
+
+2.21 A card shortfall message names the smallest `--n-cpu-moe` value (MoE
+model) or `--n-cpu-ffn` value (dense model) at which every card fits,
+found by evaluating the placement function for increasing counts. On an
+engine that lacks `--n-cpu-ffn` the message gives the equivalent
+`--override-tensor` value, an explicit alternation of layer indices with
+upstream's dense FFN regex. When no count fits, the message says so.
+
+2.22 On mainline, `--fit` acts only on values left unset: it is active when
+`--fit` is unset or on and none of `--n-gpu-layers`, `--override-tensor`,
+`--cpu-moe`, `--n-cpu-moe`, `--n-cpu-ffn` or `--tensor-split` is set and
+the split mode is `layer` (or there is one card). Under an active fit a
+shortfall produces a note that llama.cpp will not fail: with no
+`--ctx-size` it shrinks the context toward `--fit-ctx` (default 4096) and
+then drops whole layers, and the note names the context it reaches,
+solved against the summed free VRAM less the per-card `--fit-target`
+margin (default 1024 MiB); with `--ctx-size` set it keeps that context and
+moves whole layers to RAM, experts first on a MoE model, and the note says
+so without a predicted context. The note reaches the abortable launch
+dialog only when `--fit` is unset; an explicit `on` keeps the launch
+silent and the readout carries the note. Unset is treated as active on
+every image.
+
+2.23 On ik_llama.cpp with `--fit` on, a MoE model that does not fit gets a
+note that ik keeps the experts of as many layers as needed in RAM with
+context and layer count unchanged, and the RAM total includes them; a dense
+model that does not fit gets a warning that ik refuses to load it. With
+`--fit` unset or off on ik the plain shortfall applies. The command builder
+sends bare `--fit` for `on` under ik and nothing for `off`, ik's default,
+and the setting's tooltip states each engine's default.
+
+2.24 The Configure readout shows the model meta line, one line per card
+("GPUn est / free GiB" with the weights, KV and compute parts in
+brackets), and one RAM line, with word wrap on so no line widens the
+window; the label's tooltip carries the full part list with the
+approximate and upper-bound notes. The launch preflight dialog shows the
+same breakdown. The router readout sums per-member card totals and the
+pool fit consumes the same breakdown with unchanged semantics. One pure
+core function renders these lines for the readout, the tooltip, the
+dialog and the CLI.
+
+2.25 `--estimate --profile NAME` prints the breakdown of 2.24 for the
+profile's launch node, and with `--json` prints it as JSON.
+
 ## 3. Constraints
 
 3.1 Python 3.12 and 3.13 are the tested floor and ceiling; the code needs
@@ -93,7 +199,11 @@ in the localci Containerfile; the two lists stay in sync.
 CHANGELOG.md and RPC.md until their cleanup cycle. UI glyphs in code are
 \u escapes.
 
-3.5 ruff, at the version the workflow standard pins in its CI lint job,
+3.5 The placement regexes for `--cpu-moe`, `--n-cpu-moe`, `--n-cpu-ffn`
+and fit's all-experts pattern are pinned by a fixture to upstream's
+strings, maintained by hand like the flag fixtures.
+
+3.6 ruff, at the version the workflow standard pins in its CI lint job,
 reports nothing for `ruff check .` and `ruff format --check .` under the
 [tool.ruff] configuration in pyproject.toml, which is the standard's block
 (line-length 88, rule sets E, F, W, I, UP, B and RUF, E501 ignored, *.md
@@ -107,6 +217,10 @@ sanity job.
   against the mount-a-local-path model and bypass the VRAM preflight.
 - Two-token flags the catalog cannot express (--spec-replace,
   --control-vector-layer-range) until they get panel plumbing like LoRA.
+- Reading a sliding-window model's per-layer window pattern; the KV
+  estimate for such models is the labelled upper bound of 2.18.
+- Reproducing mainline fit's per-card layer distribution; the predicted
+  context of 2.22 is solved against the summed budget.
 - Synthetic speculative acceptance flags (--spec-synth-len,
   --spec-synth-rates): upstream marks them benchmarking only and they
   falsify acceptance, so a profile carrying them serves nonsense.

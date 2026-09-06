@@ -597,3 +597,24 @@ def test_both_halves_of_the_pair_emit_in_catalog_order():
     p.settings["no-reasoning-preserve"] = True
     argv = build_command(p)
     assert argv.index("--reasoning-preserve") < argv.index("--no-reasoning-preserve")
+
+
+def test_fit_on_renders_bare_for_ik_and_valued_for_mainline():
+    p = _golden_profile()
+    p.settings["fit"] = "on"
+    p.runtime.engine = "ik_llama.cpp"
+    argv = build_command(p)
+    i = argv.index("--fit")
+    # A bare flag is followed by the next flag, not a value.
+    assert argv[i + 1].startswith("-")
+    p.runtime.engine = "llama.cpp"
+    argv = build_command(p)
+    i = argv.index("--fit")
+    assert argv[i + 1] == "on"
+
+
+def test_fit_off_emits_nothing_for_ik():
+    p = _golden_profile()
+    p.settings["fit"] = "off"
+    p.runtime.engine = "ik_llama.cpp"
+    assert "--fit" not in build_command(p)

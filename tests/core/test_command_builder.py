@@ -122,3 +122,26 @@ def test_worker_command_labels_tag_the_pool():
     assert "llama-launcher.mode=rpc-worker" in joined
     assert "llama-launcher.pool=pool" in joined
     assert "llama-launcher.profile=pool" in joined
+
+
+def test_server_repeated_override_tensor_survives_beside_profile_value():
+    """llama-server applies every --override-tensor occurrence, so repeated
+    raw -ot entries must survive in argv beside the profile's own setting
+    rather than being folded into (and dropping) it."""
+    p = Profile(
+        name="s",
+        image="img",
+        runtime=Runtime(bind_host="127.0.0.1"),
+        mode="server",
+        mounts=[Mount(host="/h", container="/models", role="model")],
+        model="/models/m.gguf",
+        raw_args="-ot a=CPU -ot b=CPU",
+        settings={"port": 8080, "override-tensor": "p=CPU"},
+    )
+    argv = build_command(p)
+    assert argv.count("--override-tensor") == 1
+    i = argv.index("--override-tensor")
+    assert argv[i + 1] == "p=CPU"
+    # The owned pair renders first; the repeatable raw entries are appended
+    # after it, in the order they appear in raw_args.
+    assert argv[-4:] == ["-ot", "a=CPU", "-ot", "b=CPU"]

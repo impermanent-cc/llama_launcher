@@ -27,6 +27,16 @@ class Setting:
     secret: bool = False  # mask the editor (password field) -- e.g. api-key
 
 
+def accepts(setting: "Setting", engine: str) -> bool:
+    """Whether the chosen engine receives this setting at all: a setting
+    gated to one engine reaches only that engine's launch."""
+    return setting.engine == "any" or setting.engine == engine
+
+
+# engine_value() returns this when the flag is emitted with no value.
+BARE = object()
+
+
 KV_CACHE_TYPES = (
     "f32",
     "f16",
@@ -78,6 +88,8 @@ def engine_value(key: str, setting: "Setting", value, engine: str):
       against ik-llama-cpp:cpu-server). "auto" drops the flag (ik's own default
       is its only auto) and "all" becomes the setting's maximum, an integer both
       engines take.
+    * fit: ik's default is off, the opposite of mainline's, so "on" emits the
+      flag bare (BARE, ik takes no value) and anything else emits nothing.
     * An enum left at its own default is a "leave it at the engine default"
       sentinel; re-emitting it is redundant at best and, for ik's --mla-use
       "auto", invalid. Scoped to enums so numeric defaults that are legitimate
@@ -99,6 +111,8 @@ def engine_value(key: str, setting: "Setting", value, engine: str):
         if value == "auto":
             return SKIP
         value = int(setting.maximum)
+    if key == "fit" and is_ik:
+        return BARE if value == "on" else SKIP
     if setting.type == "enum" and value == setting.default:
         return SKIP
     return value
@@ -1498,11 +1512,12 @@ _ALL = [
         "GPU & Memory",
         ("-fit",),
         enum=("unset", "on", "off"),
-        tooltip="Let llama.cpp adjust arguments you left unset (context size above "
-        "all) so the model fits device memory. Upstream default is on. "
-        "Set 'off' to make an oversized config fail loudly instead of being "
-        "silently shrunk, which also makes the VRAM estimate above "
-        "authoritative.",
+        tooltip="Let the engine adjust arguments you left unset so the model "
+        "fits device memory. llama.cpp: default on, shrinks the context (down "
+        "to --fit-ctx) and then drops whole layers; set 'off' to make an "
+        "oversized config fail loudly instead, which also makes the VRAM "
+        "estimate authoritative. ik_llama.cpp: default off, and 'on' moves "
+        "MoE expert tensors to the CPU as needed, dense models excluded.",
     ),
     Setting(
         "fit-target",
@@ -2208,7 +2223,7 @@ _ALL = [
         "bool",
         False,
         "Speculative Decoding",
-        ("-cmoed",),
+        ("-cmoed", "--cpu-moe-draft"),
         tooltip="Keep ALL of the draft model's MoE expert weights on the CPU, freeing "
         "VRAM for the target model.",
     ),
@@ -2218,7 +2233,7 @@ _ALL = [
         "int",
         0,
         "Speculative Decoding",
-        ("-ncmoed",),
+        ("-ncmoed", "--n-cpu-moe-draft", "--spec-draft-ncmoe"),
         0,
         512,
         1,
@@ -2231,7 +2246,7 @@ _ALL = [
         "string",
         "",
         "Speculative Decoding",
-        ("-otd",),
+        ("-otd", "--override-tensor-draft"),
         tooltip="Tensor-name pattern to buffer-type map for the DRAFT model, the same "
         "form as override-tensor (e.g. 'exps=CPU'). Empty = no override.",
     ),

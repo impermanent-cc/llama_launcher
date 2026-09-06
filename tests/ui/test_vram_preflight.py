@@ -1,7 +1,27 @@
+"""Launch-time VRAM/RAM preflight: LaunchController.vram_check() builds the
+same per-card and RAM fit report the Configure tab's live readout uses and
+renders it as the abortable launch dialog's text.
+"""
+
+import pytest
+
 import llama_launcher.ui.main_window as mw
-from llama_launcher.core.gguf import GgufMeta
+from llama_launcher.core.gguf import GgufMeta, TensorInfo
 from llama_launcher.core.spec import Mount, Profile, Runtime
+from llama_launcher.services import pool_preflight
 from llama_launcher.services.gpu import GpuStat
+
+_MIB = 1024 * 1024
+
+
+@pytest.fixture(autouse=True)
+def _fixed_free_ram(monkeypatch):
+    """Every preflight test judges RAM against a fixed figure instead of
+    the host's real /proc/meminfo (or an ssh round trip), so a test's own
+    override, set after this fixture runs, still wins for that test."""
+    monkeypatch.setattr(
+        pool_preflight, "free_ram_bytes", lambda ssh_target="": 64 * 1024**3
+    )
 
 
 def _profile(ctx, **settings):
@@ -26,147 +46,181 @@ def _gpu(free_mib, total_mib=16384, name="GPU"):
     )
 
 
-def test_vram_check_warns_when_over(qtbot, monkeypatch):
-    monkeypatch.setattr(
-        mw.model_info,
-        "read_gguf_meta",
-        lambda path: GgufMeta(
-            arch="llama",
-            n_layers=80,
-            n_head=64,
-            n_head_kv=8,
-            n_embd=8192,
-            ctx_train=131072,
-            quant="Q8_0",
-        ),
+def _tensor(name: str, nbytes: int) -> TensorInfo:
+    """A type-0 (F32) tensor of exactly nbytes bytes."""
+    return TensorInfo(name=name, n_elements=nbytes // 4, ggml_type=0, nbytes=nbytes)
+
+
+def _layer_tensors(n_layers: int) -> list:
+    tensors = []
+    for i in range(n_layers):
+        tensors.append(_tensor(f"blk.{i}.attn_q.weight", 64 * _MIB))
+        tensors.append(_tensor(f"blk.{i}.ffn_up.weight", 192 * _MIB))
+    return tensors
+
+
+def _meta(n_layers: int = 80) -> GgufMeta:
+    tensors = _layer_tensors(n_layers)
+    tensors.append(_tensor("token_embd.weight", 512 * _MIB))
+    tensors.append(_tensor("output.weight", 512 * _MIB))
+    return GgufMeta(
+        arch="llama",
+        n_layers=n_layers,
+        n_head=64,
+        n_head_kv=8,
+        n_embd=8192,
+        ctx_train=131072,
+        quant="Q8_0",
+        tensors=tuple(tensors),
     )
-    monkeypatch.setattr(mw.model_info, "file_size", lambda path: 20 * 1024**3)
-    monkeypatch.setattr(
-        mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(1024)]
-    )  # ~1 GiB free
-    w = mw.MainWindow()
-    qtbot.addWidget(w)
-    w._configure_panel.load_profile(_profile(131072))
-    msg = w._launch.vram_check()
-    assert msg is not None and "VRAM" in msg
-    assert "--n-cpu-moe" in msg and "--n-cpu-ffn" in msg
 
 
-def test_vram_check_none_when_unknown(qtbot, monkeypatch):
-    monkeypatch.setattr(mw.model_info, "read_gguf_meta", lambda path: None)
+def _patch_model(monkeypatch, weights_gib=20, n_layers=80):
+    """Patches read_model to return the profile's own model (host /h/m.gguf)
+    with a full tensor table, and (None, None) for any other host path, so a
+    test that sets a draft or projector path needs its own read_model stub."""
+    meta = _meta(n_layers)
+
+    def _read_model(path):
+        if str(path) == "/h/m.gguf":
+            return meta, weights_gib * 1024**3
+        return None, None
+
+    monkeypatch.setattr(mw.model_info, "read_model", _read_model)
+
+
+def test_vram_check_warns_when_over(main_window, monkeypatch):
+    # A small model whose weights, once fully on GPU, exceed a tight budget,
+    # but which fits once every FFN layer's weights offload to the CPU: the
+    # dialog names the card, the shortfall and the offload that fixes it.
+    _patch_model(monkeypatch, n_layers=4)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(2048)])
+    main_window._configure_panel.load_profile(_profile(4096))
+    text = main_window._launch.vram_check()
+    assert "GPU0" in text and "exceeds" in text
+    assert "--n-cpu-ffn" in text
+
+
+def test_vram_check_includes_draft_weights(main_window, monkeypatch):
+    """The draft model's own weights, KV and compute add to the estimate: a
+    profile that fits without a draft can overflow once one is set."""
+    meta = _meta(n_layers=4)
+    draft_meta = _meta(n_layers=2)
+
+    def _read_model(path):
+        if str(path) == "/h/m.gguf":
+            return meta, 0
+        if str(path) == "/h/d.gguf":
+            return draft_meta, 0
+        return None, None
+
+    monkeypatch.setattr(mw.model_info, "read_model", _read_model)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(3400)])
+    p = _profile(4096)
+    main_window._configure_panel.load_profile(p)
+    assert main_window._launch.vram_check() is None
+
+    p.draft_model = "/models/d.gguf"
+    main_window._configure_panel.load_profile(p)
+    text = main_window._launch.vram_check()
+    assert text is not None and "GPU0" in text
+
+
+def test_fit_report_for_forwards_raw_args_and_projector(main_window, monkeypatch):
+    """raw_args reaches the estimate the same as settings, and the
+    projector's bytes land on the GPU: a raw -ngl 0 pushes the model's
+    weights to RAM, leaving only the projector on the card, so the card
+    estimate drops and the RAM figure rises."""
+    meta = _meta(n_layers=4)
+
+    def _read_model(path):
+        if str(path) == "/h/m.gguf":
+            return meta, 0
+        if str(path) == "/h/mm.gguf":
+            return None, 64 * _MIB
+        return None, None
+
+    monkeypatch.setattr(mw.model_info, "read_model", _read_model)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(30000)])
+    p = _profile(4096)
+    p.mmproj = "/models/mm.gguf"
+    ctl = main_window._launch
+
+    plain = ctl._fit_report_for(p)
+    p.raw_args = "-ngl 0"
+    limited = ctl._fit_report_for(p)
+
+    assert limited.cards[0].est < plain.cards[0].est
+    assert limited.ram.est > plain.ram.est
+
+
+def test_vram_check_none_without_any_gpu(main_window, monkeypatch):
+    _patch_model(monkeypatch)
     monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [])
-    w = mw.MainWindow()
-    qtbot.addWidget(w)
-    w._configure_panel.load_profile(_profile(4096))
-    assert w._launch.vram_check() is None
+    main_window._configure_panel.load_profile(_profile(131072))
+    assert main_window._launch.vram_check() is None
 
 
-def test_vram_check_sums_free_across_two_gpus(qtbot, monkeypatch):
-    # 16+12 GB rig, 14.7 + 7.3 GiB free, model ~20.2 GiB. Split across both
-    # GPUs it fits (~22 GiB), so NO warning: the budget is the sum across
-    # GPUs, not one card's max.
-    gib = 1024**3
-    monkeypatch.setattr(
-        mw.model_info,
-        "read_gguf_meta",
-        lambda path: GgufMeta(
-            arch="llama",
-            n_layers=1,
-            n_head=8,
-            n_head_kv=8,
-            n_embd=64,
-            ctx_train=4096,
-            quant="Q8_0",
-        ),
-    )
-    monkeypatch.setattr(mw.model_info, "file_size", lambda path: int(20.0 * gib))
-    monkeypatch.setattr(
-        mw.gpu,
-        "query_gpus",
-        lambda ssh_target="": [
-            _gpu(int(14.7 * 1024)),
-            _gpu(int(7.3 * 1024), total_mib=12288),
-        ],
-    )
-    w = mw.MainWindow()
-    qtbot.addWidget(w)
-    w._configure_panel.load_profile(_profile(4096))  # default split-mode -> summed
-    assert w._launch.vram_check() is None  # ~22 GiB free covers ~20 GiB
+def test_vram_check_none_when_fits(main_window, monkeypatch):
+    _patch_model(monkeypatch, weights_gib=1)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(30000)])
+    main_window._configure_panel.load_profile(_profile(4096))
+    assert main_window._launch.vram_check() is None
 
 
-def test_vram_check_split_none_uses_single_gpu(qtbot, monkeypatch):
-    # split-mode none puts everything on main-gpu, so the same model that fits
-    # across both GPUs does not fit on one 16 GB card -> warns, and the message
-    # reports the single-card free, not the sum.
-    gib = 1024**3
-    monkeypatch.setattr(
-        mw.model_info,
-        "read_gguf_meta",
-        lambda path: GgufMeta(
-            arch="llama",
-            n_layers=1,
-            n_head=8,
-            n_head_kv=8,
-            n_embd=64,
-            ctx_train=4096,
-            quant="Q8_0",
-        ),
-    )
-    monkeypatch.setattr(mw.model_info, "file_size", lambda path: int(20.0 * gib))
+def test_vram_check_fit_unset_mentions_shrink(main_window, monkeypatch):
+    _patch_model(monkeypatch)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(1024)])
+    # No fit, n-gpu-layers, override-tensor or ctx-size set: llama.cpp's
+    # --fit runs by default and, with no context pinned, an over-budget
+    # profile is told what --fit will shrink the context to instead of a
+    # flat "won't fit".
+    main_window._configure_panel.load_profile(_profile(131072, **{"ctx-size": None}))
+    text = main_window._launch.vram_check()
+    assert "shrink" in text
+
+
+def test_vram_check_fit_on_explicit_is_silent(main_window, monkeypatch):
+    _patch_model(monkeypatch)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(1024)])
+    main_window._configure_panel.load_profile(_profile(131072, fit="on"))
+    assert main_window._launch.vram_check() is None
+
+
+def test_vram_check_two_cards_names_the_overflowing_card(main_window, monkeypatch):
+    _patch_model(monkeypatch)
     monkeypatch.setattr(
         mw.gpu,
         "query_gpus",
-        lambda ssh_target="": [
-            _gpu(int(14.7 * 1024)),
-            _gpu(int(7.3 * 1024), total_mib=12288),
-        ],
+        lambda ssh_target="": [_gpu(30000), _gpu(1024, total_mib=12288)],
     )
-    w = mw.MainWindow()
-    qtbot.addWidget(w)
-    w._configure_panel.load_profile(_profile(4096, **{"split-mode": "none"}))
-    msg = w._launch.vram_check()
-    assert msg is not None
-    assert "across" not in msg  # single-GPU budget, no breakdown
+    main_window._configure_panel.load_profile(
+        _profile(4096, **{"tensor-split": "50,50"})
+    )
+    text = main_window._launch.vram_check()
+    # The dialog leads with the full per-card breakdown, so GPU0 appears
+    # there too; only the overflowing card's shortfall message, after that
+    # breakdown block, names it as exceeding free VRAM.
+    message_part = text.split("\n\n", 1)[1]
+    assert "GPU1: est" in message_part
+    assert "GPU0: est" not in message_part
 
 
-def test_vram_check_shows_per_gpu_breakdown(qtbot, monkeypatch):
-    # When it genuinely doesn't fit across multiple GPUs, the message shows the
-    # per-card free so the "free" figure is transparent.
-    gib = 1024**3
+def test_vram_check_ram_warning(main_window, monkeypatch):
+    _patch_model(monkeypatch)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(30000)])
     monkeypatch.setattr(
-        mw.model_info,
-        "read_gguf_meta",
-        lambda path: GgufMeta(
-            arch="llama",
-            n_layers=80,
-            n_head=64,
-            n_head_kv=8,
-            n_embd=8192,
-            ctx_train=131072,
-            quant="Q8_0",
-        ),
+        pool_preflight, "free_ram_bytes", lambda ssh_target="": 256 * _MIB
     )
-    monkeypatch.setattr(mw.model_info, "file_size", lambda path: 40 * gib)
-    monkeypatch.setattr(
-        mw.gpu,
-        "query_gpus",
-        lambda ssh_target="": [
-            _gpu(int(14.7 * 1024)),
-            _gpu(int(7.3 * 1024), total_mib=12288),
-        ],
-    )
-    w = mw.MainWindow()
-    qtbot.addWidget(w)
-    w._configure_panel.load_profile(_profile(131072))
-    msg = w._launch.vram_check()
-    assert msg is not None and "across 2 GPUs" in msg and "+" in msg
+    main_window._configure_panel.load_profile(_profile(4096, **{"n-cpu-ffn": 80}))
+    text = main_window._launch.vram_check()
+    assert text is not None and "RAM" in text
 
 
 def test_vram_check_uses_profile_nodes_gpus(main_window, monkeypatch):
     """A profile pinned to a remote node must be judged against THAT node's
     free VRAM (ssh nvidia-smi), not the local cards."""
     from llama_launcher.core.nodes import Node
-    from llama_launcher.core.spec import Mount, Profile, Runtime
     from llama_launcher.store.nodes import add_node
 
     add_node(
@@ -174,20 +228,7 @@ def test_vram_check_uses_profile_nodes_gpus(main_window, monkeypatch):
         main_window.base_dir(),
     )
     main_window._configure_panel.reload_nodes()  # combo predates the add
-    monkeypatch.setattr(
-        mw.model_info,
-        "read_gguf_meta",
-        lambda path: GgufMeta(
-            arch="llama",
-            n_layers=80,
-            n_head=64,
-            n_head_kv=8,
-            n_embd=8192,
-            ctx_train=131072,
-            quant="Q8_0",
-        ),
-    )
-    monkeypatch.setattr(mw.model_info, "file_size", lambda path: 20 * 1024**3)
+    _patch_model(monkeypatch)
     seen = {}
 
     def _query(ssh_target=""):
@@ -195,63 +236,38 @@ def test_vram_check_uses_profile_nodes_gpus(main_window, monkeypatch):
         return [_gpu(1024)]
 
     monkeypatch.setattr(mw.gpu, "query_gpus", _query)
-    p = Profile(
-        name="v",
-        image="img",
-        runtime=Runtime(binary="podman", node="box-b"),
-        mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
-        model="/models/m.gguf",
-        settings={"port": 8080, "ctx-size": 131072},
-    )
+    p = _profile(131072)
+    p.runtime.node = "box-b"
     main_window._configure_panel.load_profile(p)
     assert main_window._launch.vram_check() is not None
     assert seen["ssh"] == "me@10.0.0.2"
 
 
-def test_check_fit_estimate_honours_per_slot_context_and_engine(qtbot, monkeypatch):
-    # _model_estimate_bytes backs the pooled "Check fit" readout; it must
-    # follow the same effective-context rule as the launch-time preflight
-    # (parallel * kv-unified-per-slot on an engine that accepts the flag,
-    # the model's trained context otherwise) rather than reading ctx-size raw.
-    monkeypatch.setattr(
-        mw.model_info,
-        "read_gguf_meta",
-        lambda path: GgufMeta(
-            arch="llama",
-            n_layers=2,
-            n_head=8,
-            n_head_kv=4,
-            n_embd=64,
-            ctx_train=4096,
-            quant="Q8_0",
-        ),
-    )
-    monkeypatch.setattr(mw.model_info, "file_size", lambda path: 1000)
-    w = mw.MainWindow()
-    qtbot.addWidget(w)
-    panel = w._configure_panel
+def test_fit_report_for_rereads_the_main_model_every_call(main_window, monkeypatch):
+    """The launch preflight always reads the main model through the panel's
+    stat-cached reader, one stat per click, rather than trusting the form's
+    last render: a file replaced after the profile loaded is picked up on
+    the next preflight."""
+    small = _meta(n_layers=2)
+    big = _meta(n_layers=8)
 
-    explicit = _profile(16384)
-    per_slot = _profile(None, **{"kv-unified-per-slot": 4096, "parallel": 4})
-    on_ik = Profile(
-        name="v",
-        image="img",
-        runtime=Runtime(binary="podman", engine="ik_llama.cpp"),
-        mounts=[Mount(host="/h", container="/models", role="model", mode="ro")],
-        model="/models/m.gguf",
-        settings={"port": 8080, "kv-unified-per-slot": 4096, "parallel": 4},
-    )
-    trained_ctx = _profile(None)
+    def _read_small(path):
+        if str(path) == "/h/m.gguf":
+            return small, 0
+        return None, None
 
-    panel.load_profile(explicit)
-    explicit_bytes = panel._model_estimate_bytes(explicit)
-    panel.load_profile(per_slot)
-    per_slot_bytes = panel._model_estimate_bytes(per_slot)
-    panel.load_profile(on_ik)
-    ik_bytes = panel._model_estimate_bytes(on_ik)
-    panel.load_profile(trained_ctx)
-    trained_bytes = panel._model_estimate_bytes(trained_ctx)
+    monkeypatch.setattr(mw.model_info, "read_model", _read_small)
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(30000)])
+    p = _profile(4096)
+    main_window._configure_panel.load_profile(p)
+    ctl = main_window._launch
+    before = ctl._fit_report_for(p)
 
-    assert per_slot_bytes == explicit_bytes
-    assert ik_bytes == trained_bytes
-    assert per_slot_bytes != ik_bytes
+    def _read_big(path):
+        if str(path) == "/h/m.gguf":
+            return big, 0
+        return None, None
+
+    monkeypatch.setattr(mw.model_info, "read_model", _read_big)
+    after = ctl._fit_report_for(p)
+    assert after.cards[0].est > before.cards[0].est

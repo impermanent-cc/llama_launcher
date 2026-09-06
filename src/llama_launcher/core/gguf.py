@@ -81,6 +81,61 @@ def _num(v):
     return v
 
 
+@dataclass(frozen=True)
+class TensorInfo:
+    name: str
+    n_elements: int
+    ggml_type: int
+    nbytes: int
+
+
+# (elements per block, bytes per block) per ggml_type id, from ggml-common.h.
+GGML_TYPE_SIZES = {
+    0: (1, 4),  # F32
+    1: (1, 2),  # F16
+    2: (32, 18),  # Q4_0
+    3: (32, 20),  # Q4_1
+    6: (32, 22),  # Q5_0
+    7: (32, 24),  # Q5_1
+    8: (32, 34),  # Q8_0
+    9: (32, 36),  # Q8_1
+    10: (256, 84),  # Q2_K
+    11: (256, 110),  # Q3_K
+    12: (256, 144),  # Q4_K
+    13: (256, 176),  # Q5_K
+    14: (256, 210),  # Q6_K
+    15: (256, 292),  # Q8_K
+    16: (256, 66),  # IQ2_XXS
+    17: (256, 74),  # IQ2_XS
+    18: (256, 98),  # IQ3_XXS
+    19: (256, 50),  # IQ1_S
+    20: (32, 18),  # IQ4_NL
+    21: (256, 110),  # IQ3_S
+    22: (256, 82),  # IQ2_S
+    23: (256, 136),  # IQ4_XS
+    24: (1, 1),  # I8
+    25: (1, 2),  # I16
+    26: (1, 4),  # I32
+    27: (1, 8),  # I64
+    28: (1, 8),  # F64
+    29: (256, 56),  # IQ1_M
+    30: (1, 2),  # BF16
+    34: (256, 54),  # TQ1_0
+    35: (256, 66),  # TQ2_0
+    39: (32, 17),  # MXFP4
+    40: (64, 36),  # NVFP4
+    41: (128, 18),  # Q1_0
+    42: (64, 18),  # Q2_0
+}
+
+
+def tensor_nbytes(n_elements: int, ggml_type: int) -> int:
+    """Bytes a tensor occupies in a buffer. A partial trailing block counts
+    as a whole block; an unknown type counts two bytes per element."""
+    block, size = GGML_TYPE_SIZES.get(ggml_type, (1, 2))
+    return -(-int(n_elements) // block) * size
+
+
 @dataclass
 class GgufMeta:
     arch: str = ""
@@ -96,6 +151,12 @@ class GgufMeta:
     sliding_window: int | None = None
     nextn_predict_layers: int | None = None
     pooling_type: int | None = None
+    n_ff: int | None = None
+    n_ff_exp: int | None = None
+    n_expert_used: int | None = None
+    n_vocab: int | None = None
+    split_count: int = 1
+    tensors: tuple = ()
 
 
 class _Reader:
@@ -132,6 +193,34 @@ class _Reader:
         raise ValueError(f"gguf: unknown value type {vtype}")
 
 
+def _parse_tensor_table(r: "_Reader", count: int) -> tuple:
+    """The tensor infos that follow the key-value block: name, dimensions,
+    type and data offset. A table the read limit cuts short yields an empty
+    tuple, since the key-value block before it is complete on its own."""
+    if count > 100_000:
+        return ()
+    out = []
+    try:
+        for _ in range(count):
+            name = r.gstr()
+            n_dims = r.u32()
+            if n_dims > 8:
+                return ()
+            n_elements = 1
+            for _ in range(n_dims):
+                n_elements *= r.u64()
+            ggml_type = r.u32()
+            r.u64()  # byte offset inside the data section
+            out.append(
+                TensorInfo(
+                    name, n_elements, ggml_type, tensor_nbytes(n_elements, ggml_type)
+                )
+            )
+    except ValueError:
+        return ()
+    return tuple(out)
+
+
 def parse_gguf_header(data: bytes) -> GgufMeta:
     r = _Reader(data)
     if r.take(4) != GGUF_MAGIC:
@@ -139,7 +228,7 @@ def parse_gguf_header(data: bytes) -> GgufMeta:
     version = r.u32()
     if version not in (2, 3):
         raise ValueError(f"gguf: unsupported version {version}")
-    r.u64()  # tensor_count (unused)
+    tensor_count = r.u64()
     kv_count = r.u64()
     if kv_count > 1_000_000:
         raise ValueError("gguf: implausible kv_count")
@@ -158,6 +247,13 @@ def parse_gguf_header(data: bytes) -> GgufMeta:
     if n_head_kv is None:
         n_head_kv = n_head
 
+    tensors = _parse_tensor_table(r, tensor_count)
+    tokens = kv.get("tokenizer.ggml.tokens")
+    n_vocab = (
+        len(tokens) if isinstance(tokens, list) and tokens else _num(a("vocab_size"))
+    )
+    split_count = kv.get("split.count")
+
     return GgufMeta(
         arch=arch,
         name=kv.get("general.name", "") or "",
@@ -172,4 +268,12 @@ def parse_gguf_header(data: bytes) -> GgufMeta:
         sliding_window=_num(a("attention.sliding_window")),
         nextn_predict_layers=_num(a("nextn_predict_layers")),
         pooling_type=_num(a("pooling_type")),
+        n_ff=_num(a("feed_forward_length")),
+        n_ff_exp=_num(a("expert_feed_forward_length")),
+        n_expert_used=_num(a("expert_used_count")),
+        n_vocab=n_vocab,
+        split_count=int(split_count)
+        if isinstance(split_count, int) and split_count > 0
+        else 1,
+        tensors=tensors,
     )

@@ -19,7 +19,8 @@ RPC pooling across machines.
 - src/llama_launcher/core/: pure logic, no Qt. settings_catalog (every
   llama-server flag the app exposes, per engine), build_catalog and
   build_spec (image build options), command_builder (profile to argv),
-  validation, vram and gguf (preflight from the GGUF header), capabilities
+  validation, vram, gguf, placement and memory_fit (the memory estimate
+  from the GGUF tensor table, its per-card fit and messages), capabilities
   (what the chosen engine and build support), instances, nodes, pathmap,
   router_* (router presets, models, events), lora_state, mtp_stats,
   prometheus, report.

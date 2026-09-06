@@ -1,9 +1,13 @@
 from llama_launcher.core.settings_catalog import (
+    BARE,
     CATALOG,
     HOST_KEYS,
     IK_EXTRA_KV_CACHE_TYPES,
     KV_CACHE_TYPES,
     ROUTER_ONLY_KEYS,
+    SKIP,
+    accepts,
+    engine_value,
     for_engine,
     member_catalog,
     router_catalog,
@@ -572,3 +576,48 @@ def test_zero_four_zero_flags_are_catalogued_with_upstream_defaults():
     assert CATALOG["video-ffmpeg-dir"].default == ""
     for key in ("video-fps", "video-timestamp-interval", "video-ffmpeg-dir"):
         assert CATALOG[key].group == "Multimodal"
+
+
+def test_accepts_matches_the_engine_gate():
+    assert accepts(CATALOG["ctx-size"], "llama.cpp")
+    assert accepts(CATALOG["ctx-size"], "ik_llama.cpp")
+    assert accepts(CATALOG["n-cpu-ffn"], "llama.cpp")
+    assert not accepts(CATALOG["n-cpu-ffn"], "ik_llama.cpp")
+    assert accepts(CATALOG["ctx-size-draft"], "ik_llama.cpp")
+    assert not accepts(CATALOG["ctx-size-draft"], "llama.cpp")
+
+
+def test_draft_offload_twins_are_mainline_only():
+    for key, flag, typ, other_spelling in (
+        (
+            "spec-draft-override-tensor",
+            "--spec-draft-override-tensor",
+            "string",
+            "--override-tensor-draft",
+        ),
+        ("spec-draft-n-cpu-moe", "--spec-draft-n-cpu-moe", "int", "--n-cpu-moe-draft"),
+        ("spec-draft-cpu-moe", "--spec-draft-cpu-moe", "bool", "--cpu-moe-draft"),
+    ):
+        s = CATALOG[key]
+        assert s.flag == flag and s.type == typ
+        assert s.group == "Speculative Decoding"
+        assert other_spelling in s.aliases
+    ik = for_engine(CATALOG, "ik_llama.cpp")
+    mainline = for_engine(CATALOG, "llama.cpp")
+    for key in (
+        "spec-draft-override-tensor",
+        "spec-draft-n-cpu-moe",
+        "spec-draft-cpu-moe",
+    ):
+        assert key not in ik
+        assert key in mainline
+
+
+def test_fit_emission_per_engine():
+    fit = CATALOG["fit"]
+    assert engine_value("fit", fit, "on", "llama.cpp") == "on"
+    assert engine_value("fit", fit, "off", "llama.cpp") == "off"
+    assert engine_value("fit", fit, "on", "ik_llama.cpp") is BARE
+    assert engine_value("fit", fit, "off", "ik_llama.cpp") is SKIP
+    assert engine_value("fit", fit, "unset", "ik_llama.cpp") is SKIP
+    assert "ik_llama.cpp" in fit.tooltip and "off" in fit.tooltip

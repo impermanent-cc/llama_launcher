@@ -12,9 +12,11 @@ import shlex
 from dataclasses import dataclass, field
 
 from .settings_catalog import (
+    BARE,
     CATALOG,
     ROUTER_ONLY_KEYS,
     SKIP,
+    accepts,
     engine_value,
 )
 from .spec import Profile, member_model_id
@@ -115,10 +117,13 @@ def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
             or key not in profile.settings
         ):
             continue
-        if setting.engine != "any" and setting.engine != engine:
+        if not accepts(setting, engine):
             continue
         value = engine_value(key, setting, profile.settings[key], engine)
         if value is SKIP:
+            continue
+        if value is BARE:
+            out.append((setting.flag.lstrip("-"), "true"))
             continue
         # The INI key is the flag itself, minus dashes, including negative
         # flags such as --no-cors-credentials, whose key is "no-cors-credentials".

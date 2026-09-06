@@ -8,7 +8,7 @@ from PySide6.QtCore import (
 )
 from PySide6.QtWidgets import QInputDialog, QMessageBox
 
-from llama_launcher.core import vram
+from llama_launcher.core import memory_fit, vram
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.nodes import connection_for
 from llama_launcher.core.spec import profile_port
@@ -16,7 +16,6 @@ from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import (
     benchmark_store,
     gpu,
-    model_info,
     native,
     pool_preflight,
     registry,
@@ -542,48 +541,53 @@ class LaunchController:
             )
         return True
 
-    def vram_check(self) -> str | None:
-        p = self.window._configure_panel.current_profile()
-        meta, weights, _caps = (
-            model_info.inspect_model(
-                p.model, self.window._configure_panel.mounts_panel.mounts()
-            )
-            if p.model
-            else (None, None, None)
+    def _fit_report_for(self, p):
+        """The FitReport judged against the cards and RAM of the node the
+        profile launches on. The main model, the draft and the projector all
+        come from the Configure panel's stat-cached reader, so a launch
+        click costs one stat per file rather than a fresh header read, and
+        never trusts a render the form made before this click."""
+        panel = self.window._configure_panel
+        meta, weights = (
+            panel._cached_meta_weights(p.model, p.mounts) if p.model else (None, None)
+        )
+        draft_meta, draft_weights = (
+            panel._cached_meta_weights(p.draft_model, p.mounts)
+            if p.draft_model
+            else (None, 0)
+        )
+        _mm, mmproj_bytes = (
+            panel._cached_meta_weights(p.mmproj, p.mounts) if p.mmproj else (None, 0)
         )
         # Judge against the GPUs of the node the profile will LAUNCH on -- a
         # remote-node profile checked against the local cards gets a wrong answer
         # in both directions.
-        gpus = gpu.query_gpus(gpu_ssh_target(self.window.base_dir(), p.runtime.node))
+        ssh = gpu_ssh_target(self.window.base_dir(), p.runtime.node)
+        gpus = gpu.query_gpus(ssh)
+        ram = pool_preflight.free_ram_bytes(ssh) or None
         mib = 1024 * 1024
-        s = vram.fit_summary(
+        return memory_fit.fit_report(
             meta,
-            weights,
+            weights or 0,
             settings=p.settings,
-            free_bytes_per_gpu=[g.mem_free_mib * mib for g in gpus],
             engine=p.runtime.engine,
+            free_bytes_per_gpu=[g.mem_free_mib * mib for g in gpus],
+            ram_available=ram,
+            raw_args=p.raw_args,
+            draft_meta=draft_meta,
+            draft_weights=draft_weights or 0,
+            mmproj_bytes=mmproj_bytes or 0,
         )
-        if s is None or s.fits:
+
+    def vram_check(self) -> str | None:
+        """The launch dialog text for the current profile's memory fit, or
+        None when nothing needs confirming. Judged against the cards and RAM
+        of the node the profile launches on."""
+        p = self.window._configure_panel.current_profile()
+        report = self._fit_report_for(p)
+        if report is None:
             return None
-        gib = 1024**3
-        # Show the per-GPU breakdown when the budget spans multiple cards, so the
-        # "free" number is transparent (e.g. "14.7 + 7.3 = 22.0 GiB across 2 GPUs").
-        if len(s.free_per_gpu) > 1 and p.settings.get("split-mode", "layer") != "none":
-            parts = " + ".join(f"{b / gib:.1f}" for b in s.free_per_gpu)
-            free_txt = (
-                f"~{s.free_bytes / gib:.1f} GiB ({parts} across "
-                f"{len(s.free_per_gpu)} GPUs)"
-            )
-        else:
-            free_txt = f"~{s.free_bytes / gib:.1f} GiB"
-        return (
-            f"Estimated VRAM need ~{s.est_bytes / gib:.1f} GiB exceeds free "
-            f"{free_txt} by ~{-s.margin / gib:.1f} GiB. It may not fit; "
-            f"consider quantized KV cache (-ctk/-ctv q8_0) or a higher "
-            f"--n-cpu-moe on a MoE model, --n-cpu-ffn on a dense one. "
-            f"(Estimate is conservative; --n-cpu-moe/--n-cpu-ffn/-ngl reduce "
-            f"actual GPU use.)"
-        )
+        return memory_fit.render_dialog(report)
 
     def _report_launch_error(
         self, text: str | None = None, *, show_dialog: bool = False

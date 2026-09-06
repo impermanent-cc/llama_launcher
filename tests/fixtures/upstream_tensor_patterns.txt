@@ -1,0 +1,8 @@
+# Tensor-name patterns llama.cpp expands its CPU offload flags into.
+# Line 1: LLM_FFN_EXPS_REGEX (common/common.h), the --n-cpu-moe and --cpu-moe body.
+# Line 2: LLM_FFN_DENSE_REGEX (common/common.h), the --n-cpu-ffn body.
+# Line 3: pattern_moe_all (common/fit.cpp), every expert tensor.
+# Regenerate by hand from those two files when they change.
+\.ffn_(up|down|gate|gate_up)_(ch|)exps
+\.ffn_(up|down|gate)\.
+blk\.\d+\.ffn_(up|down|gate_up|gate)_(ch|)exps

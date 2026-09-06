@@ -22,7 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from llama_launcher.core import vram
+from llama_launcher.core import memory_fit, vram
 from llama_launcher.core.capabilities import (
     Tier,
     describe_relevance,
@@ -162,6 +162,11 @@ class _FitGpusGather(QRunnable):
             gpus = gpu_svc.query_gpus(self._ssh)
         except Exception:  # worker must never raise
             gpus = []
+        try:
+            ram = pool_preflight.free_ram_bytes(self._ssh) or None
+        except Exception:  # worker must never raise
+            ram = None
+        self._owner._fit_ram = ram
         self._owner._fit_gpus = gpus
         self._owner._fit_gpus_ssh = self._ssh
         self._owner._fit_gpus_at = time.monotonic()
@@ -185,6 +190,7 @@ class ConfigurePanel(QWidget):
         # keystrokes in ctx-size don't each cost a probe.
         self._fit_meta = None
         self._fit_weights = None
+        self._fit_ram = None
         self._meta_text = ""
         self._fit_line = ""
         self._fit_gpus = None
@@ -541,6 +547,7 @@ class ConfigurePanel(QWidget):
         config_bottom_box.setContentsMargins(0, 0, 0, 0)
         config_bottom_box.setSpacing(3)  # tighten the bottom strip's dead space
         self.model_meta_label = QLabel("")
+        self.model_meta_label.setWordWrap(True)
         config_bottom_box.addWidget(self.model_meta_label)
         self.model_edit.textChanged.connect(lambda _: self.apply_model_caps())
         self.mounts_panel.changed.connect(self.apply_model_caps)
@@ -723,18 +730,20 @@ class ConfigurePanel(QWidget):
         QTimer.singleShot(150, self._poll_check_fit)
 
     def _model_estimate_bytes(self, p: Profile) -> int:
-        """Same weights+KV-cache estimate LaunchController.vram_check() uses
-        for the single-node preflight, reused here for the pooled one."""
+        """The pooled preflight's whole-model figure: weights and KV on
+        every device (GPU and RAM combined) for one profile's model."""
         meta, weights, _caps = model_info.inspect_model(
             p.model, self.mounts_panel.mounts()
         )
-        return vram.estimate_for_model(
+        est = vram.estimate_memory(
             meta,
-            weights,
-            ctx_size=vram.effective_ctx_size(p.settings, p.runtime.engine),
-            k_quant=p.settings.get("cache-type-k", "f16"),
-            v_quant=p.settings.get("cache-type-v", "f16"),
+            weights or 0,
+            settings=p.settings,
+            engine=p.runtime.engine,
+            free_bytes_per_gpu=[0],
+            raw_args=p.raw_args,
         )
+        return est.model_total if est is not None else int(weights or 0)
 
     def _poll_check_fit(self) -> None:
         if not self._check_fit_inflight:
@@ -1304,10 +1313,12 @@ class ConfigurePanel(QWidget):
         return self.mode_combo.currentData() == "router"
 
     def _member_estimates(self) -> list[int]:
-        """Per-member weights+KV estimates for the router fit readout, each
-        derived from that member profile's OWN model, mounts and settings --
-        the router itself has no model, and whatever lingers in the (disabled)
+        """Per-member GPU totals for the router fit readout, each derived
+        from that member profile's OWN model, mounts and settings: the
+        router itself has no model, and whatever lingers in the (disabled)
         model field must not leak into the estimate."""
+        mib = 1024 * 1024
+        free = [g.mem_free_mib * mib for g in (self._fit_gpus or [])]
         out: list[int] = []
         for _member, prof in self._member_pairs_cached():
             if not prof.model:
@@ -1315,39 +1326,55 @@ class ConfigurePanel(QWidget):
             meta, weights = self._cached_meta_weights(prof.model, prof.mounts)
             if meta is None and not weights:
                 continue
-            out.append(
-                vram.estimate_for_model(
-                    meta,
-                    weights or 0,
-                    ctx_size=vram.effective_ctx_size(
-                        prof.settings, prof.runtime.engine
-                    ),
-                    k_quant=prof.settings.get("cache-type-k", "f16"),
-                    v_quant=prof.settings.get("cache-type-v", "f16"),
-                )
+            est = vram.estimate_memory(
+                meta,
+                weights or 0,
+                settings=prof.settings,
+                engine=prof.runtime.engine,
+                free_bytes_per_gpu=free,
+                raw_args=prof.raw_args,
             )
+            if est is not None:
+                out.append(est.gpu_total)
+            elif weights:
+                # No usable header (meta None or missing hyperparameters):
+                # the file size still stands for the member rather than
+                # dropping it from the pool estimate entirely.
+                out.append(int(weights))
         return out
 
     def _cached_meta_weights(self, container_path: str, mounts) -> tuple:
-        """(meta, weights_bytes) cached by the file's (mtime, size) stamp: a
-        GGUF header read is a 64MB file read, and the debounced fit refresh
-        re-runs on every form edit. A stat per render means an unchanged
-        header is never re-read while a swapped model file invalidates
-        instantly."""
+        """(meta, weights_bytes) cached by a stamp over every part of a
+        split model: model_info.split_parts(host), named from the file's
+        own part-of-total suffix, each stat'd for (mtime_ns, size), a
+        missing part contributing None. A GGUF header read is a 64MB file
+        read per part, and the debounced fit refresh re-runs on every form
+        edit; a stat per render means an unchanged model is never re-read
+        while a swapped file, including a replaced sibling part, invalidates
+        the cache instantly."""
         host = container_to_host(container_path, mounts)
         if host is None:
             return None, None
         try:
             st = os.stat(host)
-            stamp = (st.st_mtime_ns, st.st_size)
+            host_stamp = (st.st_mtime_ns, st.st_size)
         except OSError:
-            stamp = None
+            host_stamp = None
+        sibling_stamps = []
+        for part in model_info.split_parts(host):
+            if part == host:
+                continue
+            try:
+                st = os.stat(part)
+                sibling_stamps.append((st.st_mtime_ns, st.st_size))
+            except OSError:
+                sibling_stamps.append(None)
+        stamp = (host_stamp, tuple(sibling_stamps))
         hit = self._member_meta_cache.get(host)
-        if hit is not None and stamp is not None and hit[0] == stamp:
+        if hit is not None and host_stamp is not None and hit[0] == stamp:
             return hit[1], hit[2]
-        meta = model_info.read_gguf_meta(host)
-        weights = model_info.file_size(host)
-        if stamp is not None:
+        meta, weights = model_info.read_model(host)
+        if host_stamp is not None:
             self._member_meta_cache[host] = (stamp, meta, weights)
         else:
             self._member_meta_cache.pop(host, None)  # unreadable: don't cache
@@ -1361,11 +1388,40 @@ class ConfigurePanel(QWidget):
             return f"all {s.models_total} members"
         return f"{s.models_counted} largest of {s.models_total} members"
 
-    def _render_fit_line(self) -> None:
+    def _current_fit_report(self):
+        """The FitReport for the form's own model, node GPUs, RAM, draft and
+        projector: the single source the readout and its tooltip render
+        from."""
+        p = self.current_profile()
         mib = 1024 * 1024
         free = [g.mem_free_mib * mib for g in (self._fit_gpus or [])]
-        gib = 1024**3
+        mounts = self.mounts_panel.mounts()
+        draft_meta, draft_weights = (
+            self._cached_meta_weights(p.draft_model, mounts)
+            if p.draft_model
+            else (None, 0)
+        )
+        _mm_meta, mm_weights = (
+            self._cached_meta_weights(p.mmproj, mounts) if p.mmproj else (None, 0)
+        )
+        return memory_fit.fit_report(
+            self._fit_meta,
+            self._fit_weights or 0,
+            settings=p.settings,
+            engine=p.runtime.engine,
+            free_bytes_per_gpu=free,
+            ram_available=self._fit_ram,
+            raw_args=p.raw_args,
+            draft_meta=draft_meta,
+            draft_weights=draft_weights or 0,
+            mmproj_bytes=mm_weights or 0,
+        )
+
+    def _render_fit_line(self) -> None:
         if self._is_router_mode():
+            mib = 1024 * 1024
+            free = [g.mem_free_mib * mib for g in (self._fit_gpus or [])]
+            gib = 1024**3
             s = vram.router_fit_summary(
                 self._member_estimates(),
                 models_max=self.current_profile().settings.get(
@@ -1374,35 +1430,37 @@ class ConfigurePanel(QWidget):
                 free_bytes_per_gpu=free,
             )
             note = f" ({self._router_fit_note(s)})" if s is not None else ""
-        else:
-            s = vram.fit_summary(
-                self._fit_meta,
-                self._fit_weights or 0,
-                settings=self.current_profile().settings,
-                free_bytes_per_gpu=free,
-                engine=self.current_profile().runtime.engine,
-            )
-            note = ""
-        if s is None:
-            line = ""
-        elif s.fits:
-            line = (
-                f"fit{note}: est ~{s.est_bytes / gib:.1f} / ~{s.free_bytes / gib:.1f} "
-                f"GiB free (margin {s.margin / gib:.1f} GiB) \u2713"
-            )
-        else:
-            line = (
-                f'<span style="color:#c62828">may not fit{note}: est '
-                f"~{s.est_bytes / gib:.1f} GiB &gt; ~{s.free_bytes / gib:.1f} GiB "
-                f"free (short {-s.margin / gib:.1f} GiB)</span>"
-            )
-        self._set_fit_line(line)
+            if s is None:
+                line = ""
+            elif s.fits:
+                line = (
+                    f"fit{note}: est ~{s.est_bytes / gib:.1f} / "
+                    f"~{s.free_bytes / gib:.1f} GiB free "
+                    f"(margin {s.margin / gib:.1f} GiB) \u2713"
+                )
+            else:
+                line = (
+                    f'<span style="color:#c62828">may not fit{note}: est '
+                    f"~{s.est_bytes / gib:.1f} GiB &gt; ~{s.free_bytes / gib:.1f} "
+                    f"GiB free (short {-s.margin / gib:.1f} GiB)</span>"
+                )
+            self._set_fit_line(line)
+            return
+        report = self._current_fit_report()
+        if report is None:
+            self._set_fit_line("")
+            return
+        self._set_fit_line("<br>".join(memory_fit.render_lines(report)))
+        self.model_meta_label.setToolTip(memory_fit.render_tooltip(report))
 
     def _set_fit_line(self, line: str) -> None:
         """Compose meta/caps text + fit line into the one label. The fit line
         may carry a styled span, so the whole label goes through rich text with
-        the plain meta part escaped."""
+        the plain meta part escaped. The tooltip is cleared here; the
+        single-server caller sets it again right after with the full
+        breakdown, so a router render never keeps a stale one."""
         self._fit_line = line
+        self.model_meta_label.setToolTip("")
         # A router serves its members' models; the leftover form model's
         # meta/caps text would be misinformation next to a member-based fit.
         meta_text = "" if self._is_router_mode() else self._meta_text
