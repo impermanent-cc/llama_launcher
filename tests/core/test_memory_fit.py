@@ -390,3 +390,34 @@ def test_fit_report_none_without_layers():
         ram_available=64 * GIB,
     )
     assert r is None
+
+
+def _hybrid_meta(n_layers=40):
+    """A hybrid model: a full-attention layer every fourth, recurrent state
+    sizes on the rest."""
+    return replace(
+        _meta(n_layers=n_layers),
+        full_attention_interval=4,
+        head_dim_k=256,
+        head_dim_v=256,
+        ssm_conv_kernel=4,
+        ssm_inner_size=4096,
+        ssm_state_size=128,
+        ssm_group_count=16,
+    )
+
+
+def test_json_and_lines_carry_state_and_checkpoints():
+    """A hybrid model's recurrent state reaches the JSON card dict and the
+    card readout lines; the checkpoints are a RAM key and a RAM line, since
+    the server keeps them in host memory."""
+    report = _report(_hybrid_meta(), free=(16 * GIB, 8 * GIB))
+    d = mf.to_json(report)
+    assert "state" in d["cards"][0] and "checkpoints" not in d["cards"][0]
+    assert {"state", "checkpoints"} <= set(d["ram"])
+    assert d["cards"][0]["state"] > 0
+    card_state = sum(c["state"] for c in d["cards"])
+    assert d["ram"]["checkpoints"] == 32 * (card_state + d["ram"]["state"])
+    lines = mf.plain_lines(report)
+    assert "state" in lines[0] and "checkpoints" not in lines[0]
+    assert "state" in lines[-1] and "checkpoints" in lines[-1]

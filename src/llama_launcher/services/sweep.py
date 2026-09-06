@@ -9,7 +9,6 @@ import subprocess
 import time
 
 from llama_launcher.core import sweep as core_sweep
-from llama_launcher.core.settings_catalog import CATALOG, accepts
 from llama_launcher.core.spec import profile_port
 from llama_launcher.core.validation import dial_host
 from llama_launcher.services import benchmark, headless, runtime
@@ -20,12 +19,14 @@ _MIN_SWEEP_VERBOSITY = 4
 
 def sweep_profile(profile, count: int, knob: str):
     """A copy of the profile named for the sweep container, with the count
-    laid over the knob. Verbosity is raised to the level that prints
-    load-time buffer-size lines, unless the profile already asks for more."""
+    laid over the knob. On mainline llama.cpp, verbosity is raised to the
+    level that prints load-time buffer-size lines, unless the profile
+    already asks for more; ik_llama.cpp prints those lines regardless, so
+    its verbosity is left alone."""
     q = copy.deepcopy(profile)
     q.name = f"{profile.name} sweep"
     q.settings[knob] = int(count)
-    if accepts(CATALOG["verbosity"], q.runtime.engine):
+    if q.runtime.engine == "llama.cpp":
         current = q.settings.get("verbosity")
         if current is None or int(current) < _MIN_SWEEP_VERBOSITY:
             q.settings["verbosity"] = _MIN_SWEEP_VERBOSITY

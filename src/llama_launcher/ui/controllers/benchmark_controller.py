@@ -510,9 +510,10 @@ class BenchmarkController:
         from values already read on the UI thread so the sweep worker touches
         no widget. ((), 0) when the metadata cannot support an estimate.
 
-        A card figure is weights + KV + compute, excluding the fixed card
-        overhead, so it names the same buffers as the measured figure the
-        sweep reads back from the server's load log.
+        A card figure is weights + KV + state + compute, excluding the fixed
+        card overhead; the RAM figure excludes the checkpoint reserve, so
+        both name the same buffers as the measured figure the sweep reads
+        back from the server's load log.
         """
         meta = fit_kwargs["meta"]
         weights = fit_kwargs["weights_bytes"]
@@ -525,8 +526,8 @@ class BenchmarkController:
             )
             if est is None:
                 return (), 0
-            cards = tuple(c.weights + c.kv + c.compute for c in est.cards)
-            return cards, est.ram.total
+            cards = tuple(c.weights + c.kv + c.state + c.compute for c in est.cards)
+            return cards, est.ram.total - est.ram.checkpoints
 
         return estimate_for
 

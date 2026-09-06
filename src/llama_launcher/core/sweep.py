@@ -7,12 +7,19 @@ from dataclasses import dataclass
 _MIB = 1024 * 1024
 _LINE = re.compile(
     r"^\s*(?:\S+ [A-Z] )?\w+:\s+(?P<dev>\S+)\s+"
-    r"(?P<kind>model|KV|compute|output) buffer size\s*=\s*"
+    r"(?:(?P<kind>model|KV|RS|compute|output) )?buffer size\s*=\s*"
     r"(?P<mib>[0-9]+(?:\.[0-9]+)?)\s*MiB",
     re.MULTILINE,
 )
 _CARD = re.compile(r"^CUDA(\d+)$")
-_KINDS = {"model": "model", "KV": "kv", "compute": "compute", "output": "output"}
+_KINDS = {
+    None: "model",
+    "model": "model",
+    "KV": "kv",
+    "RS": "kv",
+    "compute": "compute",
+    "output": "output",
+}
 
 
 @dataclass(frozen=True)
@@ -70,7 +77,9 @@ def default_range(smallest_fitting) -> tuple:
 
 def parse_load_log(text: str) -> MeasuredMemory:
     """Per-device buffer sizes from llama-server's load-time log lines. A
-    device named CUDA<n> is card n; every other device counts as RAM."""
+    device named CUDA<n> is card n; every other device counts as RAM. A
+    buffer line with no kind word (ik_llama.cpp's model line) counts as
+    model; a recurrent-state (RS) buffer line counts into KV."""
     cards: dict = {}
     ram = {"model": 0, "kv": 0, "compute": 0, "output": 0}
     for m in _LINE.finditer(text or ""):

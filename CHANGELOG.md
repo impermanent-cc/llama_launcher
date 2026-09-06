@@ -17,9 +17,9 @@ not on the release page, so the two never drift.
   memory estimate prefills, benchmarks each, records the measured model, KV
   and compute buffers from the server log and shows their per-card total
   beside the estimate, marks the fastest count and writes it into the
-  profile on Apply. Sweep launches run at log verbosity 4, the level at
-  which llama.cpp 0.4.0 prints the buffer lines, and the parser reads the
-  timestamped 0.4.0 log format.
+  profile on Apply. Sweep launches on mainline llama.cpp run at log
+  verbosity 4, the level at which 0.4.0 prints the buffer lines; the parser
+  reads the timestamped 0.4.0 format and ik_llama.cpp's buffer lines.
 - Four llama.cpp 0.4.0 server flags: `--kv-unified-per-slot` (per-slot context
   limit, under GPU and Memory) and `--video-fps`,
   `--video-timestamp-interval` and `--video-ffmpeg-dir` (Multimodal). All four
@@ -79,6 +79,17 @@ not on the release page, so the two never drift.
 - An ik_llama.cpp profile with `--fit on` emitted `--fit on`, which ik's
   parser rejects; it now emits the bare `--fit` flag, and `off` emits
   nothing.
+- The VRAM estimate charges KV only to layers that hold a cache (the
+  header's full-attention interval or per-layer head counts), sizes entries
+  from the header's key and value lengths, adds the recurrent state and
+  context checkpoints of hybrid models, charges the logits buffer to the
+  output card only, and sizes the output buffer by request slots. On
+  the 2026-09-06 measurements it read up to 5 GiB high per card before.
+- The sweep parser reads ik_llama.cpp's buffer lines and recurrent-state
+  lines.
+  The compute buffer formula also gains a recurrent-activations term sized
+  by the header's inner size and a per-engine scale, so a hybrid model's
+  estimate on ik_llama.cpp reads inside the fit tolerance.
 
 ## [0.1.1] - 2026-09-03
 

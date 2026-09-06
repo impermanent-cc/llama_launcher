@@ -53,6 +53,36 @@ def _meta(n_layers=8, moe=False):
     )
 
 
+def _hybrid_meta():
+    """A recurrent/full-attention hybrid meta shaped like Qwen3.6: a full
+    KV layer every fourth layer, a recurrent-state layer sized from the
+    ssm_* fields on every other layer, so a card's state term is nonzero."""
+    n_layers = 40
+    ts = [TensorInfo("token_embd.weight", 1, 0, 10 * MIB)]
+    for i in range(n_layers):
+        ts.append(TensorInfo(f"blk.{i}.attn_q.weight", 1, 0, 100 * MIB))
+        ts.append(TensorInfo(f"blk.{i}.ffn_up.weight", 1, 0, 400 * MIB))
+    ts.append(TensorInfo("output.weight", 1, 0, 100 * MIB))
+    return GgufMeta(
+        arch="qwen3next",
+        n_layers=n_layers,
+        n_head=8,
+        n_head_kv=2,
+        n_embd=512,
+        ctx_train=32768,
+        n_ff=256,
+        n_vocab=1000,
+        head_dim_k=256,
+        head_dim_v=256,
+        full_attention_interval=4,
+        ssm_conv_kernel=4,
+        ssm_inner_size=4096,
+        ssm_state_size=128,
+        ssm_group_count=16,
+        tensors=tuple(ts),
+    )
+
+
 def _gpu(free_mib=8192):
     return GpuStat(
         name="card",
@@ -336,6 +366,7 @@ def test_drain_removes_a_terminated_sweep_container(win, monkeypatch):
 
 def test_estimate_for_uses_the_panel_report(win):
     _prepared(win)
+    win._configure_panel._fit_meta = _hybrid_meta()
     captured = {}
 
     win._benchmark._run_sweep_sync(CFG, run_sweep=_stub_run_sweep(captured))
@@ -356,10 +387,36 @@ def test_estimate_for_uses_the_panel_report(win):
     )
     card = est.cards[0]
     # The card figure names the same buffers the load log measures: weights,
-    # KV and compute, without the fixed per-card overhead.
-    assert cards0[0] == card.weights + card.kv + card.compute
+    # KV, state and compute, without the fixed per-card overhead.
+    assert cards0[0] == card.weights + card.kv + card.state + card.compute
     assert cards0[0] == card.total - vram.CARD_OVERHEAD_BYTES
-    assert ram0 == est.ram.total
+    assert ram0 == est.ram.total - est.ram.checkpoints
+    assert card.state > 0
+
+
+def test_estimate_for_ram_figure_excludes_the_checkpoint_reserve(win):
+    """The RAM figure the sweep reads names the same buffers as the card
+    figure: weights, KV, state and host/output buffers, never the checkpoint
+    reserve, which RAM always carries."""
+    _prepared(win)
+    win._configure_panel._fit_meta = _hybrid_meta()
+    win._configure_panel._widgets["no-kv-offload"].set_value(True)
+    captured = {}
+
+    win._benchmark._run_sweep_sync(CFG, run_sweep=_stub_run_sweep(captured))
+
+    estimate_for = captured["estimate_for"]
+    _cards0, ram0 = estimate_for(0)
+
+    fit = win._configure_panel._fit_report_kwargs()
+    est = vram.estimate_memory(
+        fit["meta"],
+        fit["weights_bytes"],
+        settings={**fit["settings"], "n-cpu-ffn": 0},
+        **{k: fit[k] for k in benchmark_controller._ESTIMATE_KEYS},
+    )
+    assert est.ram.checkpoints > 0
+    assert ram0 == est.ram.total - est.ram.checkpoints
 
 
 def test_benchmark_refused_while_a_sweep_runs(win):

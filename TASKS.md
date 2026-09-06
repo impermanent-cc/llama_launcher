@@ -2,9 +2,11 @@
 
 ## Current phase
 
-Idle: no cycle open. The offload sweep cycle (feat/offload-sweep, SPEC.md
-2.6 and 2.26 to 2.31) landed on main on 2026-09-06. The two owner smokes
-that need the 5080 plus A2000 box are listed below, the sweep one first.
+Idle: no cycle open. The estimate calibration cycle (fix/estimate-calibration,
+SPEC.md 2.18, 2.19, 2.26, 2.29, 2.31 and 2.32) landed on main on 2026-09-06.
+The owner smokes that need the 5080 plus A2000 box are listed below, the
+re-run of --estimate against the sweep files first, then a dense non-hybrid
+measurement to pin the FFN and residual terms.
 
 ## Open items
 
@@ -92,9 +94,43 @@ that need the 5080 plus A2000 box are listed below, the sweep one first.
       weights it runs on the CPU (1.2 GiB beside the 2.5 GiB mmap of the
       e2b model on 2026-09-06, measured 3.8 GiB against 3.4 estimated).
       The same applies to expert layers kept in RAM by the offload knobs.
+- [ ] The host multiplier in COMPUTE_TERMS also scales the attention-scores
+      term, which no calibration record covers since every record ran with
+      flash attention on.
+- [ ] scripts/fit_compute_terms.py's search() computes the best_effort point
+      on every grid combination even after a feasible one is found, so the
+      full grid runs regardless of how early the search succeeds.
+- [ ] The checkpoints term charges the --ctx-checkpoints maximum (32 by
+      default) times the recurrent state per slot to RAM, although the
+      server creates checkpoints on demand; no log line measures the term.
+      Watch a long session on the 35B-A3B for RAM growth into it.
+- [ ] Multi-head latent attention (deepseek2 and kin) is priced at the
+      header's per-head key and value lengths, far above the engine's
+      latent cache; reading kv_lora_rank plus the rope dimension would fix
+      it (SPEC out of scope).
+- [ ] With no tensor table, an --override-tensor rule that promotes the
+      output tensor to a card while -ngl leaves the output layer in RAM
+      still sends the logits term to the host buffer; the device flag wins
+      over the override.
+- [ ] recurrent_layer_mask treats any layer with a non-zero per-layer
+      feed-forward width as not recurrent, so a hybrid whose recurrent block
+      also carries an MLP would be charged no state (SPEC 2.32 as written).
+- [ ] The ik calibration record's card 0 KV lower bound clears by a few KiB
+      only through the log-precision allowance; a second ik measurement
+      would settle whether the one-layer slack is enough.
 
 ## Pending owner smokes
 
+- [ ] Re-run `--estimate --json` for the 27B dense and 35B-A3B profiles on
+      the 5080 plus A2000 box and compare each card's `kv + state + compute`
+      and the RAM `buffers` against the sweep files' measured figures; then
+      re-run one sweep per profile and report the measured against
+      estimated columns.
+- [ ] Measure one dense non-hybrid model on the 5080 plus A2000 box (any
+      Llama or Gemma dense GGUF, mainline, Verbosity 4, one sweep point or
+      a detached launch with the buffer lines and the exit table) and paste
+      the print_info block plus the buffer lines, so a fifth record can pin
+      the FFN and residual terms that the hybrid records leave free.
 - [ ] Run a sweep on the 5080 plus A2000 box on the 27B dense profile with
       the prefilled range: confirm each point launches, benchmarks, stops
       and removes its container, that the winner is marked and Apply writes
@@ -116,8 +152,12 @@ that need the 5080 plus A2000 box are listed below, the sweep one first.
 - [ ] Launch a real profile and confirm the four-line readout, its tooltip
       and the launch dialog on KDE/Wayland; try an over-budget context to see
       the --fit note and the suggested offload count.
-- [ ] Smoke an ik_llama.cpp profile with --fit on: the command carries bare
-      --fit and the readout shows the ik note on a MoE model.
+- [x] Smoke an ik_llama.cpp profile with --fit on. Done 2026-09-06 on the
+      5080 plus A2000 box with Qwen3.6-35B-A3B MXFP4 on the cu13-server
+      image: the command carried bare --fit, the server ran with it, and
+      the readout tooltip carried the ik note (24 layers' experts in host
+      RAM). The note was wrong in substance: ik loaded all 41 layers on the
+      cards with 1.2 and 1.8 GiB to spare, the KV over-estimate again.
 - [x] Smoke the new flags against a real llama.cpp 0.4.0 image. Done
       2026-09-05 against ghcr.io/ggml-org/llama.cpp:server-b10818 (version
       0.4.0-dev, build 10818), the first server tag past b10795; the
@@ -146,25 +186,26 @@ that need the 5080 plus A2000 box are listed below, the sweep one first.
 
 ## Done this cycle
 
-- An offload sweep in the Benchmark tab: one detached container per
-  --n-cpu-ffn (dense) or --n-cpu-moe (MoE) count over a range the memory
-  estimate prefills, each waited for on /health, its load-time model, KV
-  and compute lines read from the container log, benchmarked with the
-  panel's settings, then stopped and removed. Failed points record the last
-  log line and the sweep continues; Cancel ends it after the current point
-  and leaves the stored sweep untouched; a server that dies at load fails
-  its point as soon as the container stops; closing the window removes a
-  running sweep container on the way out.
-- A pure core module (knob, counts, log parser, winner), a runner service
-  with injectable probes, a per-profile sweep store beside the benchmark
-  history, and the panel's sweep row and table with the winner marked and
-  Apply writing the count into the profile.
-- The sweep refuses router, native, RPC and remote-node profiles, a profile
-  with no model or no prompt sizes, an engine without the knob, raw
-  arguments carrying the knob's flag, a running instance of the profile or
-  of a previous sweep container, and a running benchmark or sweep; a
-  benchmark refuses to start during a sweep. The stored sweep of the loaded
-  profile is shown when the profile loads.
-- The estimated figure beside each measured card total is model plus KV
-  plus compute, without the per-card overhead the log never reports.
-- The suite went from 1933 to 1994 tests.
+- The VRAM estimate charges KV only to layers that hold a cache, from the
+  header's full-attention interval or a per-layer head-count array, sizes
+  entries from the header's key and value lengths and the cache types, and
+  adds the recurrent state of Gated DeltaNet layers per request slot and,
+  in RAM, the context checkpoints the server keeps for them. On the two Qwen3.5 and 3.6 hybrids
+  measured on 2026-09-06 the KV sum now lands within 2.5 percent of the
+  server's own figure; before, it read six times high on the 27B dense.
+- The compute term charges the logits buffer to the card that holds the
+  output tensor only, gains a recurrent-activations term, and is scaled per
+  engine (ik_llama.cpp 0.7). RAM carries a host compute buffer as a fraction
+  of the card formula and an output buffer of vocabulary times four bytes
+  times request slots, in place of the 2 GiB batch-sized buffer of before.
+- A calibration records module holds the four measured runs and a fit
+  script refits the term table against them; every record reads never low,
+  compute and host at most 2.45 times high, KV plus state within a quarter.
+- The sweep parser reads ik_llama.cpp's buffer lines and recurrent-state
+  lines; sweep launches raise log verbosity on mainline llama.cpp only; the
+  sweep's estimated column includes the recurrent state.
+- The GGUF reader exposes the interval, per-layer KV heads, head sizes and
+  recurrent sizes; the readout, tooltip and JSON show state and
+  checkpoints; VRAM.md documents the terms and a per-engine calibration
+  procedure.
+- The suite went from 1994 to 2039 tests.

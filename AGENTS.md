@@ -37,7 +37,8 @@ RPC pooling across machines.
   stats, benchmark, lora), controllers (launch, monitor, benchmark,
   report), widgets, dialogs (nodes), icon.
 - scripts/: install-desktop.sh (desktop entry), release-notes.sh (extracts
-  a CHANGELOG section for a GitHub release).
+  a CHANGELOG section for a GitHub release), fit_compute_terms.py (refits the
+  VRAM estimate's compute table against tests/core/calibration_records.py).
 - tests/: mirrors the package (core, services, store, ui) plus tests/guard
   for the house text rules; conftest.py at the root sets up offscreen Qt.
 - docs/ is ignored and untracked; nothing under it is a source of truth.

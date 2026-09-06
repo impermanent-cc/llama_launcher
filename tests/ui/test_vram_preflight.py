@@ -115,7 +115,9 @@ def test_vram_check_includes_draft_weights(main_window, monkeypatch):
         return None, None
 
     monkeypatch.setattr(mw.model_info, "read_model", _read_model)
-    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(3400)])
+    # A budget between the two estimates this fixture produces: 2144 MiB for
+    # the model alone, 3232 MiB once the draft's layers, KV and compute join.
+    monkeypatch.setattr(mw.gpu, "query_gpus", lambda ssh_target="": [_gpu(2600)])
     p = _profile(4096)
     main_window._configure_panel.load_profile(p)
     assert main_window._launch.vram_check() is None
