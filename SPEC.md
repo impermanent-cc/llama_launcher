@@ -121,16 +121,35 @@ upstream's `--override-tensor-draft`, `--n-cpu-moe-draft` and
 `--cpu-moe-draft` spellings as aliases. A projector file adds its size to
 the GPU unless `--no-mmproj-offload` is set.
 
-2.18 The KV cache of a sliding-window model is estimated at full context
-for every layer and labelled as an upper bound wherever it is shown.
+2.18 The KV cache is charged only to layers that hold one. A layer holds
+a KV cache when the header's full-attention interval names it (layer i,
+counting from zero, when i plus one is a multiple of the interval) or when
+a per-layer KV head-count array gives it a non-zero count; a model whose
+header carries neither charges every layer. The cache type settings and
+the header's key and value lengths (embedding size over head count when
+absent) size each entry. A sliding-window model is estimated at full context on its KV
+layers and labelled as an upper bound wherever it is shown; a hybrid model
+without a sliding window carries no label.
 
 2.19 The compute buffer is estimated per card from a formula of ubatch-
-scaled terms (logits, FFN activations, attention scores, residual stream)
-plus a fixed backend constant, with the attention-scores term absent when
-flash attention is on or auto. The term table lives in the VRAM module and
-every rendering of the value marks it approximate. The logical batch size
-adds a host-side output buffer to the RAM total. The calibration procedure
-against llama.cpp's exit-time memory breakdown is documented so the
+scaled terms (FFN activations, attention scores, residual stream, recurrent
+activations sized by the header's inner size) plus a fixed backend constant, with the attention-scores term absent when flash
+attention is on or auto, and the card and host figures scaled by one
+constant per engine, fitted on that engine's calibration records. The ubatch-scaled logits term is charged only to
+the card the placement gives the output tensor, or to RAM when that tensor
+stays there. RAM also carries a host compute buffer, a multiplier from the
+same table on the card formula without the logits term, and an output
+buffer of vocabulary size times four
+bytes times the slot count (the `--parallel` setting, else the engine's
+default, four on llama.cpp and one on ik_llama.cpp). The term table lives in the VRAM module and every
+rendering of the value marks it approximate. The multipliers are fitted
+against the measured breakdowns kept with the project's calibration
+records: KV plus recurrent state reads high by at most a quarter and never
+low on the sum across cards, and per card within one layer's KV of that;
+compute and host buffers never read low and read at most two and a half
+times high, compared per card as sorted figures since the output card
+follows settings the records do not carry. The calibration procedure
+against llama.cpp's memory breakdown is documented, per engine, so the
 constants can be refitted when upstream changes its graphs.
 
 2.20 The fit check compares each card's estimated total (weights, KV,
@@ -189,8 +208,9 @@ detached container named `llama-<slug>-sweep`, waits for `/health` up to a
 ready timeout (panel field, default 600 seconds), reads the memory lines
 from the container log, runs the benchmark with the panel's current prompt
 sizes, n-predict, warmup and repeats, stops and removes the container, and
-proceeds to the next count. It refuses, with a one-line message in the
-panel, a native, RPC, router or remote-node profile, a profile with no
+proceeds to the next count; on mainline llama.cpp the launch carries log
+verbosity 4 when the profile's is lower, on other engines the profile's
+own. It refuses, with a one-line message in the panel, a native, RPC, router or remote-node profile, a profile with no
 model, an engine that does not accept the sweep's knob, raw arguments that
 carry the knob's flag, an empty prompt-sizes field, and a start while the
 profile's own instance, a previous sweep container, a benchmark or another
@@ -210,9 +230,12 @@ stopped and removed, and the sweep continues with the next count. Cancel
 ends the sweep after stopping and removing the current point's container.
 
 2.29 Each ready point records the seconds from launch to ready and the
-load-time memory lines llama-server logs: the model, KV and compute buffer
-sizes per device and the output buffer. A device named `CUDA<n>` maps to
-card `n`; every other device counts toward RAM.
+load-time memory lines llama-server logs: the model, KV, recurrent-state
+and compute buffer sizes per device and the output buffer. A device named
+`CUDA<n>` maps to card `n`; every other device counts toward RAM. A line
+may carry a timestamp and level prefix; a model line without a kind word
+(ik_llama.cpp) counts as model; a recurrent-state (RS) line counts into the
+KV figure.
 
 2.30 The latest sweep of a profile is stored in its own file beside the
 benchmark history, which the sweep never touches: the knob, the counts, and
@@ -226,9 +249,25 @@ step, ready timeout, Run sweep or Cancel, Apply) and a sweep table under
 the run table in a splitter: count, status with the failure line in its
 tooltip, ready seconds, prompt and generation tokens per second at the
 largest prompt size, per card measured against estimated GiB for model plus
-KV plus compute, and RAM measured against estimated; the winning row is
-marked. Apply writes the winner's count into the Configure form and saves
+KV (recurrent state included) plus compute, without the per-card overhead
+and checkpoint terms the log never reports, and RAM measured against
+estimated; the winning row is marked. Apply writes the winner's count into the Configure form and saves
 the profile. The compute constants of 2.19 are not changed by a sweep.
+
+2.32 A recurrent layer (a layer without a KV cache, and without a dense
+feed-forward width where the header carries per-layer widths, on a model
+whose header carries recurrent-state sizes; every layer on a model with
+state sizes and no attention heads) adds its state in f32, the convolution
+state (kernel size minus one, times inner size plus twice the group count
+times state size) plus the state matrix (state size times inner size),
+once per request slot, to the card that holds the layer, or to RAM where KV
+would go. A checkpoints term, the `--ctx-checkpoints` setting (default 32)
+times the recurrent state of every recurrent layer per slot, is charged to
+RAM, where the server keeps its checkpoints. Both appear in every readout
+total, the dialog and `--estimate --json` (card key `state`, RAM keys
+`state` and `checkpoints`), and the sweep's estimated figures of 2.31
+include the state and exclude the checkpoints. A per-layer KV head-count
+array sizes each layer's cache by its own count.
 
 ## 3. Constraints
 
@@ -266,6 +305,12 @@ sanity job.
   --control-vector-layer-range) until they get panel plumbing like LoRA.
 - Reading a sliding-window model's per-layer window pattern; the KV
   estimate for such models is the labelled upper bound of 2.18.
+- Multi-head latent attention caches (deepseek2 and kin): the estimate
+  prices them at the header's key and value lengths per head, far above
+  the latent cache the engine keeps, and labels nothing.
+- The CPU_REPACK copy of weights run on the CPU (a second, repacked copy
+  beside the mapped one on a CPU-only launch); the RAM estimate does not
+  model it.
 - Reproducing mainline fit's per-card layer distribution; the predicted
   context of 2.22 is solved against the summed budget.
 - A ubatch sweep, a headless `--sweep` command and sweeps on a remote

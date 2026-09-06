@@ -54,6 +54,19 @@ def _gib(n) -> str:
     return f"{n / _GIB:.1f}"
 
 
+def _state_parts(state: int, checkpoints: int = 0, unit: str = "") -> str:
+    """The recurrent-state clause of a breakdown, with the checkpoints term
+    where the device carries one (RAM alone), empty when the model has
+    neither."""
+    if not (state or checkpoints):
+        return ""
+    tail = f" {unit}" if unit else ""
+    out = f", state {_gib(state)}{tail}"
+    if checkpoints:
+        out += f", checkpoints {_gib(checkpoints)}{tail}"
+    return out
+
+
 def _fit_state(settings) -> str:
     """'unset', 'on' or 'off' as the engine will see it."""
     raw = settings.get("fit", "unset")
@@ -527,7 +540,8 @@ def render_lines(report: FitReport) -> list:
     lines = []
     for c, ce in zip(report.cards, est.cards, strict=False):
         parts = (
-            f"weights {_gib(ce.weights)}, {kv_label} {_gib(ce.kv)}, "
+            f"weights {_gib(ce.weights)}, {kv_label} {_gib(ce.kv)}"
+            f"{_state_parts(ce.state)}, "
             f"compute ~{_gib(ce.compute)}, overhead {_gib(ce.overhead)}"
         )
         if c.fits:
@@ -543,7 +557,8 @@ def render_lines(report: FitReport) -> list:
             )
     r = report.ram
     ram_parts = (
-        f"weights {_gib(est.ram.weights)}, {kv_label} {_gib(est.ram.kv)}, "
+        f"weights {_gib(est.ram.weights)}, {kv_label} {_gib(est.ram.kv)}"
+        f"{_state_parts(est.ram.state, est.ram.checkpoints)}, "
         f"buffers {_gib(est.ram.buffers)}"
     )
     if r.available is None:
@@ -577,11 +592,13 @@ def render_tooltip(report: FitReport) -> str:
     lines = [f"Context used for KV: {est.ctx}"]
     for i, c in enumerate(est.cards):
         lines.append(
-            f"GPU{i}: weights {_gib(c.weights)} GiB, KV {_gib(c.kv)} GiB, "
+            f"GPU{i}: weights {_gib(c.weights)} GiB, KV {_gib(c.kv)} GiB"
+            f"{_state_parts(c.state, unit='GiB')}, "
             f"compute {_gib(c.compute)} GiB, overhead {_gib(c.overhead)} GiB"
         )
     lines.append(
-        f"RAM: weights {_gib(est.ram.weights)} GiB, KV {_gib(est.ram.kv)} GiB, "
+        f"RAM: weights {_gib(est.ram.weights)} GiB, KV {_gib(est.ram.kv)} GiB"
+        f"{_state_parts(est.ram.state, est.ram.checkpoints, 'GiB')}, "
         f"host buffers {_gib(est.ram.buffers)} GiB"
     )
     lines.append(
@@ -624,6 +641,7 @@ def to_json(report: FitReport) -> dict:
                 "kv": ce.kv,
                 "compute": ce.compute,
                 "overhead": ce.overhead,
+                "state": ce.state,
             }
             for c, ce in zip(report.cards, est.cards, strict=False)
         ],
@@ -635,6 +653,8 @@ def to_json(report: FitReport) -> dict:
             "weights": est.ram.weights,
             "kv": est.ram.kv,
             "buffers": est.ram.buffers,
+            "state": est.ram.state,
+            "checkpoints": est.ram.checkpoints,
         },
         "messages": [m.text for m in report.messages],
     }

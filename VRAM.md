@@ -5,8 +5,8 @@ places every tensor the way llama.cpp and ik_llama.cpp place it, so the
 Configure readout, the launch preflight dialog and `llama-launcher
 --estimate` all show the same numbers for the same profile. This document
 describes what the estimate counts, what its messages mean, how to
-recalibrate its two hand-tuned constants, its JSON keys, and where it is
-known to fall short of the real allocator.
+recalibrate its fitted constants, its JSON keys, and where it is known to
+fall short of the real allocator.
 
 ## What the estimate counts
 
@@ -16,12 +16,25 @@ Per card:
   `--n-gpu-layers`, the CPU offload flags `--cpu-moe`, `--n-cpu-moe` and
   `--n-cpu-ffn`, and `--override-tensor`, then split across cards by
   `--tensor-split` or free memory;
-- the KV cache of every layer whose card that is (all of it moves to RAM
-  under `--no-kv-offload`);
+- the KV cache of every layer that holds one: the header's full-attention
+  interval or a per-layer KV head-count array picks out which layers do (a
+  header naming neither charges every layer, and one with state sizes and
+  no attention heads charges none); each entry is sized from the cache
+  type settings, that layer's own KV head count where the header gives one
+  per layer, and the header's key and value lengths (embedding size over
+  head count when absent); all of it moves to RAM under
+  `--no-kv-offload`;
+- the recurrent state of every layer that holds no KV cache on a header
+  carrying recurrent-state sizes, one copy per request slot, charged to
+  the card that holds the layer (or to RAM where its KV would go); a
+  header with state sizes and no attention heads is purely recurrent, and
+  a layer with no KV heads but a non-zero per-layer feed-forward width is
+  MLP-only and holds neither cache nor state;
 - a compute buffer (see the formula below), counted only on a card that
   holds weights or KV, except under `split-mode row`, where it is counted
   once, on `--main-gpu`, and only when `--main-gpu` itself holds weights
-  or KV;
+  or KV; the logits term of that formula lands only on the one card that
+  holds the output tensor;
 - a fixed backend overhead, applied to every visible card whether or not
   it holds any weights or KV.
 
@@ -30,20 +43,41 @@ In RAM:
 - the weights of layers kept off every card (block layers under a CPU
   rule or override, token embeddings, and the output matrix when it is
   kept off a card or tied to the embeddings);
-- their KV cache;
-- a host output buffer sized from the vocabulary and the logical batch
-  size (`--batch-size`, capped to the context; `--ubatch-size` is
-  separately capped to that batch).
+- their KV cache and recurrent state;
+- the context checkpoints: `--ctx-checkpoints` times the recurrent state
+  of every recurrent layer, wherever that layer sits, since llama-server
+  keeps its checkpoints as host vectors;
+- a host compute buffer: the host term of the compute formula times the
+  same per-card formula without its logits term (the host reserves a
+  card-sized buffer for the same graph rather than one that follows the
+  embedding size alone), plus the logits term itself when the output
+  tensor stays in RAM instead of landing on a card;
+- an output buffer the server hands back per slot: vocabulary size times
+  four bytes times the slot count (the `--parallel` setting, else the
+  engine's default of four on llama.cpp and one on ik_llama.cpp).
+
+The compute buffer is a formula of five f32 terms, each scaled by
+`--ubatch-size` (itself capped to `--batch-size`, which is capped to the
+context): FFN activations (active experts on a MoE model), the residual
+stream, recurrent activations sized by the header's inner size, attention
+scores over the context (dropped when flash attention is on or auto), and
+logits sized by the vocabulary, which is added only to the one card that
+holds the output tensor, or to the RAM host buffer when that tensor stays
+there. `COMPUTE_TERMS` and `CARD_OVERHEAD_BYTES` hold the coefficients and
+the fixed backend constant; `ENGINE_COMPUTE_SCALE` multiplies every compute
+and host figure by one constant per engine, since ik_llama.cpp's graphs
+reserve less than mainline's for the same model, and an engine the table
+does not name keeps mainline's figures.
 
 A draft model is placed by the same function, gated on the draft twins of
 the offload flags (`spec-draft-override-tensor`, `spec-draft-n-cpu-moe`
 and `spec-draft-cpu-moe`, which also accept upstream's
 `--override-tensor-draft`, `--n-cpu-moe-draft` and `--cpu-moe-draft`
 spellings), and its KV cache uses `--ctx-size-draft` when set and the main
-context otherwise. Its weights, KV and compute buffer add into the same
-per-card and RAM totals as the main model's. A projector file's bytes add
-to `--main-gpu`'s weights unless `--no-mmproj-offload` is set, in which
-case they go to RAM instead.
+context otherwise. Its weights, KV, recurrent state, checkpoints and
+compute buffer add into the same per-card and RAM totals as the main
+model's. A projector file's bytes add to `--main-gpu`'s weights unless
+`--no-mmproj-offload` is set, in which case they go to RAM instead.
 
 A sliding-window model's KV estimate uses the full context for every
 layer rather than the model's own window, so it is labelled an upper
@@ -92,56 +126,83 @@ wording says the launch will fail when `--load-mode` locks every page
 (`none`, `mlock` or `mmap+mlock`, or `--mlock` set) and otherwise that the
 server will page weights in and out of RAM and run slowly.
 
-## Calibrating `COMPUTE_TERMS` and `CARD_OVERHEAD_BYTES`
+## Calibrating `COMPUTE_TERMS`, `ENGINE_COMPUTE_SCALE` and `CARD_OVERHEAD_BYTES`
 
-Both constants live in `src/llama_launcher/core/vram.py` and are
-hand-tuned against llama.cpp's own numbers, not derived from its source.
-`COMPUTE_TERMS` are f32 elements per micro-batch token; `CARD_OVERHEAD_BYTES`
-is a byte count. A sweep in the Benchmark tab gives one combined measured
-against estimated total per card and for RAM, a quick check on the
-estimate as a whole; refitting `COMPUTE_TERMS` and `CARD_OVERHEAD_BYTES`
-still needs the manual procedure below, because the compute figure has to
-be read on its own and the overhead comes from the exit-time
-`llama_memory_breakdown_print` table, which a sweep's log read never sees
-since it happens while the server is still running. To refit them:
+All three live in `src/llama_launcher/core/vram.py` and are fitted against
+llama.cpp's and ik_llama.cpp's own logged numbers, not derived from either
+engine's source. `COMPUTE_TERMS` and `ENGINE_COMPUTE_SCALE` are f32
+coefficients per micro-batch token and engine multipliers respectively;
+`CARD_OVERHEAD_BYTES` is a byte count. SPEC 2.19 sets the tolerance a fit
+must meet: KV plus recurrent state reads high by at most a quarter and
+never low on the sum across cards, and per card within one layer's KV of
+that; compute and host buffers never read low and read at most two and a
+half times high, compared per card as sorted figures since the output card
+follows settings the records do not carry. The terms written today were
+fit on four calibration records measured 2026-09-06. A sweep in the
+Benchmark tab gives one combined measured against estimated total per card
+and for RAM, a quick check on the estimate as a whole; refitting the three
+constants still needs the manual procedure below, because the compute
+figure has to be read on its own and the overhead comes from the exit-time
+memory breakdown table, which a sweep's log read never sees since it
+happens while the server is still running.
+
+Each engine logs its buffers differently, so the read step splits by
+engine; steps 1, 4, 5 and 6 are the same for both.
+
+### llama.cpp (mainline)
+
+Set the profile's Verbosity setting (the Logging group, `-lv`) to 4:
+llama.cpp 0.4.0 prints the per-device buffer lines and the
+`common_memory_breakdown_print` table (`llama_memory_breakdown_print`
+before 0.4.0) only at verbosity 4 and above, nothing at its default of 3.
+The table appears once before loading and once just before the server
+exits; every line carries a timestamp and level prefix such as
+`0.05.529.870 I`. Read the last occurrence. It has one row per device,
+each row reading `total = free + self + unaccounted` with
+`self = model + context + compute`.
+
+### ik_llama.cpp
+
+ik_llama.cpp prints its buffer lines at its default verbosity already, in
+the `llm_load_tensors: CUDA0 buffer size` form, with no separate
+memory-breakdown table; setting verbosity 4 there only adds a line per
+token and changes nothing about the buffer lines themselves.
+
+### Procedure
 
 1. Before launching, read each card's already-used VRAM with `nvidia-smi
    --query-gpu=index,memory.used --format=csv`, so the per-card subtraction
    in step 5 pairs unambiguously on a multi-card box.
-2. Set the profile's Verbosity setting (the Logging group, `-lv`) to 4:
-   llama.cpp 0.4.0 prints the per-device buffer lines and the memory
-   breakdown table only at verbosity 4 and above, and nothing at its
-   default of 3. Then launch a dense model profile and a MoE model profile
+2. Launch a dense model profile and a MoE model profile per engine
    headlessly with
    `llama-launcher --launch --profile NAME` (detached, kept after exit) or
    with **Run detached** enabled in the GUI. A foreground GUI launch runs
    its container with `--rm`, so the container and its log are gone at
-   exit; that same table still streams into the Monitor tab's log, so read
+   exit; the buffer lines still stream into the Monitor tab's log, so read
    it there instead when launching in the foreground.
 3. Stop each server with `llama-launcher --stop --profile NAME` (or the
    GUI's Stop), then read `podman logs <container name>` (`docker logs`
    likewise); find the container name with `podman ps -a`, or read it off
-   the Monitor card. llama.cpp prints the `common_memory_breakdown_print`
-   table (`llama_memory_breakdown_print` before 0.4.0) once before loading
-   and once just before it exits; read the last one. Every line carries a
-   timestamp and level prefix such as `0.05.529.870 I`. The table has one
-   row per device, each row reading `total = free + self + unaccounted`
-   with `self = model + context + compute`.
+   the Monitor card. Read the buffer lines the engine's section above
+   names.
 4. Run `llama-launcher --estimate --profile NAME --json` for the same
    profile.
-5. Compare the JSON's `estimate.cards[i].compute` against the table's
-   compute column, and `estimate.cards[i].overhead` against the table's
-   unaccounted column minus the VRAM that step 1 found already used on
+5. Compare the JSON's `estimate.cards[i].compute` against the logged
+   compute figure, and `estimate.cards[i].overhead` against the logged
+   unaccounted figure minus the VRAM that step 1 found already used on
    that card: the launcher's own estimate already judges each card against
    its free VRAM at probe time, so other processes' usage has to come out
    of unaccounted before the two overheads are comparable.
-6. Adjust `COMPUTE_TERMS` or `CARD_OVERHEAD_BYTES`, re-run the estimate,
-   and repeat; re-read the log (step 3) before relaunching the profile,
-   since relaunching removes the previous stopped container.
-7. Stop once every card's compute and overhead sit within a few hundred
-   MiB of the logged numbers and never read lower than them: an estimate
-   that reads a little high is a safe warning, one that reads low hides a
-   real shortfall.
+6. Add the measurement as a new record in `tests/core/calibration_records.py`
+   (header block, settings, free VRAM per card and the logged buffer
+   sizes, all in bytes), then run `scripts/fit_compute_terms.py`: it
+   refits `COMPUTE_TERMS` and `ENGINE_COMPUTE_SCALE` over every record at
+   once and prints the winning point, or the least-bad one when SPEC
+   2.19's tolerance is not reachable on every record together.
+7. Adjust `CARD_OVERHEAD_BYTES` by hand from the unaccounted comparison in
+   step 5, since the fit script does not touch it; stop once every card's
+   overhead sits within a few hundred MiB of the logged figure and never
+   reads lower than it.
 
 ## JSON keys
 
@@ -150,18 +211,24 @@ since it happens while the server is still running. To refit them:
 
 - `fits`, `ctx`, `kv_upper_bound`;
 - `cards`: a list, each with `index`, `est`, `free`, `margin`, `fits`,
-  `weights`, `kv`, `compute`, `overhead`;
-- `ram`: `est`, `available`, `margin`, `fits`, `weights`, `kv`, `buffers`;
+  `weights`, `kv`, `compute`, `overhead`, `state`;
+- `ram`: `est`, `available`, `margin`, `fits`, `weights`, `kv`, `buffers`,
+  `state`, `checkpoints`;
 - `messages`: a list of the message strings shown in the readout.
 
 ## Known limits
 
-- The compute buffer is a formula (logits, FFN, residual and, without
-  flash attention, attention-score terms scaled by `--ubatch-size`, plus
-  the fixed per-card overhead), not a readout of llama.cpp's own
-  allocator; every place it is shown marks it approximate.
+- The compute buffer is a formula (FFN, residual, recurrent activations,
+  attention scores without flash attention and logits on the output card,
+  scaled by `--ubatch-size`, plus the fixed per-card overhead and, per
+  engine, the `ENGINE_COMPUTE_SCALE` multiplier), not a readout of the
+  engine's own allocator; every place it is shown marks it approximate.
 - A sliding-window model's KV figure is the labelled upper bound above;
   its per-layer window pattern is not read.
+- The RAM estimate does not model `CPU_REPACK`, the second, repacked copy
+  of weights llama.cpp keeps on a CPU-only launch (or of expert layers the
+  offload knobs keep in RAM) beside the mapped one; the estimate reads low
+  by that amount there.
 - llama.cpp's real `--fit` distributes layers per card while it searches;
   the predicted context here is solved against the free VRAM summed
   across every card, not per card.

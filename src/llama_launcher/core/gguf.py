@@ -81,6 +81,16 @@ def _num(v):
     return v
 
 
+def _per_layer(v):
+    """A GGUF value that names one number per layer as a tuple of ints, or
+    None when it is a scalar, empty or non-numeric. It keeps the per-layer
+    detail _num collapses, for the fields whose layers really differ."""
+    if not isinstance(v, (list, tuple)) or not v:
+        return None
+    nums = [x for x in v if isinstance(x, (int, float))]
+    return tuple(int(x) for x in nums) if nums else None
+
+
 @dataclass(frozen=True)
 class TensorInfo:
     name: str
@@ -157,6 +167,15 @@ class GgufMeta:
     n_vocab: int | None = None
     split_count: int = 1
     tensors: tuple = ()
+    full_attention_interval: int | None = None
+    kv_layer_heads: tuple | None = None
+    head_dim_k: int | None = None
+    head_dim_v: int | None = None
+    ssm_conv_kernel: int | None = None
+    ssm_inner_size: int | None = None
+    ssm_state_size: int | None = None
+    ssm_group_count: int | None = None
+    ff_layers: tuple | None = None
 
 
 class _Reader:
@@ -243,9 +262,13 @@ def parse_gguf_header(data: bytes) -> GgufMeta:
         return kv.get(f"{arch}.{suffix}")
 
     n_head = _num(a("attention.head_count"))
-    n_head_kv = _num(a("attention.head_count_kv"))
+    raw_kv_heads = a("attention.head_count_kv")
+    n_head_kv = _num(raw_kv_heads)
     if n_head_kv is None:
         n_head_kv = n_head
+
+    kv_layer_heads = _per_layer(raw_kv_heads)
+    ff_layers = _per_layer(a("feed_forward_length"))
 
     tensors = _parse_tensor_table(r, tensor_count)
     tokens = kv.get("tokenizer.ggml.tokens")
@@ -276,4 +299,13 @@ def parse_gguf_header(data: bytes) -> GgufMeta:
         if isinstance(split_count, int) and split_count > 0
         else 1,
         tensors=tensors,
+        full_attention_interval=_num(a("full_attention_interval")),
+        kv_layer_heads=kv_layer_heads,
+        head_dim_k=_num(a("attention.key_length")),
+        head_dim_v=_num(a("attention.value_length")),
+        ssm_conv_kernel=_num(a("ssm.conv_kernel")),
+        ssm_inner_size=_num(a("ssm.inner_size")),
+        ssm_state_size=_num(a("ssm.state_size")),
+        ssm_group_count=_num(a("ssm.group_count")),
+        ff_layers=ff_layers,
     )

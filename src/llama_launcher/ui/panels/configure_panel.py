@@ -735,8 +735,9 @@ class ConfigurePanel(QWidget):
         QTimer.singleShot(150, self._poll_check_fit)
 
     def _model_estimate_bytes(self, p: Profile) -> int:
-        """The pooled preflight's whole-model figure: weights and KV on
-        every device (GPU and RAM combined) for one profile's model."""
+        """The pooled preflight's whole-model figure: weights, KV, state and
+        checkpoints on every device (GPU and RAM combined) for one profile's
+        model."""
         meta, weights, _caps = model_info.inspect_model(
             p.model, self.mounts_panel.mounts()
         )

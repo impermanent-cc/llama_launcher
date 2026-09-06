@@ -95,6 +95,39 @@ def test_parse_load_log_reads_a_timestamp_prefixed_cuda_line():
     assert m.cards[0]["model"] == int(17904.12 * MIB)
 
 
+IK_LOG = """\
+llm_load_tensors: offloaded 41/41 layers to GPU
+llm_load_tensors:        CPU buffer size =   515.31 MiB
+llm_load_tensors:      CUDA0 buffer size = 11780.09 MiB
+llm_load_tensors:      CUDA1 buffer size =  8394.71 MiB
+llama_kv_cache_init:      CUDA0 KV buffer size =  1573.69 MiB
+llama_kv_cache_init:      CUDA1 KV buffer size =  1049.12 MiB
+llama_init_from_model:  CUDA_Host  output buffer size =     0.95 MiB
+llama_init_from_model:      CUDA0 compute buffer size =   194.17 MiB
+llama_init_from_model:      CUDA1 compute buffer size =   489.00 MiB
+llama_init_from_model:  CUDA_Host compute buffer size =   132.01 MiB
+"""
+RS_LOG = """\
+0.03.1 I llama_memory_recurrent:      CUDA0 RS buffer size =    62.83 MiB
+0.03.2 I llama_kv_cache:      CUDA0 KV buffer size =   384.00 MiB
+0.03.3 I llama_memory_recurrent:        CPU RS buffer size =    10.00 MiB
+"""
+
+
+def test_parse_ik_lines_without_a_kind_word():
+    m = sw.parse_load_log(IK_LOG)
+    assert m.cards[0]["model"] == int(11780.09 * MIB)
+    assert m.cards[1]["model"] == int(8394.71 * MIB)
+    assert m.ram["model"] == int(515.31 * MIB)
+    assert m.cards[1]["compute"] == 489 * MIB and m.ram["output"] == int(0.95 * MIB)
+
+
+def test_rs_lines_count_into_kv():
+    m = sw.parse_load_log(RS_LOG)
+    assert m.cards[0]["kv"] == int(62.83 * MIB) + 384 * MIB
+    assert m.ram["kv"] == 10 * MIB
+
+
 def test_last_log_line_skips_blank_tail():
     assert sw.last_log_line("a\nb\n\n  \n") == "b"
     assert sw.last_log_line("") == ""

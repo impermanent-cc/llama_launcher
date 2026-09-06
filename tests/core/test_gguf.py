@@ -31,6 +31,21 @@ def _kv_arr_u32(key, vals):
     return out + b"".join(struct.pack("<I", v) for v in vals)
 
 
+def _kv_arr_arr_u32(key, vals):
+    # An array of arrays: value type 9 (_ARR) nested inside value type 9,
+    # each inner element itself an array of u32.
+    kb = key.encode()
+    out = struct.pack("<Q", len(kb)) + kb
+    out += struct.pack("<I", 9)  # value type = _ARR
+    out += struct.pack("<I", 9)  # element type = _ARR
+    out += struct.pack("<Q", len(vals))  # outer count
+    for inner in vals:
+        out += struct.pack("<I", 4)  # inner element type = _U32
+        out += struct.pack("<Q", len(inner))  # inner count
+        out += b"".join(struct.pack("<I", v) for v in inner)
+    return out
+
+
 def _arr_head_gguf():
     # A model that stores per-layer attention.head_count[_kv] as arrays
     # (its layers differ); valid GGUF that some real models emit.
@@ -312,3 +327,96 @@ def test_implausible_tensor_count_yields_no_tensors():
     m = parse_gguf_header(blob)
     assert m.tensors == ()
     assert m.n_layers == 2
+
+
+def _hybrid_gguf():
+    kvs = [
+        _kv_str("general.architecture", "qwen3next"),
+        _kv_u32("qwen3next.block_count", 8),
+        _kv_u32("qwen3next.attention.head_count", 16),
+        _kv_u32("qwen3next.attention.head_count_kv", 2),
+        _kv_u32("qwen3next.embedding_length", 2048),
+        _kv_u32("qwen3next.context_length", 262144),
+        _kv_u32("qwen3next.full_attention_interval", 4),
+        _kv_u32("qwen3next.attention.key_length", 256),
+        _kv_u32("qwen3next.attention.value_length", 256),
+        _kv_u32("qwen3next.ssm.conv_kernel", 4),
+        _kv_u32("qwen3next.ssm.inner_size", 4096),
+        _kv_u32("qwen3next.ssm.state_size", 128),
+        _kv_u32("qwen3next.ssm.group_count", 16),
+    ]
+    body = b"".join(kvs)
+    header = (
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", 0)
+        + struct.pack("<Q", len(kvs))
+    )
+    return header + body
+
+
+def test_hybrid_and_state_keys():
+    m = parse_gguf_header(_hybrid_gguf())
+    assert m.full_attention_interval == 4
+    assert (m.head_dim_k, m.head_dim_v) == (256, 256)
+    assert (
+        m.ssm_conv_kernel,
+        m.ssm_inner_size,
+        m.ssm_state_size,
+        m.ssm_group_count,
+    ) == (4, 4096, 128, 16)
+    assert m.kv_layer_heads is None
+
+
+def test_hybrid_keys_absent_are_none():
+    m = parse_gguf_header(_synthetic_gguf())
+    assert m.full_attention_interval is None and m.head_dim_k is None
+    assert m.ssm_inner_size is None and m.kv_layer_heads is None
+
+
+def test_per_layer_kv_heads_kept_raw():
+    m = parse_gguf_header(_arr_head_gguf())
+    assert m.kv_layer_heads == (8, 8, 4, 4)
+    assert m.n_head_kv == 8
+
+
+def test_per_layer_feed_forward_lengths_kept_beside_the_collapsed_one():
+    """A header naming one feed-forward width per layer keeps the array as
+    ff_layers, with n_ff still the collapsed maximum; a scalar width leaves
+    ff_layers empty."""
+    kvs = [
+        _kv_str("general.architecture", "nemotron_h"),
+        _kv_u32("nemotron_h.block_count", 4),
+        _kv_u32("nemotron_h.attention.head_count", 32),
+        _kv_arr_u32("nemotron_h.attention.head_count_kv", [0, 0, 8, 0]),
+        _kv_arr_u32("nemotron_h.feed_forward_length", [0, 11008, 11008, 0]),
+        _kv_u32("nemotron_h.embedding_length", 4096),
+    ]
+    header = (
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", 0)
+        + struct.pack("<Q", len(kvs))
+    )
+    m = parse_gguf_header(header + b"".join(kvs))
+    assert m.ff_layers == (0, 11008, 11008, 0)
+    assert m.n_ff == 11008
+    assert parse_gguf_header(_arr_head_gguf()).ff_layers is None
+
+
+def test_nested_array_head_count_kv_yields_none_without_raising():
+    kvs = [
+        _kv_str("general.architecture", "x"),
+        _kv_u32("x.block_count", 3),
+        _kv_u32("x.attention.head_count", 8),
+        _kv_arr_arr_u32("x.attention.head_count_kv", [[2], [0], [2]]),
+        _kv_u32("x.embedding_length", 64),
+    ]
+    header = (
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", 0)
+        + struct.pack("<Q", len(kvs))
+    )
+    m = parse_gguf_header(header + b"".join(kvs))
+    assert m.kv_layer_heads is None

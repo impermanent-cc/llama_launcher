@@ -98,6 +98,15 @@ def test_sweep_profile_keeps_a_higher_verbosity():
     assert q.settings["verbosity"] == 6
 
 
+def test_sweep_profile_leaves_verbosity_unset_for_ik_llama_cpp():
+    """ik_llama.cpp prints its load-time buffer lines without the verbosity
+    flag, so a sweep never sets it for that engine."""
+    p = _profile()
+    p.runtime = Runtime(binary="podman", engine="ik_llama.cpp")
+    q = svc.sweep_profile(p, 6, "n-cpu-ffn")
+    assert q.settings.get("verbosity") is None
+
+
 def test_run_sweep_records_every_point_and_stops_each_container():
     calls, probes = _probes()
     seen = []
