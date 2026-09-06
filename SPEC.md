@@ -46,6 +46,7 @@ stats; the Stats dock shows CPU, GPU and memory; the Benchmark panel runs
 prompt and generation sweeps and shows deltas against the previous run.
 Each run records a config snapshot of the settings that shape throughput,
 including both CPU offload counts.
+The Benchmark panel also runs the offload sweep of 2.26 to 2.31.
 
 2.7 The router API key, LoRA adapter scales and model switching are driven
 through the server's HTTP API, never by restarting the server.
@@ -183,6 +184,52 @@ dialog and the CLI.
 2.25 `--estimate --profile NAME` prints the breakdown of 2.24 for the
 profile's launch node, and with `--json` prints it as JSON.
 
+2.26 An offload sweep launches the current profile once per count as a
+detached container named `llama-<slug>-sweep`, waits for `/health` up to a
+ready timeout (panel field, default 600 seconds), reads the memory lines
+from the container log, runs the benchmark with the panel's current prompt
+sizes, n-predict, warmup and repeats, stops and removes the container, and
+proceeds to the next count. It refuses, with a one-line message in the
+panel, a native, RPC, router or remote-node profile, a profile with no
+model, an engine that does not accept the sweep's knob, raw arguments that
+carry the knob's flag, an empty prompt-sizes field, and a start while the
+profile's own instance, a previous sweep container, a benchmark or another
+sweep is running. A cancelled sweep is shown but not stored; the stored
+sweep of the loaded profile is shown when the profile loads.
+
+2.27 The sweep varies `--n-cpu-ffn` on a dense model and `--n-cpu-moe` on
+a MoE one, over the counts from `from` to `to` inclusive in steps of
+`step`, three panel fields prefilled when the profile or its estimate
+changes: `from` is the smallest fitting count of 2.21, or 0 when every card
+fits or no count fits; `to` is `from` plus 8; `step` is 2. Each point's
+settings are the profile's settings with that count laid over.
+
+2.28 A point whose container fails to start or is not ready within the
+timeout is recorded as failed with the last line of its log, its container
+stopped and removed, and the sweep continues with the next count. Cancel
+ends the sweep after stopping and removing the current point's container.
+
+2.29 Each ready point records the seconds from launch to ready and the
+load-time memory lines llama-server logs: the model, KV and compute buffer
+sizes per device and the output buffer. A device named `CUDA<n>` maps to
+card `n`; every other device counts toward RAM.
+
+2.30 The latest sweep of a profile is stored in its own file beside the
+benchmark history, which the sweep never touches: the knob, the counts, and
+per point the status, the ready seconds, the benchmark rows, the measured
+memory and the estimate's per-card model plus KV plus compute and its
+RAM total for that count. The winner is the ok point with the highest generation tokens per second at the
+largest prompt size.
+
+2.31 The Benchmark tab carries a sweep control row (knob label, from, to,
+step, ready timeout, Run sweep or Cancel, Apply) and a sweep table under
+the run table in a splitter: count, status with the failure line in its
+tooltip, ready seconds, prompt and generation tokens per second at the
+largest prompt size, per card measured against estimated GiB for model plus
+KV plus compute, and RAM measured against estimated; the winning row is
+marked. Apply writes the winner's count into the Configure form and saves
+the profile. The compute constants of 2.19 are not changed by a sweep.
+
 ## 3. Constraints
 
 3.1 Python 3.12 and 3.13 are the tested floor and ceiling; the code needs
@@ -221,6 +268,8 @@ sanity job.
   estimate for such models is the labelled upper bound of 2.18.
 - Reproducing mainline fit's per-card layer distribution; the predicted
   context of 2.22 is solved against the summed budget.
+- A ubatch sweep, a headless `--sweep` command and sweeps on a remote
+  node: ROADMAP Later.
 - Synthetic speculative acceptance flags (--spec-synth-len,
   --spec-synth-rates): upstream marks them benchmarking only and they
   falsify acceptance, so a profile carrying them serves nonsense.

@@ -97,12 +97,22 @@ server will page weights in and out of RAM and run slowly.
 Both constants live in `src/llama_launcher/core/vram.py` and are
 hand-tuned against llama.cpp's own numbers, not derived from its source.
 `COMPUTE_TERMS` are f32 elements per micro-batch token; `CARD_OVERHEAD_BYTES`
-is a byte count. To refit them:
+is a byte count. A sweep in the Benchmark tab gives one combined measured
+against estimated total per card and for RAM, a quick check on the
+estimate as a whole; refitting `COMPUTE_TERMS` and `CARD_OVERHEAD_BYTES`
+still needs the manual procedure below, because the compute figure has to
+be read on its own and the overhead comes from the exit-time
+`llama_memory_breakdown_print` table, which a sweep's log read never sees
+since it happens while the server is still running. To refit them:
 
 1. Before launching, read each card's already-used VRAM with `nvidia-smi
    --query-gpu=index,memory.used --format=csv`, so the per-card subtraction
    in step 5 pairs unambiguously on a multi-card box.
-2. Launch a dense model profile and a MoE model profile headlessly with
+2. Set the profile's Verbosity setting (the Logging group, `-lv`) to 4:
+   llama.cpp 0.4.0 prints the per-device buffer lines and the memory
+   breakdown table only at verbosity 4 and above, and nothing at its
+   default of 3. Then launch a dense model profile and a MoE model profile
+   headlessly with
    `llama-launcher --launch --profile NAME` (detached, kept after exit) or
    with **Run detached** enabled in the GUI. A foreground GUI launch runs
    its container with `--rm`, so the container and its log are gone at
@@ -111,9 +121,12 @@ is a byte count. To refit them:
 3. Stop each server with `llama-launcher --stop --profile NAME` (or the
    GUI's Stop), then read `podman logs <container name>` (`docker logs`
    likewise); find the container name with `podman ps -a`, or read it off
-   the Monitor card. llama.cpp prints the `llama_memory_breakdown_print`
-   table just before it exits, one row per device, each row reading `total
-   = free + self + unaccounted` with `self = model + context + compute`.
+   the Monitor card. llama.cpp prints the `common_memory_breakdown_print`
+   table (`llama_memory_breakdown_print` before 0.4.0) once before loading
+   and once just before it exits; read the last one. Every line carries a
+   timestamp and level prefix such as `0.05.529.870 I`. The table has one
+   row per device, each row reading `total = free + self + unaccounted`
+   with `self = model + context + compute`.
 4. Run `llama-launcher --estimate --profile NAME --json` for the same
    profile.
 5. Compare the JSON's `estimate.cards[i].compute` against the table's

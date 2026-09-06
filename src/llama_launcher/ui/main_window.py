@@ -184,6 +184,17 @@ class MainWindow(QMainWindow):
         self.benchmark_panel.benchmark_clear_requested.connect(
             self._benchmark._on_benchmark_clear
         )
+        self.benchmark_panel.sweep_run_requested.connect(self._benchmark._on_sweep_run)
+        self.benchmark_panel.sweep_cancel_requested.connect(
+            self._benchmark._on_sweep_cancel
+        )
+        self.benchmark_panel.sweep_apply_requested.connect(
+            self._benchmark._on_sweep_apply
+        )
+        # The fit readout is re-composed on every profile load and every fit
+        # render, the two moments the sweep's refusal reason and its prefill
+        # can change.
+        self._configure_panel.fit_rendered.connect(self._benchmark.refresh_sweep)
         self.tabs.addTab(self.benchmark_panel, "Benchmark")
         # Same base_dir() indirection every other store access uses (tests
         # monkeypatch it), and the Configure form's runtime choice decides

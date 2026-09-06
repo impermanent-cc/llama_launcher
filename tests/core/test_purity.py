@@ -22,6 +22,7 @@ _ENHANCEMENT_MODULES = {
     "report.py",
     "placement.py",
     "memory_fit.py",
+    "sweep.py",
 }
 
 

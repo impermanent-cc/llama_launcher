@@ -87,6 +87,12 @@ def logs_argv(name: str, binary: str, connection: str = "") -> list[str]:
     return [*_base(binary, connection), "logs", "-f", name]
 
 
+def logs_once_argv(name: str, binary: str, connection: str = "") -> list[str]:
+    """Argv that prints a container's log so far and exits, with no
+    timestamp flag: the log parser anchors matches at line start."""
+    return [*_base(binary, connection), "logs", name]
+
+
 def container_exists(name: str, binary: str, connection: str = "") -> bool:
     # `container exists` is a podman-only convenience subcommand (docker has no
     # equivalent -> always False, breaking stale-container cleanup on docker).

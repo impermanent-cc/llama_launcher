@@ -4,7 +4,7 @@ import os
 import posixpath
 import time
 
-from PySide6.QtCore import QRunnable, Qt, QThreadPool, QTimer
+from PySide6.QtCore import QRunnable, Qt, QThreadPool, QTimer, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QFileDialog,
@@ -178,6 +178,11 @@ class ConfigurePanel(QWidget):
     command preview + api-key box. Owns all Configure-tab widgets. Holds a
     back-reference to the MainWindow for the few cross-panel calls it makes.
     """
+
+    # Emitted whenever the fit readout line is (re)composed, including the
+    # blank one a model change writes, so a listener can refresh anything
+    # derived from the current estimate.
+    fit_rendered = Signal()
 
     def __init__(self, window, *, parent=None):
         super().__init__(parent)
@@ -1388,10 +1393,11 @@ class ConfigurePanel(QWidget):
             return f"all {s.models_total} members"
         return f"{s.models_counted} largest of {s.models_total} members"
 
-    def _current_fit_report(self):
-        """The FitReport for the form's own model, node GPUs, RAM, draft and
-        projector: the single source the readout and its tooltip render
-        from."""
+    def _fit_report_kwargs(self) -> dict:
+        """Every argument fit_report() takes for the form's own model, node
+        GPUs, RAM, draft and projector, read from the widgets. A caller that
+        estimates off the UI thread captures this first and drops
+        `ram_available`, which only fit_report takes."""
         p = self.current_profile()
         mib = 1024 * 1024
         free = [g.mem_free_mib * mib for g in (self._fit_gpus or [])]
@@ -1404,9 +1410,9 @@ class ConfigurePanel(QWidget):
         _mm_meta, mm_weights = (
             self._cached_meta_weights(p.mmproj, mounts) if p.mmproj else (None, 0)
         )
-        return memory_fit.fit_report(
-            self._fit_meta,
-            self._fit_weights or 0,
+        return dict(
+            meta=self._fit_meta,
+            weights_bytes=self._fit_weights or 0,
             settings=p.settings,
             engine=p.runtime.engine,
             free_bytes_per_gpu=free,
@@ -1416,6 +1422,12 @@ class ConfigurePanel(QWidget):
             draft_weights=draft_weights or 0,
             mmproj_bytes=mm_weights or 0,
         )
+
+    def _current_fit_report(self):
+        """The FitReport for the form's own model, node GPUs, RAM, draft and
+        projector: the single source the readout and its tooltip render
+        from."""
+        return memory_fit.fit_report(**self._fit_report_kwargs())
 
     def _render_fit_line(self) -> None:
         if self._is_router_mode():
@@ -1467,6 +1479,7 @@ class ConfigurePanel(QWidget):
         base = _html.escape(meta_text) if meta_text else ""
         sep = "<br>" if base and line else ""
         self.model_meta_label.setText(base + sep + line)
+        self.fit_rendered.emit()
 
     def _suggestion_index(self, caps):
         """key -> (Suggestion, reason). A multi-key suggestion indexes each key."""

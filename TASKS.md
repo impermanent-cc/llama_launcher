@@ -2,9 +2,9 @@
 
 ## Current phase
 
-Idle: no cycle open. The placement-aware VRAM cycle landed on main on
-2026-09-05. Three owner smokes are pending below, the calibration one
-first: it needs the 5080 plus A2000 box.
+Idle: no cycle open. The offload sweep cycle (feat/offload-sweep, SPEC.md
+2.6 and 2.26 to 2.31) landed on main on 2026-09-06. The two owner smokes
+that need the 5080 plus A2000 box are listed below, the sweep one first.
 
 ## Open items
 
@@ -64,11 +64,49 @@ first: it needs the 5080 plus A2000 box.
 - [ ] setting_widgets.py:147 carries a doubled-hyphen prose separator and
       narrates history in a comment; one for the documentation cycle's prose
       sweep, along with RPC.md's non-ASCII at lines 143 and 163.
+- [ ] core.sweep.parse_load_log drops an "output buffer" line whose device
+      is a card, and knows no "RS buffer size" kind, so a hybrid or SSM
+      model's measured column reads short (RS is on the ROADMAP with the
+      placement sweep).
+- [ ] The Benchmark panel's reset() leaves the previous profile's sweep
+      table on screen, and sweep_store.load has no production caller: a
+      profile's stored sweep is never shown again after a restart.
+- [ ] services.sweep._wait_ready duplicates headless.wait_ready minus the
+      cancel flag and never probes at timeout 0; _read_log and
+      _stop_and_remove have no test through a fake subprocess.run, and the
+      QThread and cancel paths are covered by the owner smoke only.
+- [ ] No refresh_sweep after a sweep ends, so a fit render during a run can
+      leave "A benchmark or sweep is already running." on the status line;
+      the prompt-sizes parse is duplicated between panel and controller.
+- [ ] tests: sweep_store tests lock neither the 0600 mode, the sweeps/
+      parent nor that a second save replaces the first;
+      test_sweep_counts_inclusive_clamped_and_deduped names a dedupe that
+      does not exist; the sweep controller tests patch away
+      smallest_fitting_offload so the kwargs plumbing is unexercised.
+- [ ] The sweep prefill is memoized on its computed values, so a typed
+      range survives a switch to a profile with the identical computed
+      range, and a start-path refusal ("same port") stays on the status
+      line until the availability reason itself changes.
+- [ ] The RAM estimate does not model llama.cpp's CPU_REPACK buffer: on a
+      CPU-only launch the server keeps a repacked second copy of the
+      weights it runs on the CPU (1.2 GiB beside the 2.5 GiB mmap of the
+      e2b model on 2026-09-06, measured 3.8 GiB against 3.4 estimated).
+      The same applies to expert layers kept in RAM by the offload knobs.
 
 ## Pending owner smokes
 
-- [ ] Calibrate the compute constants on the 5080 plus A2000 box: follow
-      VRAM.md's procedure with the two-card 27B dense profile from the
+- [ ] Run a sweep on the 5080 plus A2000 box on the 27B dense profile with
+      the prefilled range: confirm each point launches, benchmarks, stops
+      and removes its container, that the winner is marked and Apply writes
+      the count, and that the measured columns are within a few hundred
+      MiB of the estimate. Then lower "from" a few counts below the
+      prefilled start so the first point is too small, confirm it records
+      as failed with its log line in the tooltip and the sweep continues;
+      report the table.
+- [ ] Calibrate the compute constants on the 5080 plus A2000 box: set the
+      profile's Verbosity to 4 first (llama.cpp 0.4.0 prints no memory
+      table below that), then follow VRAM.md's procedure with the
+      two-card 27B dense profile from the
       screenshot (tensor-split 60,40, ctx 98304, q8_0 KV) and one MoE
       profile; compare --estimate --json per card against the server's
       exit-time memory breakdown and report the four numbers per profile so
@@ -108,22 +146,25 @@ first: it needs the 5080 plus A2000 box.
 
 ## Done this cycle
 
-- The VRAM estimate reads the GGUF tensor table (split models merged) and
-  places every tensor the way llama.cpp and ik_llama.cpp do: per card by
-  tensor-split or free-VRAM proportion, or in RAM under --n-gpu-layers,
-  --cpu-moe, --n-cpu-moe, --n-cpu-ffn and --override-tensor, with tied
-  embeddings, the draft model (through the existing spec-draft-* rows, now
-  aliased to upstream's other spellings) and the projector counted.
-- Per-card fit and a RAM check against the launch node's available memory;
-  a compute-buffer formula scaled by --ubatch-size and flash attention; the
-  sliding-window KV as a labelled upper bound.
-- Shortfall messages name the smallest --n-cpu-moe or --n-cpu-ffn that fits,
-  or an --override-tensor alternation on an engine without --n-cpu-ffn; the
-  llama.cpp --fit note predicts the shrunken context and reaches the launch
-  dialog only when --fit is unset; ik's --fit is modelled (experts to RAM on
-  a MoE model, refusal on a dense one) and its bare-flag emission fixed.
-- The Configure readout shows one line per card and one for RAM with word
-  wrap and a tooltip; the launch dialog and the new headless --estimate
-  command show the same breakdown; VRAM.md documents the estimate and the
-  calibration procedure.
-- The suite went from 1796 to 1933 tests.
+- An offload sweep in the Benchmark tab: one detached container per
+  --n-cpu-ffn (dense) or --n-cpu-moe (MoE) count over a range the memory
+  estimate prefills, each waited for on /health, its load-time model, KV
+  and compute lines read from the container log, benchmarked with the
+  panel's settings, then stopped and removed. Failed points record the last
+  log line and the sweep continues; Cancel ends it after the current point
+  and leaves the stored sweep untouched; a server that dies at load fails
+  its point as soon as the container stops; closing the window removes a
+  running sweep container on the way out.
+- A pure core module (knob, counts, log parser, winner), a runner service
+  with injectable probes, a per-profile sweep store beside the benchmark
+  history, and the panel's sweep row and table with the winner marked and
+  Apply writing the count into the profile.
+- The sweep refuses router, native, RPC and remote-node profiles, a profile
+  with no model or no prompt sizes, an engine without the knob, raw
+  arguments carrying the knob's flag, a running instance of the profile or
+  of a previous sweep container, and a running benchmark or sweep; a
+  benchmark refuses to start during a sweep. The stored sweep of the loaded
+  profile is shown when the profile loads.
+- The estimated figure beside each measured card total is model plus KV
+  plus compute, without the per-card overhead the log never reports.
+- The suite went from 1933 to 1994 tests.

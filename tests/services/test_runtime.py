@@ -258,3 +258,24 @@ def test_rm_argv():
         "-f",
         "llama-host",
     ]
+
+
+def test_logs_once_argv_does_not_follow():
+    from llama_launcher.services.runtime import logs_once_argv
+
+    argv = logs_once_argv("llama-x-sweep", "podman")
+    assert argv[-2:] == ["logs", "llama-x-sweep"] and "-f" not in argv
+    assert logs_once_argv("n", "podman", connection="c") == [
+        "podman",
+        "--connection",
+        "c",
+        "logs",
+        "n",
+    ]
+    assert logs_once_argv("n", "docker", connection="c") == [
+        "docker",
+        "--context",
+        "c",
+        "logs",
+        "n",
+    ]

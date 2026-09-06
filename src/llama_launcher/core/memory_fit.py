@@ -171,7 +171,7 @@ def _all_fit(est, free) -> bool:
     return all(c.total <= int(f) for c, f in zip(est.cards, free, strict=False))
 
 
-def _is_moe(meta) -> bool:
+def is_moe(meta) -> bool:
     """A model counts as MoE when its metadata names an expert count or any
     tensor name carries an expert-weight suffix, so a table missing the
     hyperparameter still routes to the expert offload flag."""
@@ -201,7 +201,7 @@ def smallest_fitting_offload(
     the layer count fits."""
     eff = _pl.effective_settings(settings, raw_args)
     n_layers = int(meta.n_layers)
-    moe = _is_moe(meta)
+    moe = is_moe(meta)
     key = "n-cpu-moe" if moe else "n-cpu-ffn"
     use_override = not accepts(CATALOG[key], engine)
     existing_override = (
@@ -366,7 +366,7 @@ def _messages(
         state = _fit_state(eff)
         if _fit_active_mainline(eff, engine, len(free_bytes_per_gpu)):
             if _ctx_size_set(eff):
-                expert_note = " (experts first on a MoE model)" if _is_moe(meta) else ""
+                expert_note = " (experts first on a MoE model)" if is_moe(meta) else ""
                 text = (
                     f"{base} With --fit active llama.cpp will keep the set "
                     f"context and move whole layers to RAM{expert_note} "
@@ -388,7 +388,7 @@ def _messages(
                     + _suggestion_text(found)
                 )
             out.append(Message(text, dialog=state == "unset"))
-        elif engine == "ik_llama.cpp" and state == "on" and not _is_moe(meta):
+        elif engine == "ik_llama.cpp" and state == "on" and not is_moe(meta):
             out.append(
                 Message(
                     f"{base} With --fit on, ik_llama.cpp refuses to "
@@ -482,7 +482,7 @@ def fit_report(
     if (
         engine == "ik_llama.cpp"
         and _fit_state(eff) == "on"
-        and _is_moe(meta)
+        and is_moe(meta)
         and meta.tensors
         and any(not c.fits for c in cards)
     ):
