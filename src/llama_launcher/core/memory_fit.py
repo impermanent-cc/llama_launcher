@@ -6,6 +6,7 @@ import html
 import re
 from dataclasses import dataclass
 
+from . import balance as _balance
 from . import placement as _pl
 from .settings_catalog import CATALOG, accepts
 from .vram import estimate_memory
@@ -48,6 +49,7 @@ class FitReport:
     ram: RamFit
     messages: tuple
     fits: bool
+    balanced: object = None
 
 
 def _gib(n) -> str:
@@ -193,7 +195,7 @@ def is_moe(meta) -> bool:
     return any("_exps" in t.name for t in (meta.tensors or ()))
 
 
-def smallest_fitting_offload(
+def _offload_search(
     meta,
     weights_bytes,
     *,
@@ -205,13 +207,15 @@ def smallest_fitting_offload(
     draft_weights=0,
     mmproj_bytes=0,
 ):
-    """(key, value) of the smallest CPU offload at which every card fits:
-    --n-cpu-moe on a MoE model, --n-cpu-ffn on a dense one, or an
-    --override-tensor alternation of the same layers where the engine lacks
-    --n-cpu-ffn, appended after any override-tensor value the profile
-    already carries so the search baseline matches the reported shortfall
-    and the suggestion keeps the user's own rules. None when no count up to
-    the layer count fits."""
+    """(candidate settings, layer count) of the smallest CPU offload at
+    which every card fits: --n-cpu-moe on a MoE model, --n-cpu-ffn on a
+    dense one, or an --override-tensor alternation of the same layers
+    where the engine lacks --n-cpu-ffn, appended after any override-tensor
+    value the profile already carries so the search baseline matches the
+    reported shortfall and the suggestion keeps the user's own rules. The
+    layer count is comparable across two searches even where the settings
+    are an --override-tensor string rather than a number. None when no
+    count up to the layer count fits."""
     eff = _pl.effective_settings(settings, raw_args)
     n_layers = int(meta.n_layers)
     moe = is_moe(meta)
@@ -254,7 +258,37 @@ def smallest_fitting_offload(
             hi = mid
         else:
             lo = mid + 1
-    value = candidate(lo)
+    return candidate(lo), lo
+
+
+def smallest_fitting_offload(
+    meta,
+    weights_bytes,
+    *,
+    settings,
+    engine,
+    free_bytes_per_gpu,
+    raw_args="",
+    draft_meta=None,
+    draft_weights=0,
+    mmproj_bytes=0,
+):
+    """(key, value) of the smallest CPU offload at which every card fits.
+    None when no count up to the layer count fits."""
+    found = _offload_search(
+        meta,
+        weights_bytes,
+        settings=settings,
+        engine=engine,
+        free_bytes_per_gpu=free_bytes_per_gpu,
+        raw_args=raw_args,
+        draft_meta=draft_meta,
+        draft_weights=draft_weights,
+        mmproj_bytes=mmproj_bytes,
+    )
+    if found is None:
+        return None
+    value, _count = found
     return next(iter(value.items()))
 
 
@@ -268,15 +302,20 @@ def _shortfall_text(cards) -> str:
     return "; ".join(parts) + "."
 
 
-def _suggestion_text(found) -> str:
+def _suggestion_text(found, split_value=None) -> str:
+    """The offload-count clause of a shortfall message: the smallest count
+    that fits, naming the split it was found at when that split is a
+    balanced suggestion rather than the profile's own, since the count is
+    minimal only in combination with that split."""
+    at = f" at --tensor-split {split_value}" if split_value else ""
     if found is None:
         return (
-            " Even offloading every layer leaves the card over budget, "
+            f" Even offloading every layer leaves the card over budget{at}, "
             "so no offload count fits; lower the context or the KV "
             "cache type."
         )
     key, value = found
-    return f" Smallest offload that fits: --{key} {value}."
+    return f" Smallest offload that fits{at}: --{key} {value}."
 
 
 def _ik_moe_offload(
@@ -327,6 +366,28 @@ def _ik_moe_offload(
     return adjusted, layers
 
 
+def _balanced_text(balanced, eff, fit_active: bool) -> str:
+    """The balanced-split sentence of a shortfall message: the value, the
+    value it replaces where the profile sets one, and, only where --fit
+    would otherwise act on the profile's own settings, the note that an
+    explicit split keeps it from acting."""
+    if balanced is None:
+        return ""
+    current = str(eff.get("tensor-split", "") or "").strip()
+    fitting = "fits every card" if balanced.fits else "does not fit on its own"
+    text = (
+        f" Balanced --tensor-split {balanced.value} "
+        f"(card 0 keeps layers up to {balanced.boundary_layers[0]}) {fitting}."
+        if balanced.boundary_layers
+        else f" Balanced --tensor-split {balanced.value} {fitting}."
+    )
+    if current:
+        text += f" It replaces the profile's --tensor-split {current}."
+    if fit_active:
+        text += " Setting --tensor-split keeps --fit from acting."
+    return text
+
+
 def _ik_moe_note(layers: int) -> str:
     return (
         f"With --fit on, ik_llama.cpp keeps the experts of {layers} layer"
@@ -350,6 +411,7 @@ def _messages(
     draft_weights,
     mmproj_bytes,
     ik_moe_layers=None,
+    balanced=None,
 ) -> list:
     eff = _pl.effective_settings(settings, raw_args)
     kwargs = dict(
@@ -374,16 +436,42 @@ def _messages(
                 )
             )
     elif over:
-        found = smallest_fitting_offload(meta, weights_bytes, **kwargs)
+        differs = balanced is not None and (
+            tuple(balanced.layers_per_card) != tuple(balanced.start_layers_per_card)
+        )
+        profile_search = _offload_search(meta, weights_bytes, **kwargs)
+        balanced_search = None
+        if differs and balanced is not None and not balanced.fits:
+            balanced_search = _offload_search(
+                meta,
+                weights_bytes,
+                **{
+                    **kwargs,
+                    "settings": {**eff, "tensor-split": balanced.value},
+                    "raw_args": "",
+                },
+            )
+        smaller_at_balanced = balanced_search is not None and (
+            profile_search is None or balanced_search[1] < profile_search[1]
+        )
+        name_balanced = differs and (balanced.fits or smaller_at_balanced)
+        at_balanced = name_balanced and not balanced.fits
+        search = balanced_search if at_balanced else profile_search
+        found = next(iter(search[0].items())) if search is not None else None
+        suggestion = _suggestion_text(found, balanced.value if at_balanced else None)
+        fit_active = _fit_active_mainline(eff, engine, len(free_bytes_per_gpu))
+        balanced_text = (
+            _balanced_text(balanced, eff, fit_active) if name_balanced else ""
+        )
         base = _shortfall_text(over)
         state = _fit_state(eff)
-        if _fit_active_mainline(eff, engine, len(free_bytes_per_gpu)):
+        if fit_active:
             if _ctx_size_set(eff):
                 expert_note = " (experts first on a MoE model)" if is_moe(meta) else ""
                 text = (
                     f"{base} With --fit active llama.cpp will keep the set "
                     f"context and move whole layers to RAM{expert_note} "
-                    "rather than fail." + _suggestion_text(found)
+                    "rather than fail." + suggestion + balanced_text
                 )
             else:
                 predicted = predicted_fit_ctx(meta, weights_bytes, **kwargs)
@@ -398,7 +486,8 @@ def _messages(
                         if found
                         else ""
                     )
-                    + _suggestion_text(found)
+                    + suggestion
+                    + balanced_text
                 )
             out.append(Message(text, dialog=state == "unset"))
         elif engine == "ik_llama.cpp" and state == "on" and not is_moe(meta):
@@ -406,14 +495,18 @@ def _messages(
                 Message(
                     f"{base} With --fit on, ik_llama.cpp refuses to "
                     "load a dense model that does not fit: the launch "
-                    f"will fail.{_suggestion_text(found)}",
+                    f"will fail.{suggestion}" + balanced_text,
                     dialog=True,
                 )
             )
         else:
             out.append(
                 Message(
-                    base + " It may not fit." + _suggestion_text(found), dialog=True
+                    base
+                    + " The profile as configured may not fit."
+                    + suggestion
+                    + balanced_text,
+                    dialog=True,
                 )
             )
     if ram.fits is False:
@@ -466,6 +559,7 @@ def fit_report(
     draft_meta=None,
     draft_weights=0,
     mmproj_bytes=0,
+    with_balanced=False,
 ):
     """Per-card and RAM verdicts plus messages for a profile; None when the
     estimate is unknowable or no card is visible. On ik_llama.cpp with
@@ -473,7 +567,10 @@ def fit_report(
     re-estimated with as many layers' experts kept in host RAM as it takes
     to fit, and the verdicts and fit outcome reflect that adjusted
     estimate. Without a tensor table the file-size fallback cannot move
-    expert bytes, so the plain shortfall applies instead."""
+    expert bytes, so the plain shortfall applies instead. The balanced
+    split is computed, and carried in FitReport.balanced, only when
+    with_balanced is true or a card is over budget: a readout that fits
+    pays nothing for a search it will not show."""
     if not free_bytes_per_gpu:
         return None
     est = estimate_memory(
@@ -514,6 +611,19 @@ def fit_report(
             est = adjusted
             cards, ram = _verdicts(est, free_bytes_per_gpu, ram_available)
             ik_moe_layers = layers
+    balanced = None
+    if with_balanced or any(not c.fits for c in cards):
+        balanced = _balance.balanced_split(
+            meta,
+            weights_bytes,
+            settings=settings,
+            engine=engine,
+            free_bytes_per_gpu=free_bytes_per_gpu,
+            raw_args=raw_args,
+            draft_meta=draft_meta,
+            draft_weights=draft_weights,
+            mmproj_bytes=mmproj_bytes,
+        )
     messages = _messages(
         meta,
         weights_bytes,
@@ -528,8 +638,11 @@ def fit_report(
         draft_weights=draft_weights,
         mmproj_bytes=mmproj_bytes,
         ik_moe_layers=ik_moe_layers,
+        balanced=balanced,
     )
-    return FitReport(est, cards, ram, tuple(messages), all(c.fits for c in cards))
+    return FitReport(
+        est, cards, ram, tuple(messages), all(c.fits for c in cards), balanced
+    )
 
 
 def render_lines(report: FitReport) -> list:
@@ -626,7 +739,7 @@ def render_dialog(report: FitReport) -> str | None:
 
 def to_json(report: FitReport) -> dict:
     est = report.estimate
-    return {
+    out = {
         "fits": report.fits,
         "ctx": est.ctx,
         "kv_upper_bound": est.kv_upper_bound,
@@ -658,3 +771,11 @@ def to_json(report: FitReport) -> dict:
         },
         "messages": [m.text for m in report.messages],
     }
+    if report.balanced is not None:
+        out["balanced_split"] = {
+            "value": report.balanced.value,
+            "layers_per_card": list(report.balanced.layers_per_card),
+            "boundary_layers": list(report.balanced.boundary_layers),
+            "fits": report.balanced.fits,
+        }
+    return out

@@ -13,18 +13,17 @@ settled, then to TASKS.md when a cycle picks them up.
   terms absorb the difference within tolerance today, so this is accuracy
   rather than a failing gate: the logits term is charged to a card that the
   run kept empty, and the host compute buffer is correspondingly light.
-- Layer rebalance under the offload knobs. Observed on the
-  5080 plus A2000 box: with --tensor-split left to auto the free-memory
-  proportions over-burden the second card, because the per-card overhead
-  and compute buffers are constant while only the weights and KV follow
-  the proportion; and raising --n-cpu-ffn or --n-cpu-moe moves the first N
-  layers' FFN or experts to RAM, which are the main card's layers, so the
-  knob only frees the main card and the owner has to raise the count, then
-  hand-tune the split to even the cards out. Settle whether the main card
-  should carry as much as fits, then make the estimate suggest (or the
-  sweep apply) a tensor-split that evens the per-card margin for the chosen
-  offload count, so an offload comes out of the over-budget card; the
-  shortfall message's suggested count follows the same rule.
+- Carry the balanced split into the offload sweep: each sweep point is
+  measured at whatever split the profile carried, so Apply writes a count
+  alone. Decide whether the sweep should vary the split as well as the
+  count, which is the placement sweep below, or whether Apply should write
+  the balanced split for its winning count.
+- The per-card overhead and the compute buffers are constant while only the
+  weights and KV follow --tensor-split, so on the 5080 plus A2000 box a
+  proportional auto split over-burdens the second card. The balanced split
+  suggestion answers this for a profile that asks for it; whether the
+  estimate should also model a main card that carries as much as fits is
+  still open.
 - Review the remaining flags both engines accept that the catalog exposes
   for neither: the control-vector family (repeatable, one takes two tokens,
   needs panel plumbing like LoRA) and --spec-replace (two tokens). Decide

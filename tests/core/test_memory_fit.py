@@ -313,7 +313,7 @@ def test_ik_fit_on_moe_without_tensor_table_falls_through_to_plain_shortfall():
     assert r.fits is False
     text = r.messages[0].text
     assert "experts" not in text and "refuses" not in text
-    assert "It may not fit" in text
+    assert "may not fit" in text
 
 
 def test_ik_fit_off_gives_plain_shortfall():
@@ -421,3 +421,380 @@ def test_json_and_lines_carry_state_and_checkpoints():
     lines = mf.plain_lines(report)
     assert "state" in lines[0] and "checkpoints" not in lines[0]
     assert "state" in lines[-1] and "checkpoints" in lines[-1]
+
+
+def test_report_has_no_balanced_split_when_not_asked():
+    """A fitting readout leaves FitReport.balanced None and carries no
+    balanced_split key, so it pays nothing for a search it will not show."""
+    r = _report(free=(16 * GIB, 16 * GIB))
+    assert r.balanced is None and r.messages == ()
+    assert "balanced_split" not in json.loads(json.dumps(mf.to_json(r)))
+
+
+def test_asking_for_the_split_does_not_move_the_estimate():
+    """The balanced split is a suggestion: what the estimate assumes about
+    an unset --tensor-split is the engines' free-VRAM proportion either
+    way."""
+    kw = dict(
+        settings={"ctx-size": 8192, "n-gpu-layers": "all"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[24 * GIB, 8 * GIB],
+        ram_available=64 * GIB,
+    )
+    plain = mf.fit_report(_meta(n_layers=16), 0, **kw)
+    asked = mf.fit_report(_meta(n_layers=16), 0, with_balanced=True, **kw)
+    assert [c.est for c in plain.cards] == [c.est for c in asked.cards]
+    assert plain.messages == asked.messages
+
+
+def test_with_balanced_carries_the_split_into_the_json():
+    """--estimate --json carries the balanced split as balanced_split with
+    its value, layers_per_card, boundary_layers and fits keys; fits is the
+    split's own outcome, not the report's, so a suggestion that resolves a
+    shortfall reports True while the plain readout still reports False."""
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+        with_balanced=True,
+    )
+    obj = mf.to_json(r)["balanced_split"]
+    assert obj["value"] == ",".join(str(n) for n in obj["layers_per_card"])
+    assert sum(obj["layers_per_card"]) == 17
+    assert len(obj["boundary_layers"]) == 1
+    assert isinstance(obj["layers_per_card"], list)
+    assert isinstance(obj["boundary_layers"], list)
+    assert r.fits is False
+    assert obj["fits"] is True
+
+
+def test_no_balanced_split_key_in_row_mode():
+    """balanced_split is absent whenever balance.balanced_split computes no
+    split, which split-mode row falls under."""
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all", "split-mode": "row"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[24 * GIB, 8 * GIB],
+        ram_available=64 * GIB,
+        with_balanced=True,
+    )
+    assert r.balanced is None and "balanced_split" not in mf.to_json(r)
+
+
+def test_a_shortfall_computes_the_split_without_being_asked():
+    """fit_report computes the balanced split whenever a card is over
+    budget, even when with_balanced was never passed."""
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    assert any(not c.fits for c in r.cards)
+    assert r.balanced is not None
+
+
+def test_shortfall_names_the_balanced_split_that_fits_on_its_own():
+    """A card shortfall message names the balanced split, and its own
+    fitting is stated, when the split resolves the shortfall by itself."""
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    assert r.fits is False
+    assert r.balanced is not None and r.balanced.fits is True
+    text = " ".join(m.text for m in r.messages)
+    assert "--tensor-split " + r.balanced.value in text
+    assert "fits every card" in text
+    assert "replaces" not in text
+
+
+def test_offload_count_stays_at_the_profile_split_when_balanced_fits_alone():
+    """When the balanced split fits on its own, the offload count search
+    still runs at the profile's own split: the message names the count
+    found there and never claims no offload count fits."""
+    meta = _meta(n_layers=16)
+    kw = dict(
+        settings={"ctx-size": 8192, "n-gpu-layers": "all"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    r = mf.fit_report(meta, 0, **kw)
+    assert r.balanced is not None and r.balanced.fits is True
+    at_profile = mf.smallest_fitting_offload(
+        meta,
+        0,
+        settings=kw["settings"],
+        engine="llama.cpp",
+        free_bytes_per_gpu=kw["free_bytes_per_gpu"],
+    )
+    assert at_profile is not None
+    key, value = at_profile
+    text = " ".join(m.text for m in r.messages)
+    assert f"--{key} {value}" in text
+    assert "no offload count fits" not in text
+
+
+def test_offload_count_is_searched_at_the_balanced_split():
+    """When the balanced split does not fit on its own and needs a smaller
+    offload count than the profile's own split does, the message names
+    the count found at the balanced split rather than at the profile's."""
+    meta = _meta(n_layers=16)
+    kw = dict(
+        settings={
+            "ctx-size": 8192,
+            "n-gpu-layers": "all",
+            "tensor-split": "15,2",
+        },
+        engine="llama.cpp",
+        free_bytes_per_gpu=[3 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    r = mf.fit_report(meta, 0, **kw)
+    assert r.balanced is not None and r.balanced.fits is False
+    at_balanced = mf.smallest_fitting_offload(
+        meta,
+        0,
+        settings={**kw["settings"], "tensor-split": r.balanced.value},
+        engine="llama.cpp",
+        free_bytes_per_gpu=kw["free_bytes_per_gpu"],
+    )
+    at_profile = mf.smallest_fitting_offload(
+        meta,
+        0,
+        settings=kw["settings"],
+        engine="llama.cpp",
+        free_bytes_per_gpu=kw["free_bytes_per_gpu"],
+    )
+    assert at_balanced is not None and at_profile is not None
+    assert at_balanced[1] < at_profile[1]
+    key, value = at_balanced
+    text = " ".join(m.text for m in r.messages)
+    assert f"--{key} {value}" in text
+
+
+def test_offload_count_search_ignores_a_raw_tensor_split():
+    """A --tensor-split carried in raw args, which would otherwise win
+    back over the balanced overlay once effective settings are recomputed,
+    does not pull the offload count search back to the profile's split."""
+    meta = _meta(n_layers=16)
+    kw = dict(
+        settings={"ctx-size": 8192, "n-gpu-layers": "all"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[3 * GIB, 3 * GIB],
+        ram_available=64 * GIB,
+    )
+    r = mf.fit_report(meta, 0, raw_args="--tensor-split 90,10", **kw)
+    assert r.balanced is not None and r.balanced.fits is False
+    at_balanced = mf.smallest_fitting_offload(
+        meta,
+        0,
+        settings={**kw["settings"], "tensor-split": r.balanced.value},
+        engine="llama.cpp",
+        free_bytes_per_gpu=kw["free_bytes_per_gpu"],
+    )
+    at_raw_split = mf.smallest_fitting_offload(
+        meta,
+        0,
+        settings=kw["settings"],
+        engine="llama.cpp",
+        free_bytes_per_gpu=kw["free_bytes_per_gpu"],
+        raw_args="--tensor-split 90,10",
+    )
+    assert at_balanced is not None and at_balanced != at_raw_split
+    key, value = at_balanced
+    text = " ".join(m.text for m in r.messages)
+    assert f"--{key} {value}" in text
+    assert f"--{at_raw_split[0]} {at_raw_split[1]}" not in text
+    assert "--tensor-split " + r.balanced.value in text
+
+
+def test_offload_count_names_the_split_it_was_found_at():
+    """When the smallest fitting count found at the balanced split is
+    smaller than the count the profile's own split needs, the message
+    names the split alongside the count, since the count is minimal only
+    there."""
+    meta = _meta(n_layers=16)
+    free = [4 * GIB, 4 * GIB]
+    settings = {"tensor-split": "15,2"}
+    r = mf.fit_report(
+        meta,
+        0,
+        settings=settings,
+        engine="llama.cpp",
+        free_bytes_per_gpu=free,
+        ram_available=64 * GIB,
+    )
+    assert r.balanced is not None and r.balanced.fits is False
+    at_profile = mf.smallest_fitting_offload(
+        meta, 0, settings=settings, engine="llama.cpp", free_bytes_per_gpu=free
+    )
+    key, value = at_profile
+    text = " ".join(m.text for m in r.messages)
+    assert f"--{key} {value}" not in text
+    assert f"at --tensor-split {r.balanced.value}" in text
+
+
+def test_shortfall_names_the_split_it_replaces():
+    """A profile that already sets --tensor-split gets a message stating
+    the balanced suggestion replaces that value."""
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={
+            "ctx-size": 8192,
+            "n-gpu-layers": "all",
+            "tensor-split": "60,40",
+        },
+        engine="llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    text = " ".join(m.text for m in r.messages)
+    assert "60,40" in text and "replaces" in text
+    assert "--fit" not in text
+
+
+def test_balanced_sentence_follows_the_shortfall_wording_not_precedes_it():
+    """The balanced-split sentence comes after the branch's own shortfall
+    wording, so a split that fits every card never reads as if it were the
+    subject of a following "may not fit"."""
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={
+            "ctx-size": 8192,
+            "n-gpu-layers": "all",
+            "tensor-split": "60,40",
+        },
+        engine="llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    text = " ".join(m.text for m in r.messages)
+    assert text.index("may not fit") < text.index("Balanced --tensor-split")
+
+
+def test_shortfall_warns_that_a_split_turns_fit_off_on_mainline():
+    """On mainline, with nothing already claiming the offload or the split
+    fit would otherwise make, the shortfall message states that setting the
+    suggested --tensor-split keeps --fit from acting."""
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    assert "keeps --fit from acting" in " ".join(m.text for m in r.messages)
+
+
+def test_shortfall_omits_the_fit_note_on_ik():
+    """With --fit explicitly on and no CPU offload flag, override or
+    tensor-split of its own claiming the placement, the balanced-split
+    sentence on ik_llama.cpp still carries no clause about --fit
+    deactivating: that note belongs to mainline's fit search alone."""
+    r = mf.fit_report(
+        _meta(n_layers=16, moe=False),
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all", "fit": "on"},
+        engine="ik_llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    text = " ".join(m.text for m in r.messages)
+    assert "--tensor-split " + r.balanced.value in text
+    assert "keeps --fit from acting" not in text
+
+
+def test_balanced_split_text_stays_out_of_the_ram_message():
+    """The balanced-split sentence belongs to the card shortfall message
+    alone: a report whose cards fit but whose RAM does not carries a
+    balanced split without adding its sentence to the RAM message."""
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[24 * GIB, 24 * GIB],
+        ram_available=50 * MIB,
+        with_balanced=True,
+    )
+    assert all(c.fits for c in r.cards) and r.ram.fits is False
+    assert r.balanced is not None
+    text = " ".join(m.text for m in r.messages)
+    assert "--tensor-split" not in text
+
+
+def test_offload_count_names_the_profile_split_when_balanced_needs_more():
+    """When the balanced split does not fit on its own and needs a larger
+    offload count than the profile's own split does, the message names the
+    profile's own count rather than the balanced pair, since naming the
+    larger count would suggest a split that makes the shortfall worse."""
+    meta = _meta(n_layers=16)
+    kw = dict(
+        settings={"ctx-size": 16384, "n-gpu-layers": "all"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[2.0 * GIB, 2.0 * GIB],
+        ram_available=64 * GIB,
+    )
+    r = mf.fit_report(meta, 0, **kw)
+    assert r.balanced is not None and r.balanced.fits is False
+    at_profile = mf.smallest_fitting_offload(
+        meta,
+        0,
+        settings=kw["settings"],
+        engine="llama.cpp",
+        free_bytes_per_gpu=kw["free_bytes_per_gpu"],
+    )
+    at_balanced = mf.smallest_fitting_offload(
+        meta,
+        0,
+        settings={**kw["settings"], "tensor-split": r.balanced.value},
+        engine="llama.cpp",
+        free_bytes_per_gpu=kw["free_bytes_per_gpu"],
+    )
+    assert at_balanced is not None and at_profile is not None
+    assert at_balanced[1] > at_profile[1]
+    key, value = at_profile
+    text = " ".join(m.text for m in r.messages)
+    assert f"--{key} {value}" in text
+    assert f"at --tensor-split {r.balanced.value}" not in text
+    assert "Balanced --tensor-split" not in text
+
+
+def test_balanced_split_not_named_when_it_matches_the_resolved_placement():
+    """A card shortfall message never suggests the balanced split where
+    applying it would change nothing: with no --tensor-split set, the
+    search's own starting point is the free-VRAM proportion the profile
+    already resolves to, and finding no better candidate there must not
+    be presented as a suggestion to replace it, nor pair it with the
+    warning that an applied split keeps --fit from acting."""
+    meta = _meta(n_layers=16)
+    free = [1610612736, 2147483648]
+    r = mf.fit_report(
+        meta,
+        0,
+        settings={"ctx-size": 8192},
+        engine="llama.cpp",
+        free_bytes_per_gpu=free,
+        ram_available=64 * GIB,
+    )
+    assert r.balanced is not None and r.balanced.fits is False
+    assert r.balanced.layers_per_card == r.balanced.start_layers_per_card
+    text = " ".join(m.text for m in r.messages)
+    assert "Balanced --tensor-split" not in text
+    assert "keeps --fit from acting" not in text
