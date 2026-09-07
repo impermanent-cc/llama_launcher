@@ -87,8 +87,8 @@ not on the release page, so the two never drift.
   the 2026-09-06 measurements it read up to 5 GiB high per card before.
 - The sweep parser reads ik_llama.cpp's buffer lines and recurrent-state
   lines.
-  The compute buffer formula also gains a recurrent-activations term sized
-  by the header's inner size and a per-engine scale, so a hybrid model's
+- The compute buffer formula gains a recurrent-activations term sized by
+  the header's inner size and a per-engine scale, so a hybrid model's
   estimate on ik_llama.cpp reads inside the fit tolerance.
 
 ## [0.1.1] - 2026-09-03

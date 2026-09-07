@@ -37,9 +37,19 @@ settled, then to TASKS.md when a cycle picks them up.
   severity on a single-user desktop).
 - A model-file-existence warning before launch, routed so that it does not
   fire through the router's own health path.
+- A warning when the profile's GPU mode is set but the launch node has no
+  GPU; it needs a probe that does not run on every poll tick.
+- Render an nvidia-smi "[N/A]" field as unknown instead of failing the
+  parse; GpuStat's integer fields would have to admit None.
+- Settle pool_preflight's double count on a worker that both pledges memory
+  and is probed, during live node testing.
 
 ## Not planned
 
 - HF download flags and URL models: they bypass the local-path model and
   the GGUF preflight.
 - CodeQL: costs Actions minutes for little gain here.
+- Reranker GGUF auto-detection: a bge reranker reports arch bert with no
+  metadata signal, and filename heuristics are ruled out.
+- Stripping host detail from the diagnostic report: it exists for bug
+  reports and the detail is the point.

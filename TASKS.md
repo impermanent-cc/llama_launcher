@@ -4,9 +4,12 @@
 
 Idle: no cycle open. The estimate calibration cycle (fix/estimate-calibration,
 SPEC.md 2.18, 2.19, 2.26, 2.29, 2.31 and 2.32) landed on main on 2026-09-06.
-The owner smokes that need the 5080 plus A2000 box are listed below, the
+The owner smokes that need the 5080 plus A2000 box are listed below: the
 re-run of --estimate against the sweep files first, then a dense non-hybrid
-measurement to pin the FFN and residual terms.
+measurement to pin the FFN and residual terms, then the two GUI checks the
+2026-09-06 runs left uncovered (a failed sweep point plus Apply, and the
+launch dialog). Repository chores the owner does by hand close the open
+items list.
 
 ## Open items
 
@@ -54,18 +57,18 @@ measurement to pin the FFN and residual terms.
 - [ ] Split-model parts hardlinked under two names with a disagreeing
       split.count key count twice (malformed layout only); the Configure
       cache stamps only the first part.
-- [ ] tests/ui/test_fit_readout.py keeps a dead inspect_file patch and a
-      stale docstring; tests/core/test_purity.py's enhancement-module test
-      is a strict subset of the whole-core scan.
+- [ ] tests/core/test_purity.py's enhancement-module test is a strict
+      subset of the whole-core scan.
 - [ ] Three LaunchController calls into the panel's private
       _cached_meta_weights; promote it to a public method.
 - [ ] No test asserts that an engine-gated build_catalog option carries a
       tooltip.
 - [ ] video-timestamp-interval takes a minimum of 0 and nothing here
       establishes what upstream does with 0.
-- [ ] setting_widgets.py:147 carries a doubled-hyphen prose separator and
-      narrates history in a comment; one for the documentation cycle's prose
-      sweep, along with RPC.md's non-ASCII at lines 143 and 163.
+- [ ] src/llama_launcher/ui/widgets/setting_widgets.py:147 carries a
+      doubled-hyphen prose separator and narrates history in a comment; one
+      for the documentation cycle's prose sweep, along with RPC.md's
+      non-ASCII at lines 143 and 163.
 - [ ] core.sweep.parse_load_log drops an "output buffer" line whose device
       is a card, and knows no "RS buffer size" kind, so a hybrid or SSM
       model's measured column reads short (RS is on the ROADMAP with the
@@ -118,6 +121,13 @@ measurement to pin the FFN and residual terms.
 - [ ] The ik calibration record's card 0 KV lower bound clears by a few KiB
       only through the log-precision allowance; a second ik measurement
       would settle whether the one-layer slack is enough.
+- [ ] Owner, GitHub: ask GitHub Support to garbage-collect the unreachable
+      objects left by the 2026-08-31 history rewrite. The unredacted
+      router.png blob (91a946f) was still fetchable by exact SHA on
+      2026-09-02 and the repository is public; nothing records the request
+      as filed.
+- [ ] Owner, GitHub: the repository has no topics, and README carries no CI
+      badge although Actions has been green since 2026-09-01.
 
 ## Pending owner smokes
 
@@ -131,27 +141,38 @@ measurement to pin the FFN and residual terms.
       a detached launch with the buffer lines and the exit table) and paste
       the print_info block plus the buffer lines, so a fifth record can pin
       the FFN and residual terms that the hybrid records leave free.
-- [ ] Run a sweep on the 5080 plus A2000 box on the 27B dense profile with
-      the prefilled range: confirm each point launches, benchmarks, stops
-      and removes its container, that the winner is marked and Apply writes
-      the count, and that the measured columns are within a few hundred
-      MiB of the estimate. Then lower "from" a few counts below the
-      prefilled start so the first point is too small, confirm it records
-      as failed with its log line in the tooltip and the sweep continues;
-      report the table.
-- [ ] Calibrate the compute constants on the 5080 plus A2000 box: set the
-      profile's Verbosity to 4 first (llama.cpp 0.4.0 prints no memory
-      table below that), then follow VRAM.md's procedure with the
-      two-card 27B dense profile from the
-      screenshot (tensor-split 60,40, ctx 98304, q8_0 KV) and one MoE
-      profile; compare --estimate --json per card against the server's
-      exit-time memory breakdown and report the four numbers per profile so
-      COMPUTE_TERMS and CARD_OVERHEAD_BYTES can be refitted. Check the RAM
-      line too: on a 262144-token vocabulary the host output buffer alone is
-      about 2 GiB and dominates it.
-- [ ] Launch a real profile and confirm the four-line readout, its tooltip
-      and the launch dialog on KDE/Wayland; try an over-budget context to see
-      the --fit note and the suggested offload count.
+- [ ] On the 27B dense profile, run a sweep whose "from" sits a few counts
+      below the prefilled start so the first point is too small: confirm it
+      records as failed with its log line in the tooltip and the sweep
+      continues; then confirm the winner is marked and Apply writes the
+      count into the profile. The prefilled-range run itself is done (below).
+- [ ] Open the launch dialog on KDE/Wayland with an over-budget context and
+      confirm it shows the per-card breakdown, the --fit note and the
+      suggested offload count. The readout and its tooltip are confirmed
+      (below); the dialog is not.
+- [x] Run a sweep on the 5080 plus A2000 box on the 27B dense profile with
+      the prefilled range. Done 2026-09-06, files in
+      DevDocs/llama_launcher/calibration-2026-09-06: n-cpu-ffn 0 to 8 on the
+      27B dense (ctx 32768, tensor-split 60,40, q8_0 KV) and n-cpu-moe 2 to
+      10 on the 35B-A3B MoE, five points each, every point launched,
+      benchmarked, stopped and recorded ok in 5 to 6 s to ready, with the
+      measured model, KV and compute columns filled. The measured columns
+      were not within a few hundred MiB: KV read six times high on the dense
+      and twice high on the MoE, which became the estimate calibration
+      cycle.
+- [x] Calibrate the compute constants on the 5080 plus A2000 box. Done
+      2026-09-06 from the two sweep files above, the ik_llama.cpp launch log
+      at Verbosity 4 and a CPU-only e2b run on the dev box: the four records
+      live in tests/core/calibration_records.py and
+      scripts/fit_compute_terms.py refit COMPUTE_TERMS from them
+      (fix/estimate-calibration). CARD_OVERHEAD_BYTES is still unmeasured;
+      it needs the exit-time table.
+- [x] Launch a real profile and confirm the four-line readout and its
+      tooltip on KDE/Wayland. Done 2026-09-06 during the ik smoke below: one
+      line per card and one for RAM, the tooltip carrying the --fit note and
+      the offload suggestion. The suggested counts (--n-cpu-ffn 3 and
+      --n-cpu-moe 24) came from the pre-calibration estimate and were too
+      high; the launch dialog is the open item above.
 - [x] Smoke an ik_llama.cpp profile with --fit on. Done 2026-09-06 on the
       5080 plus A2000 box with Qwen3.6-35B-A3B MXFP4 on the cu13-server
       image: the command carried bare --fit, the server ran with it, and
@@ -190,9 +211,10 @@ measurement to pin the FFN and residual terms.
   header's full-attention interval or a per-layer head-count array, sizes
   entries from the header's key and value lengths and the cache types, and
   adds the recurrent state of Gated DeltaNet layers per request slot and,
-  in RAM, the context checkpoints the server keeps for them. On the two Qwen3.5 and 3.6 hybrids
-  measured on 2026-09-06 the KV sum now lands within 2.5 percent of the
-  server's own figure; before, it read six times high on the 27B dense.
+  in RAM, the context checkpoints the server keeps for them. On the two
+  Qwen3.5 and 3.6 hybrids measured on 2026-09-06 the KV sum now lands
+  within 2.5 percent of the server's own figure; before, it read six times
+  high on the 27B dense.
 - The compute term charges the logits buffer to the card that holds the
   output tensor only, gains a recurrent-activations term, and is scaled per
   engine (ik_llama.cpp 0.7). RAM carries a host compute buffer as a fraction
