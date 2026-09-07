@@ -176,6 +176,10 @@ class GgufMeta:
     ssm_state_size: int | None = None
     ssm_group_count: int | None = None
     ff_layers: tuple | None = None
+    head_dim_k_swa: int | None = None
+    head_dim_v_swa: int | None = None
+    sliding_window_pattern: tuple | None = None
+    shared_kv_layers: int | None = None
 
 
 class _Reader:
@@ -270,6 +274,11 @@ def parse_gguf_header(data: bytes) -> GgufMeta:
     kv_layer_heads = _per_layer(raw_kv_heads)
     ff_layers = _per_layer(a("feed_forward_length"))
 
+    raw_pattern = _per_layer(a("attention.sliding_window_pattern"))
+    sliding_window_pattern = (
+        tuple(bool(x) for x in raw_pattern) if raw_pattern else None
+    )
+
     tensors = _parse_tensor_table(r, tensor_count)
     tokens = kv.get("tokenizer.ggml.tokens")
     n_vocab = (
@@ -308,4 +317,8 @@ def parse_gguf_header(data: bytes) -> GgufMeta:
         ssm_state_size=_num(a("ssm.state_size")),
         ssm_group_count=_num(a("ssm.group_count")),
         ff_layers=ff_layers,
+        head_dim_k_swa=_num(a("attention.key_length_swa")),
+        head_dim_v_swa=_num(a("attention.value_length_swa")),
+        sliding_window_pattern=sliding_window_pattern,
+        shared_kv_layers=_num(a("attention.shared_kv_layers")),
     )
