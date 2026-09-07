@@ -5,10 +5,10 @@
 Idle: no cycle open. The estimate calibration cycle (fix/estimate-calibration,
 SPEC.md 2.18, 2.19, 2.26, 2.29, 2.31 and 2.32) landed on main on 2026-09-06.
 The owner smokes that need the 5080 plus A2000 box are listed below: the
-re-run of --estimate against the sweep files first, then a dense non-hybrid
-measurement to pin the FFN and residual terms, then the two GUI checks the
-2026-09-06 runs left uncovered (a failed sweep point plus Apply, and the
-launch dialog). Repository chores the owner does by hand close the open
+re-run of --estimate against the sweep files first, then the two GUI checks
+the 2026-09-06 runs left uncovered (a failed sweep point plus Apply, and the
+launch dialog). The Gemma 4 measurements of 2026-09-06 are the next cycle's
+input: sliding-window head sizes and the non-output card's compute term. Repository chores the owner does by hand close the open
 items list.
 
 ## Open items
@@ -118,6 +118,22 @@ items list.
 - [ ] recurrent_layer_mask treats any layer with a non-zero per-layer
       feed-forward width as not recurrent, so a hybrid whose recurrent block
       also carries an MLP would be charged no state (SPEC 2.32 as written).
+- [ ] Gemma 4 prices its sliding-window layers at attention.key_length (512)
+      although the header gives key_length_swa and value_length_swa (256)
+      plus a sliding_window_pattern bool array; with --swa-full the KV
+      estimate reads 2.2x high on the 12B and 1.9x on the 26B-A4B, and
+      the 26B message suggested --n-cpu-moe 22 for a model that loaded
+      whole. Reading the three keys makes the swa-full case exact and gives
+      the per-layer window for the non-swa-full case (ROADMAP item).
+- [ ] The compute estimate reads low on the non-output card: 23 to 68 MiB
+      against about 410 MiB measured on both Gemma 4 runs, whose measured
+      compute is symmetric across cards (407/407, 413/413) with the output
+      layer on card 1. That breaks SPEC 2.19's never-low rule once these
+      runs become records.
+- [ ] An MTP draft (--spec-type draft-mtp, gemma4-assistant) reserves a
+      3320 MiB compute buffer on card 0 for 58 MiB of weights and shares the
+      main model's KV (shared_kv_layers 4); the estimate has no term for it
+      and charges the draft KV as if it had its own cache.
 - [ ] The ik calibration record's card 0 KV lower bound clears by a few KiB
       only through the log-precision allowance; a second ik measurement
       would settle whether the one-layer slack is enough.
@@ -136,11 +152,17 @@ items list.
       and the RAM `buffers` against the sweep files' measured figures; then
       re-run one sweep per profile and report the measured against
       estimated columns.
-- [ ] Measure one dense non-hybrid model on the 5080 plus A2000 box (any
-      Llama or Gemma dense GGUF, mainline, Verbosity 4, one sweep point or
-      a detached launch with the buffer lines and the exit table) and paste
-      the print_info block plus the buffer lines, so a fifth record can pin
-      the FFN and residual terms that the hybrid records leave free.
+- [ ] Re-read the g31b_ud4k container's log once the run has finished: the
+      2026-09-06 paste ends at the model buffer lines, with no KV or
+      compute figures.
+- [x] Measure one dense non-hybrid model on the 5080 plus A2000 box. Done
+      2026-09-06 with Gemma 4 12B (dense, MTP draft), 26B-A4B (MoE) and 31B
+      (dense, model buffers only), mainline b10818 at Verbosity 4 with
+      --swa-full; print_info blocks, buffer lines, commands and estimate
+      JSON in DevDocs/llama_launcher/calibration-2026-09-06. Weights are
+      exact on every card; KV reads 1.9x to 2.2x high and compute reads low
+      on card 0, see the open items. Not yet added as records: the KV rule
+      fails until the reader knows the sliding-window head size.
 - [ ] On the 27B dense profile, run a sweep whose "from" sits a few counts
       below the prefilled start so the first point is too small: confirm it
       records as failed with its log line in the tooltip and the sweep
