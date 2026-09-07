@@ -2,14 +2,20 @@
 
 ## Current phase
 
-Idle: no cycle open. The estimate calibration cycle (fix/estimate-calibration,
-SPEC.md 2.18, 2.19, 2.26, 2.29, 2.31 and 2.32) landed on main on 2026-09-06.
-The owner smokes that need the 5080 plus A2000 box are listed below: the
-re-run of --estimate against the sweep files first, then the two GUI checks
-the 2026-09-06 runs left uncovered (a failed sweep point plus Apply, and the
-launch dialog). The Gemma 4 measurements of 2026-09-06 are the next cycle's
-input: sliding-window head sizes and the non-output card's compute term. Repository chores the owner does by hand close the open
-items list.
+Branch fix/swa-kv-head-size, ready for the finish gate: SPEC.md 2.18 and
+2.19 as amended on 2026-09-06 are implemented. A sliding-window model's
+window layers are priced at the header's window head sizes and, without
+--swa-full, at the window plus a micro-batch per slot; shared_kv_layers
+layers hold no cache; the upper-bound label is left only for a header with
+no window pattern or for ik_llama.cpp. The Gemma 4 12B and 26B-A4B runs of
+2026-09-06 are calibration records, and the KV figure matches the logs
+exactly on the 12B and 26B-A4B runs, and on the CPU-only E2B model, where
+it read about twice high before. The
+compute formula gains a vocabulary-sized activation charged to each card
+and excluded from the host buffer, and every term was refitted against all
+six records: nothing reads low and the worst over-read is 2.468 against
+the ceiling of 2.5. Next: cumulative review, then localci and the commit
+behind owner consent.
 
 ## Open items
 
@@ -134,6 +140,32 @@ items list.
       3320 MiB compute buffer on card 0 for 58 MiB of weights and shares the
       main model's KV (shared_kv_layers 4); the estimate has no term for it
       and charges the draft KV as if it had its own cache.
+- [ ] With --n-gpu-layers all and no tensor table the estimate puts the
+      output layer on a card, but all three Gemma 4 runs of 2026-09-06 kept
+      the tied token embedding in host RAM (the logged host model buffer is
+      exactly vocabulary times embedding size at the file's quantization),
+      so the logits landed in the host compute buffer and the card buffers
+      came out symmetric. The fitted compute terms absorb the difference
+      within tolerance, so this costs accuracy rather than failing a gate.
+- [ ] The host compute buffer's vocabulary block is f16 on the Gemma runs
+      (262144 x 512 x 2 bytes = 256 MiB), while the compute formula prices
+      every activation in f32; the fitted logits coefficient absorbs the
+      factor rather than the formula naming the width.
+- [ ] calibration_records.py declares output_card in its docstring but
+      nothing in the repository reads it; either the compute assertion uses
+      it or the key goes.
+- [ ] test_calibration.layer_kv_bytes prices a card's KV slack at the
+      full-attention head size, so on a sliding-window record the per-card
+      band is about twice the largest real layer and only the summed 1.25
+      check binds.
+- [ ] The draft model's memory estimate uses the main model's micro-batch
+      size and slot count, although llama.cpp builds the draft context with
+      one sequence and its own batch; the pre-existing context fallback
+      makes the same approximation.
+- [ ] kv_layer_mask clears the shared_kv_layers tail before
+      recurrent_layer_mask reads it, so a header carrying both recurrent
+      state sizes and shared_kv_layers would charge recurrent state to its
+      trailing shared layers. No such header exists today.
 - [ ] The ik calibration record's card 0 KV lower bound clears by a few KiB
       only through the log-precision allowance; a second ik measurement
       would settle whether the one-layer slack is enough.
@@ -168,10 +200,9 @@ items list.
       records as failed with its log line in the tooltip and the sweep
       continues; then confirm the winner is marked and Apply writes the
       count into the profile. The prefilled-range run itself is done (below).
-- [ ] Open the launch dialog on KDE/Wayland with an over-budget context and
+- [x] Open the launch dialog on KDE/Wayland with an over-budget context and
       confirm it shows the per-card breakdown, the --fit note and the
-      suggested offload count. The readout and its tooltip are confirmed
-      (below); the dialog is not.
+      suggested offload count. Confirmed by the owner on 2026-09-06.
 - [x] Run a sweep on the 5080 plus A2000 box on the 27B dense profile with
       the prefilled range. Done 2026-09-06, files in
       DevDocs/llama_launcher/calibration-2026-09-06: n-cpu-ffn 0 to 8 on the

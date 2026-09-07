@@ -90,6 +90,17 @@ not on the release page, so the two never drift.
 - The compute buffer formula gains a recurrent-activations term sized by
   the header's inner size and a per-engine scale, so a hybrid model's
   estimate on ik_llama.cpp reads inside the fit tolerance.
+- The VRAM estimate prices a sliding-window model's window layers at the
+  header's window head sizes and, without `--swa-full`, at the window plus
+  one micro-batch per slot rather than the full context, and charges no
+  cache to layers that share an earlier layer's KV. On the Gemma 4 12B and
+  26B-A4B runs of 2026-09-06 the KV figure read about twice the logged size
+  before and matches it exactly now; the "KV up to" label remains only for a
+  header without a window pattern or on ik_llama.cpp.
+- The compute buffer estimate gains a vocabulary-sized activation charged
+  to each card, and the compute terms were refitted against the measured
+  runs, so a card that does not hold the output layer no longer reads far
+  below the buffer the server reserves there.
 
 ## [0.1.1] - 2026-09-03
 

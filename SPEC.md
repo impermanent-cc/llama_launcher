@@ -125,27 +125,42 @@ the GPU unless `--no-mmproj-offload` is set.
 a KV cache when the header's full-attention interval names it (layer i,
 counting from zero, when i plus one is a multiple of the interval) or when
 a per-layer KV head-count array gives it a non-zero count; a model whose
-header carries neither charges every layer. The cache type settings and
-the header's key and value lengths (embedding size over head count when
-absent) size each entry. A sliding-window model is estimated at full context on its KV
-layers and labelled as an upper bound wherever it is shown; a hybrid model
-without a sliding window carries no label.
+header carries neither charges every layer. The last `shared_kv_layers`
+layers of a model whose header carries that key own no cache. The cache
+type settings and the header's key and value lengths (embedding size over
+head count when absent) size each entry; a window layer, one whose entry
+in the header's `sliding_window_pattern` array is true, is sized by the
+header's `key_length_swa` and `value_length_swa` instead. On mainline
+llama.cpp without `--swa-full`, a window layer holds per request slot the
+smaller of the per-slot context and the sliding window plus the micro-batch
+size, rounded up to a multiple of 256 tokens (with `--kv-unified`, one
+stream holding the smaller of the context and the window times the slot
+count plus the micro-batch size); with `--swa-full`, and on ik_llama.cpp
+always, it holds the full context. A draft model follows the same rules.
+A model whose header carries a sliding window but no pattern array is
+estimated at full context on every KV layer; that case, and a
+sliding-window model on ik_llama.cpp, is labelled as an upper bound
+wherever the KV figure is shown (readout label, message and the JSON key
+`kv_upper_bound`); no other model carries the label.
 
 2.19 The compute buffer is estimated per card from a formula of ubatch-
 scaled terms (FFN activations, attention scores, residual stream, recurrent
-activations sized by the header's inner size) plus a fixed backend constant, with the attention-scores term absent when flash
+activations sized by the header's inner size, and a vocabulary-sized
+activation the card graph reserves) plus a fixed backend constant, with the attention-scores term absent when flash
 attention is on or auto, and the card and host figures scaled by one
 constant per engine, fitted on that engine's calibration records. The ubatch-scaled logits term is charged only to
 the card the placement gives the output tensor, or to RAM when that tensor
 stays there. RAM also carries a host compute buffer, a multiplier from the
-same table on the card formula without the logits term, and an output
+same table on the card formula without the logits or the vocabulary term,
+since the host graph reserves neither, and an output
 buffer of vocabulary size times four
 bytes times the slot count (the `--parallel` setting, else the engine's
 default, four on llama.cpp and one on ik_llama.cpp). The term table lives in the VRAM module and every
 rendering of the value marks it approximate. The multipliers are fitted
 against the measured breakdowns kept with the project's calibration
 records: KV plus recurrent state reads high by at most a quarter and never
-low on the sum across cards, and per card within one layer's KV of that;
+low on the sum across cards (on the RAM figure for a record with no card
+figures), and per card within one layer's KV of that;
 compute and host buffers never read low and read at most two and a half
 times high, compared per card as sorted figures since the output card
 follows settings the records do not carry. The calibration procedure
@@ -303,8 +318,9 @@ sanity job.
   against the mount-a-local-path model and bypass the VRAM preflight.
 - Two-token flags the catalog cannot express (--spec-replace,
   --control-vector-layer-range) until they get panel plumbing like LoRA.
-- Reading a sliding-window model's per-layer window pattern; the KV
-  estimate for such models is the labelled upper bound of 2.18.
+- A sliding-window model whose header carries no `sliding_window_pattern`
+  array (the pattern is hardcoded upstream); its KV estimate is the
+  labelled upper bound of 2.18.
 - Multi-head latent attention caches (deepseek2 and kin): the estimate
   prices them at the header's key and value lengths per head, far above
   the latent cache the engine keeps, and labels nothing.

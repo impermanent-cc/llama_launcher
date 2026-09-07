@@ -1,11 +1,12 @@
 """The estimate against the owner's measured runs.
 
 The fit rule for every calibration record: KV plus recurrent state reads high
-by at most a quarter and never low over the sum across cards, and per card
-within one layer's KV of that band; the per-card compute buffers, the host
-compute buffer and the output buffer, each compared on its own so no term can
-cover another's shortfall, never read low and read at most two and a half
-times high.
+by at most a quarter and never low over the sum across cards, or over the RAM
+figure for a record with no card figures, and per card within one layer's KV
+of that band; the per-card compute buffers, the host compute buffer and the
+output buffer, each compared on its own so no term can cover another's
+shortfall, never read low and read at most two and a half times high, on
+every record.
 """
 
 from types import SimpleNamespace
@@ -66,10 +67,10 @@ def test_record_kv_reads_high_by_at_most_a_quarter_and_never_low(rec):
     est = estimate_for(rec)
     cards = rec["measured"]["cards"]
     if not cards:
-        pytest.skip(
-            "no card figures: this record's KV sits in RAM as the labelled "
-            "sliding-window upper bound, which the measurement does not match"
-        )
+        measured = rec["measured"]["ram"]["kv"]
+        estimated = est.ram.kv + est.ram.state
+        assert_within(estimated, measured, KV_TOLERANCE, f"{rec['name']} ram kv")
+        return
     measured = sum(m["kv"] for m in cards)
     estimated = sum(c.kv + c.state for c in est.cards[: len(cards)])
     assert_within(estimated, measured, KV_TOLERANCE, f"{rec['name']} kv sum")
@@ -85,11 +86,11 @@ def test_record_kv_reads_high_by_at_most_a_quarter_and_never_low(rec):
 def test_record_compute_never_reads_low_and_at_most_two_and_a_half_high(rec):
     est = estimate_for(rec)
     cards = rec["measured"]["cards"]
+    r = rec["measured"]["ram"]
     measured = sorted(m["compute"] for m in cards)
     estimated = sorted(c.compute for c in est.cards[: len(cards)])
     for i, (m, c) in enumerate(zip(measured, estimated, strict=True)):
         assert_within(c, m, COMPUTE_TOLERANCE, f"{rec['name']} sorted compute {i}")
-    r = rec["measured"]["ram"]
     assert_within(
         est.ram.host, r["compute"], COMPUTE_TOLERANCE, f"{rec['name']} host buffer"
     )

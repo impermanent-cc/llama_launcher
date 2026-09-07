@@ -420,3 +420,75 @@ def test_nested_array_head_count_kv_yields_none_without_raising():
     )
     m = parse_gguf_header(header + b"".join(kvs))
     assert m.kv_layer_heads is None
+
+
+def _kv_arr_bool(key, vals):
+    kb = key.encode()
+    out = struct.pack("<Q", len(kb)) + kb
+    out += struct.pack("<I", 9)  # value type = _ARR
+    out += struct.pack("<I", 7)  # element type = _BOOL
+    out += struct.pack("<Q", len(vals))  # count
+    return out + b"".join(struct.pack("<?", v) for v in vals)
+
+
+def _swa_gguf(pattern=None, shared=None):
+    kvs = [
+        _kv_str("general.architecture", "gemma4"),
+        _kv_u32("gemma4.block_count", 6),
+        _kv_u32("gemma4.attention.head_count", 16),
+        _kv_arr_u32("gemma4.attention.head_count_kv", [8, 8, 8, 8, 8, 2]),
+        _kv_u32("gemma4.embedding_length", 2816),
+        _kv_u32("gemma4.attention.key_length", 512),
+        _kv_u32("gemma4.attention.value_length", 512),
+        _kv_u32("gemma4.attention.sliding_window", 1024),
+        _kv_u32("gemma4.attention.key_length_swa", 256),
+        _kv_u32("gemma4.attention.value_length_swa", 256),
+    ]
+    if pattern is not None:
+        kvs.append(_kv_arr_bool("gemma4.attention.sliding_window_pattern", pattern))
+    if shared is not None:
+        kvs.append(_kv_u32("gemma4.attention.shared_kv_layers", shared))
+    return _blob(kvs)
+
+
+def test_sliding_window_keys_are_read():
+    """A header carrying the window head sizes, the per-layer window pattern
+    and a shared-KV layer count exposes all four beside the full-attention
+    head sizes."""
+    m = parse_gguf_header(
+        _swa_gguf(pattern=[True, True, True, True, True, False], shared=2)
+    )
+    assert m.head_dim_k == 512 and m.head_dim_v == 512
+    assert m.head_dim_k_swa == 256 and m.head_dim_v_swa == 256
+    assert m.sliding_window_pattern == (True, True, True, True, True, False)
+    assert all(isinstance(x, bool) for x in m.sliding_window_pattern)
+    assert m.shared_kv_layers == 2
+
+
+def test_sliding_window_pattern_absent_or_scalar_is_none():
+    """No pattern key, or a scalar in its place, leaves the pattern None and
+    the shared count None, while the window head sizes still read."""
+    m = parse_gguf_header(_swa_gguf())
+    assert m.sliding_window_pattern is None and m.shared_kv_layers is None
+    assert m.head_dim_k_swa == 256
+    scalar = _blob(
+        [
+            _kv_str("general.architecture", "gemma4"),
+            _kv_u32("gemma4.block_count", 6),
+            _kv_u32("gemma4.attention.head_count", 16),
+            _kv_u32("gemma4.embedding_length", 2816),
+            _kv_u32("gemma4.attention.sliding_window_pattern", 6),
+        ]
+    )
+    assert parse_gguf_header(scalar).sliding_window_pattern is None
+    assert parse_gguf_header(scalar).shared_kv_layers is None
+    empty = _blob(
+        [
+            _kv_str("general.architecture", "gemma4"),
+            _kv_u32("gemma4.block_count", 6),
+            _kv_u32("gemma4.attention.head_count", 16),
+            _kv_u32("gemma4.embedding_length", 2816),
+            _kv_arr_bool("gemma4.attention.sliding_window_pattern", []),
+        ]
+    )
+    assert parse_gguf_header(empty).sliding_window_pattern is None

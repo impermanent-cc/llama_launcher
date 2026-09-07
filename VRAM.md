@@ -48,26 +48,29 @@ In RAM:
   of every recurrent layer, wherever that layer sits, since llama-server
   keeps its checkpoints as host vectors;
 - a host compute buffer: the host term of the compute formula times the
-  same per-card formula without its logits term (the host reserves a
-  card-sized buffer for the same graph rather than one that follows the
-  embedding size alone), plus the logits term itself when the output
-  tensor stays in RAM instead of landing on a card;
+  same per-card formula without its logits or vocabulary term (the host
+  reserves a card-sized buffer for the same graph rather than one that
+  follows the embedding size alone), plus the logits term itself when the
+  output tensor stays in RAM instead of landing on a card;
 - an output buffer the server hands back per slot: vocabulary size times
   four bytes times the slot count (the `--parallel` setting, else the
   engine's default of four on llama.cpp and one on ik_llama.cpp).
 
-The compute buffer is a formula of five f32 terms, each scaled by
-`--ubatch-size` (itself capped to `--batch-size`, which is capped to the
-context): FFN activations (active experts on a MoE model), the residual
-stream, recurrent activations sized by the header's inner size, attention
-scores over the context (dropped when flash attention is on or auto), and
-logits sized by the vocabulary, which is added only to the one card that
-holds the output tensor, or to the RAM host buffer when that tensor stays
-there. `COMPUTE_TERMS` and `CARD_OVERHEAD_BYTES` hold the coefficients and
-the fixed backend constant; `ENGINE_COMPUTE_SCALE` multiplies every compute
-and host figure by one constant per engine, since ik_llama.cpp's graphs
-reserve less than mainline's for the same model, and an engine the table
-does not name keeps mainline's figures.
+The compute buffer is a formula of f32 terms, each scaled by `--ubatch-size`
+(itself capped to `--batch-size`, which is capped to the context): FFN
+activations (active experts on a MoE model), the residual stream, recurrent
+activations sized by the header's inner size, attention scores over the
+context (dropped when flash attention is on or auto), a vocabulary-sized
+activation charged to card compute buffers only, and logits sized by the
+vocabulary, which is added only to the one card that holds the output
+tensor, or to the RAM host buffer when that tensor stays there. The
+vocabulary term is fitted along with the rest of `COMPUTE_TERMS`, still
+charged to card compute buffers only; the host buffer excludes it, as it
+excludes the logits term. `COMPUTE_TERMS` and `CARD_OVERHEAD_BYTES` hold the
+coefficients and the fixed backend constant; `ENGINE_COMPUTE_SCALE`
+multiplies every compute and host figure by one constant per engine, since
+ik_llama.cpp's graphs reserve less than mainline's for the same model, and
+an engine the table does not name keeps mainline's figures.
 
 A draft model is placed by the same function, gated on the draft twins of
 the offload flags (`spec-draft-override-tensor`, `spec-draft-n-cpu-moe`
@@ -79,12 +82,22 @@ compute buffer add into the same per-card and RAM totals as the main
 model's. A projector file's bytes add to `--main-gpu`'s weights unless
 `--no-mmproj-offload` is set, in which case they go to RAM instead.
 
-A sliding-window model's KV estimate uses the full context for every
-layer rather than the model's own window, so it is labelled an upper
-bound wherever it appears: the readout lines say "KV up to" instead of
-"KV", the tooltip carries a separate upper-bound note, and the JSON
-carries `kv_upper_bound: true`. Setting `--swa-full` drops the label,
-since the server then really does keep the full window.
+A sliding-window model whose header carries a per-layer window pattern
+(`attention.sliding_window_pattern`, as Gemma 4 writes it) has each window
+layer priced at the header's window head sizes (`key_length_swa`,
+`value_length_swa`). On mainline llama.cpp without `--swa-full` a window
+layer holds, per request slot, the smaller of the slot's share of the
+context and the window plus one micro-batch, rounded up to a multiple of
+256 tokens (with `--kv-unified`, one stream holding the window times the
+slot count plus a micro-batch, capped at the context); with `--swa-full`
+it holds the full context. The last `shared_kv_layers` layers hold no cache
+of their own. A header with a sliding window but no pattern array is priced
+at full context on every layer and labelled an upper bound wherever it
+appears: the readout lines say "KV up to" instead of "KV", the tooltip
+carries a separate upper-bound note, and the JSON carries
+`kv_upper_bound: true`; the same label applies to any sliding-window model
+on ik_llama.cpp, whose window cache is not modelled. `--swa-full` drops the
+label in both cases, since the server then keeps the full window.
 
 ## What the messages mean
 
@@ -134,11 +147,13 @@ engine's source. `COMPUTE_TERMS` and `ENGINE_COMPUTE_SCALE` are f32
 coefficients per micro-batch token and engine multipliers respectively;
 `CARD_OVERHEAD_BYTES` is a byte count. SPEC 2.19 sets the tolerance a fit
 must meet: KV plus recurrent state reads high by at most a quarter and
-never low on the sum across cards, and per card within one layer's KV of
-that; compute and host buffers never read low and read at most two and a
+never low on the sum across cards (on the RAM figure instead, for a record
+with no card figures), and per card within one layer's KV of that;
+compute and host buffers never read low and read at most two and a
 half times high, compared per card as sorted figures since the output card
-follows settings the records do not carry. The terms written today were
-fit on four calibration records measured 2026-09-06. A sweep in the
+follows settings the records do not carry. `COMPUTE_TERMS` and
+`ENGINE_COMPUTE_SCALE` are fit against six calibration records measured
+2026-09-06. A sweep in the
 Benchmark tab gives one combined measured against estimated total per card
 and for RAM, a quick check on the estimate as a whole; refitting the three
 constants still needs the manual procedure below, because the compute
@@ -223,8 +238,8 @@ token and changes nothing about the buffer lines themselves.
   scaled by `--ubatch-size`, plus the fixed per-card overhead and, per
   engine, the `ENGINE_COMPUTE_SCALE` multiplier), not a readout of the
   engine's own allocator; every place it is shown marks it approximate.
-- A sliding-window model's KV figure is the labelled upper bound above;
-  its per-layer window pattern is not read.
+- A sliding-window model without a pattern array, or on ik_llama.cpp, is
+  the labelled upper bound above.
 - The RAM estimate does not model `CPU_REPACK`, the second, repacked copy
   of weights llama.cpp keeps on a CPU-only launch (or of expert layers the
   offload knobs keep in RAM) beside the mapped one; the estimate reads low

@@ -21,6 +21,8 @@ from llama_launcher.core.vram import (
     recurrent_layer_mask,
     recurrent_state_bytes,
     slot_count,
+    window_layer_mask,
+    window_tokens,
 )
 
 MIB = 1024 * 1024
@@ -233,6 +235,7 @@ def test_compute_bytes_terms():
         COMPUTE_TERMS["logits"] * 1000
         + COMPUTE_TERMS["ffn"] * 256
         + COMPUTE_TERMS["residual"] * 64
+        + COMPUTE_TERMS["vocab"] * 1000
     )
     assert fa == int(4 * 512 * per_token)
     no_fa = compute_bytes(m, ubatch=512, ctx=4096, flash_attn=False)
@@ -854,10 +857,12 @@ def test_slot_count_setting_and_engine_defaults():
 
 def test_host_compute_bytes_is_the_card_formula_at_the_host_term():
     """The host compute buffer is the host term of the table times the
-    per-card formula without its logits term, and nothing at all when that
-    formula is empty."""
+    per-card formula without its logits or vocabulary term, and nothing at
+    all when that formula is empty."""
     m = _meta(n_embd=64, n_vocab=1000)
-    base = compute_bytes(m, ubatch=512, ctx=4096, flash_attn=True, logits=False)
+    base = compute_bytes(
+        m, ubatch=512, ctx=4096, flash_attn=True, logits=False, vocab=False
+    )
     assert host_compute_bytes(m, ubatch=512, ctx=4096, flash_attn=True) == int(
         COMPUTE_TERMS["host"] * base
     )
@@ -1189,3 +1194,174 @@ def test_logits_bytes_is_the_delta_the_compute_formula_carries():
     without = compute_bytes(m, ubatch=512, ctx=2048, flash_attn=True, logits=False)
     assert with_logits - without == logits_bytes(m, 512)
     assert logits_bytes(m, 512) == int(4 * 512 * COMPUTE_TERMS["logits"] * 1000)
+
+
+def _swa_meta(**kw):
+    """Six layers, five windowed then one full, Gemma 4 style head sizes."""
+    base = dict(
+        n_layers=6,
+        n_head=16,
+        n_head_kv=8,
+        kv_layer_heads=(8, 8, 8, 8, 8, 2),
+        head_dim_k=512,
+        head_dim_v=512,
+        head_dim_k_swa=256,
+        head_dim_v_swa=256,
+        sliding_window=1024,
+        sliding_window_pattern=(True, True, True, True, True, False),
+        shared_kv_layers=0,
+    )
+    base.update(kw)
+    return _meta(**base)
+
+
+def _kv_of(meta, settings, engine="llama.cpp"):
+    est = estimate_memory(
+        meta,
+        0,
+        settings={"n-gpu-layers": "all", **settings},
+        engine=engine,
+        free_bytes_per_gpu=[1],
+    )
+    return est.cards[0].kv, est.kv_upper_bound
+
+
+# One window layer at full context: 8 heads x 256 x 2 bytes x K and V
+WINDOW_FULL = 8 * 256 * 2 * 2 * 32768
+# The single full-attention layer: 2 heads x 512 x 2 bytes x K and V
+FULL_LAYER = 2 * 512 * 2 * 2 * 32768
+
+
+def test_window_layers_use_the_swa_head_size_under_swa_full():
+    kv, label = _kv_of(_swa_meta(), {"ctx-size": 32768, "swa-full": True})
+    assert kv == 5 * WINDOW_FULL + FULL_LAYER
+    assert label is False
+
+
+def test_window_layers_hold_window_plus_ubatch_padded_to_256():
+    """Without --swa-full a window layer holds min(ctx per slot, window +
+    ubatch) rounded up to 256 tokens per slot: 1024 + 512 = 1536 here."""
+    kv, label = _kv_of(_swa_meta(), {"ctx-size": 32768, "parallel": 1})
+    per_token = 8 * 256 * 2 * 2
+    assert kv == 5 * per_token * 1536 + FULL_LAYER
+    assert label is False
+
+
+def test_window_tokens_rule():
+    assert window_tokens(32768, 1024, 512, 1, False) == 1536
+    assert window_tokens(32768, 1024, 512, 2, False) == 2 * 1536
+    assert window_tokens(32768, 1024, 512, 2, True) == 2560
+    assert window_tokens(2048, 512, 512, 4, False) == 4 * 512
+    assert window_tokens(1000, 1024, 512, 1, False) == 1024
+    assert window_tokens(300, 100, 100, 1, False) == 256
+    # The unified branch caps the total at ctx: window * slots + ubatch
+    # (4608) exceeds a 2048 context, so the pad settles at ctx itself.
+    assert window_tokens(2048, 1024, 512, 4, True) == 2048
+    # A context smaller than the slot count floors ctx // slots at 1 token,
+    # which still pads up to a full 256-token slot.
+    assert window_tokens(3, 100, 10, 8, False) == 8 * 256
+
+
+def test_window_layer_mask_pads_a_short_pattern_with_false():
+    """A pattern array shorter than the layer count leaves every layer past
+    its end False rather than raising or repeating the pattern."""
+    m = _swa_meta(sliding_window_pattern=(True, True))
+    assert window_layer_mask(m, 6) == (True, True, False, False, False, False)
+
+
+def test_unified_cache_sizes_the_window_once_across_slots():
+    kv, _ = _kv_of(_swa_meta(), {"ctx-size": 32768, "parallel": 2, "kv-unified": True})
+    per_token = 8 * 256 * 2 * 2
+    assert kv == 5 * per_token * 2560 + FULL_LAYER
+
+
+def test_pattern_less_sliding_window_stays_the_labelled_upper_bound():
+    m = _swa_meta(sliding_window_pattern=None)
+    kv, label = _kv_of(m, {"ctx-size": 32768})
+    # Every layer at full context and at the full-attention head size.
+    assert kv == 5 * (8 * 512 * 2 * 2 * 32768) + FULL_LAYER
+    assert label is True
+    _, label_full = _kv_of(m, {"ctx-size": 32768, "swa-full": True})
+    assert label_full is False
+
+
+def test_ik_prices_window_layers_at_full_context_and_keeps_the_label():
+    kv, label = _kv_of(_swa_meta(), {"ctx-size": 32768}, engine="ik_llama.cpp")
+    assert kv == 5 * WINDOW_FULL + FULL_LAYER
+    assert label is True
+
+
+def test_shared_kv_layers_own_no_cache():
+    assert kv_layer_mask(_swa_meta(shared_kv_layers=2), 6) == (
+        True,
+        True,
+        True,
+        True,
+        False,
+        False,
+    )
+    kv, _ = _kv_of(_swa_meta(shared_kv_layers=2), {"ctx-size": 32768, "swa-full": True})
+    assert kv == 4 * WINDOW_FULL
+
+
+def test_draft_model_follows_the_window_rule():
+    """The draft model's own window layers are priced by the same window
+    rule as the main model, from its own head sizes and window token count.
+    ctx-size-draft is not accepted for the llama.cpp engine in the catalog,
+    so the draft falls back to the main ctx-size here."""
+    ctx = 32768
+    window = 1024
+    ubatch = 512
+    slots = 1
+    d = _swa_meta(shared_kv_layers=0)
+    est = estimate_memory(
+        _swa_meta(),
+        0,
+        settings={
+            "ctx-size": ctx,
+            "parallel": slots,
+            "ctx-size-draft": 16384,
+            "n-gpu-layers": "all",
+        },
+        engine="llama.cpp",
+        free_bytes_per_gpu=[1],
+        draft_meta=d,
+    )
+    tokens = window_tokens(ctx, window, ubatch, slots, False)
+    per_model_kv = 5 * (8 * 256 * 2 * 2 * tokens) + FULL_LAYER
+    assert est.cards[0].kv == per_model_kv + per_model_kv
+
+
+def test_vocab_term_is_charged_on_every_card(monkeypatch):
+    """The vocabulary compute term adds f32 entries per token and vocabulary
+    entry to the card formula, so it lands on every used card and not only
+    on the output card."""
+    monkeypatch.setitem(COMPUTE_TERMS, "vocab", 0.5)
+    m = _meta(n_vocab=100000, n_layers=4, n_ff=256)
+    est = estimate_memory(
+        m,
+        10**9,
+        settings={"ctx-size": 2048, "tensor-split": "1,1"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[8 * 1024**3, 8 * 1024**3],
+    )
+    with_logits = compute_bytes(m, ubatch=512, ctx=2048, flash_attn=True, logits=True)
+    non_output = next(i for i, c in enumerate(est.cards) if c.compute != with_logits)
+    with_vocab = compute_bytes(
+        m, ubatch=512, ctx=2048, flash_attn=True, logits=False, vocab=True
+    )
+    without_vocab = compute_bytes(
+        m, ubatch=512, ctx=2048, flash_attn=True, logits=False, vocab=False
+    )
+    assert with_vocab != without_vocab
+    assert est.cards[non_output].compute == with_vocab
+
+
+def test_host_buffer_carries_no_vocabulary_activation(monkeypatch):
+    """The host compute buffer excludes the vocabulary term, as it excludes
+    the logits term: the CPU graph reserves neither."""
+    monkeypatch.setitem(COMPUTE_TERMS, "vocab", 0.5)
+    monkeypatch.setitem(COMPUTE_TERMS, "host", 1.0)
+    m = _meta(n_vocab=1000, n_ff=0, n_embd=8)
+    host = host_compute_bytes(m, ubatch=512, ctx=4096, flash_attn=True)
+    assert host == int(4 * 512 * COMPUTE_TERMS["residual"] * 8)

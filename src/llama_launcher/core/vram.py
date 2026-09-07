@@ -43,18 +43,28 @@ def kv_layer_mask(meta, n_layers: int) -> tuple:
     counts only on a header that also carries recurrent-state sizes, so a
     header naming an interval alone leaves no layer uncharged. A header with
     recurrent-state sizes and no attention heads is purely recurrent: no
-    layer holds a cache."""
+    layer holds a cache. Regardless of the rule above, the last
+    `shared_kv_layers` layers own no cache of their own."""
     n = int(n_layers)
     heads = getattr(meta, "kv_layer_heads", None)
     if heads:
-        return tuple(bool(int(heads[i])) if i < len(heads) else True for i in range(n))
-    interval = getattr(meta, "full_attention_interval", None)
-    if interval and int(interval) > 1 and recurrent_state_bytes(meta):
-        k = int(interval)
-        return tuple((i + 1) % k == 0 for i in range(n))
-    if recurrent_state_bytes(meta) and not int(getattr(meta, "n_head", None) or 0):
-        return tuple(False for _ in range(n))
-    return tuple(True for _ in range(n))
+        mask = tuple(bool(int(heads[i])) if i < len(heads) else True for i in range(n))
+    else:
+        interval = getattr(meta, "full_attention_interval", None)
+        if interval and int(interval) > 1 and recurrent_state_bytes(meta):
+            k = int(interval)
+            mask = tuple((i + 1) % k == 0 for i in range(n))
+        elif recurrent_state_bytes(meta) and not int(
+            getattr(meta, "n_head", None) or 0
+        ):
+            mask = tuple(False for _ in range(n))
+        else:
+            mask = tuple(True for _ in range(n))
+    shared = int(getattr(meta, "shared_kv_layers", None) or 0)
+    if shared > 0:
+        cut = max(n - shared, 0)
+        mask = tuple(m if i < cut else False for i, m in enumerate(mask))
+    return mask
 
 
 def recurrent_layer_mask(meta, kv_mask) -> tuple:
@@ -84,6 +94,38 @@ def recurrent_state_bytes(meta) -> int:
         return 0
     conv_state = (int(conv) - 1) * (int(inner) + 2 * int(groups) * int(state))
     return _F32 * (conv_state + int(state) * int(inner))
+
+
+def window_layer_mask(meta, n_layers: int) -> tuple:
+    """Per layer, whether it attends over a sliding window: the header's
+    per-layer pattern array, all False when the header carries none."""
+    pattern = getattr(meta, "sliding_window_pattern", None)
+    n = int(n_layers)
+    if not pattern:
+        return tuple(False for _ in range(n))
+    return tuple(bool(pattern[i]) if i < len(pattern) else False for i in range(n))
+
+
+def _pad256(n: int) -> int:
+    return (int(n) + 255) // 256 * 256
+
+
+def window_tokens(ctx: int, window: int, ubatch: int, slots: int, unified: bool) -> int:
+    """Tokens a window layer's cache holds across every request slot on
+    mainline llama.cpp: per slot the smaller of the slot's share of the
+    context and the window plus one micro-batch, rounded up to 256; a unified
+    cache is one stream sized by the window times the slot count plus a
+    micro-batch, capped at the context. In both branches the rounding up to
+    256 is applied after the cap: the non-unified total pads per slot, not
+    after summing the slots, so it can exceed the context when the per-slot
+    share is not itself a multiple of 256, and the unified total can exceed
+    the context the same way when the context itself is not a multiple of
+    256."""
+    slots = max(int(slots), 1)
+    if unified:
+        return _pad256(min(int(ctx), int(window) * slots + int(ubatch)))
+    per_slot = max(int(ctx) // slots, 1)
+    return slots * _pad256(min(per_slot, int(window) + int(ubatch)))
 
 
 def fits(estimate_bytes: int, free_bytes: int) -> tuple[bool, int]:
@@ -213,22 +255,24 @@ def pooled_fit(estimate_bytes: int, donations: list[tuple[str, int]]) -> PooledF
 # Coefficients of the f32 activation terms the compute buffer holds per
 # micro-batch token; the attention-scores term applies without flash
 # attention, the recurrent term applies to a header carrying an inner size,
-# and the host term is a multiplier on the whole per-card formula, without
-# the logits term, for the host-side compute buffer.
+# the vocabulary term applies on a card graph only, and the host term is a
+# multiplier on the whole per-card formula, without the logits or the
+# vocabulary term, for the host-side compute buffer.
 # Calibrated against llama.cpp's memory breakdown as VRAM.md describes.
 COMPUTE_TERMS = {
-    "logits": 0.5,
+    "logits": 0.22,
     "ffn": 1.0,
-    "residual": 2.0,
-    "ssm": 64.0,
+    "residual": 41.0,
+    "ssm": 26.0,
+    "vocab": 0.36,
     "attn_scores": 1.0,
-    "host": 0.75,
+    "host": 1.14,
 }
 # Multiplier on every compute figure, the card buffers and the host buffer,
 # for an engine whose graphs reserve a different amount than mainline
 # llama.cpp does for the same model; an engine the table does not name
 # reserves what mainline does.
-ENGINE_COMPUTE_SCALE = {"ik_llama.cpp": 0.7}
+ENGINE_COMPUTE_SCALE = {"ik_llama.cpp": 0.74}
 # Backend context and allocator pool per visible card.
 CARD_OVERHEAD_BYTES = 512 * 1024 * 1024
 _F32 = 4
@@ -317,11 +361,12 @@ def _ssm_inner(meta) -> int:
 
 def host_compute_bytes(meta, *, ubatch: int, ctx: int, flash_attn: bool) -> int:
     """The host-side compute buffer: the host term of the table times the
-    per-card formula without its logits term, since the host reserves a
-    card-sized buffer for the same graph rather than one that follows the
-    embedding size alone."""
+    per-card formula without its logits or vocabulary term, since the host
+    reserves a card-sized buffer for the same graph rather than one that
+    follows the embedding size alone, and the CPU graph reserves neither the
+    logits nor the vocabulary activation."""
     base = compute_bytes(
-        meta, ubatch=ubatch, ctx=ctx, flash_attn=flash_attn, logits=False
+        meta, ubatch=ubatch, ctx=ctx, flash_attn=flash_attn, logits=False, vocab=False
     )
     return int(COMPUTE_TERMS["host"] * base)
 
@@ -343,14 +388,22 @@ def logits_bytes(meta, ubatch: int) -> int:
 
 
 def compute_bytes(
-    meta, *, ubatch: int, ctx: int, flash_attn: bool, logits: bool = True
+    meta,
+    *,
+    ubatch: int,
+    ctx: int,
+    flash_attn: bool,
+    logits: bool = True,
+    vocab: bool = True,
 ) -> int:
     """The per-card compute buffer: f32 activations for one micro-batch,
     FFN (active experts on a MoE model), residual stream, the recurrent
-    activations of a header carrying an inner size and, without flash
-    attention, the attention scores over the context. The logits term is
-    added only when `logits` is set, since it is charged to the one card
-    that holds the output layer."""
+    activations of a header carrying an inner size, a vocabulary-sized
+    activation, on a card graph only, and, without flash attention, the
+    attention scores over the context. The logits term is added only when
+    `logits` is set, since it is charged to the one card that holds the
+    output layer; the vocabulary term is added only when `vocab` is set,
+    since the host graph reserves no such activation."""
     n_ff_exp = int(meta.n_ff_exp) if meta.n_ff_exp else 0
     n_expert_used = int(meta.n_expert_used) if meta.n_expert_used else 0
     n_ff = (
@@ -358,11 +411,14 @@ def compute_bytes(
     )
     n_embd = int(meta.n_embd) if meta.n_embd else 0
     n_head = int(meta.n_head) if meta.n_head else 0
+    n_vocab = int(meta.n_vocab) if meta.n_vocab else 0
     per_token = (
         COMPUTE_TERMS["ffn"] * n_ff
         + COMPUTE_TERMS["residual"] * n_embd
         + COMPUTE_TERMS["ssm"] * _ssm_inner(meta)
     )
+    if vocab:
+        per_token += COMPUTE_TERMS["vocab"] * n_vocab
     scores = 0.0 if flash_attn else COMPUTE_TERMS["attn_scores"] * n_head * int(ctx)
     total = int(_F32 * int(ubatch) * (per_token + scores))
     if logits:
@@ -401,7 +457,7 @@ class _Part:
     dist: object
 
 
-def _model_part(meta, weights_bytes, *, settings, engine, free, ctx, draft):
+def _model_part(meta, weights_bytes, *, settings, engine, free, ctx, ubatch, draft):
     """Per-card weights, KV and recurrent state plus the same in RAM for one
     model, with the checkpoints of every recurrent layer in RAM."""
     n_layers = int(meta.n_layers)
@@ -458,6 +514,8 @@ def _model_part(meta, weights_bytes, *, settings, engine, free, ctx, draft):
         getattr(meta, "head_dim_k", None) or ((n_embd // n_head) if n_head else 0)
     )
     head_dim_v = int(getattr(meta, "head_dim_v", None) or head_dim_k)
+    swa_dim_k = int(getattr(meta, "head_dim_k_swa", None) or head_dim_k)
+    swa_dim_v = int(getattr(meta, "head_dim_v_swa", None) or head_dim_v)
     k_quant = settings.get("cache-type-k", "f16")
     v_quant = settings.get("cache-type-v", "f16")
     if draft:
@@ -467,13 +525,31 @@ def _model_part(meta, weights_bytes, *, settings, engine, free, ctx, draft):
             v_quant = settings.get("cache-type-v-draft", v_quant)
     heads = n_head_kv or n_head or 1
     layer_heads = getattr(meta, "kv_layer_heads", None)
+    windowed = window_layer_mask(meta, n_layers)
+    window = int(getattr(meta, "sliding_window", None) or 0)
+    swa_full = _flag_on(settings, engine, "swa-full")
+    if window and any(windowed) and not swa_full and engine != "ik_llama.cpp":
+        w_tokens = window_tokens(
+            ctx,
+            window,
+            ubatch,
+            slot_count(settings, engine),
+            _flag_on(settings, engine, "kv-unified"),
+        )
+    else:
+        w_tokens = int(ctx)
 
     def kv_bytes_at(il):
         """One layer's KV cache, from its own head count where the header
-        carries a per-layer array and from the collapsed count otherwise."""
+        carries a per-layer array and from the collapsed count otherwise; a
+        window layer uses the window head sizes and the window token count."""
         n = heads
         if layer_heads and il < len(layer_heads) and int(layer_heads[il]):
             n = int(layer_heads[il])
+        if windowed[il]:
+            return kv_side_bytes(1, n, swa_dim_k, w_tokens, k_quant) + kv_side_bytes(
+                1, n, swa_dim_v, w_tokens, v_quant
+            )
         return kv_side_bytes(1, n, head_dim_k, ctx, k_quant) + kv_side_bytes(
             1, n, head_dim_v, ctx, v_quant
         )
@@ -607,6 +683,7 @@ def estimate_memory(
         engine=engine,
         free=free,
         ctx=ctx,
+        ubatch=ubatch,
         draft=False,
     )
     weights, kv = part.weights, part.kv
@@ -643,6 +720,7 @@ def estimate_memory(
             engine=engine,
             free=free,
             ctx=dctx or ctx,
+            ubatch=ubatch,
             draft=True,
         )
         dw, dkv = dpart.weights, dpart.kv
@@ -684,7 +762,15 @@ def estimate_memory(
         + ram_logits
     )
     output_buffer = n_vocab * _F32 * slot_count(eff, engine)
-    swa = bool(meta.sliding_window) and not _flag_on(eff, engine, "swa-full")
+    pattern = getattr(meta, "sliding_window_pattern", None)
+    # True when the KV figure is an upper bound: a sliding-window header
+    # without a pattern array, or a sliding-window model on ik_llama.cpp,
+    # without --swa-full.
+    swa = (
+        bool(meta.sliding_window)
+        and not _flag_on(eff, engine, "swa-full")
+        and (not pattern or engine == "ik_llama.cpp")
+    )
     ram = RamEstimate(
         ram_w,
         ram_kv,
