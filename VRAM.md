@@ -99,6 +99,61 @@ carries a separate upper-bound note, and the JSON carries
 on ik_llama.cpp, whose window cache is not modelled. `--swa-full` drops the
 label in both cases, since the server then keeps the full window.
 
+## The balanced tensor-split suggestion
+
+Whenever the estimate is knowable, at least two cards are visible, and the
+split mode places layers in contiguous runs (every mode but `row` and
+`none`), the launcher searches for the `--tensor-split` value with the most
+even per-card capacity and offers it as a suggestion. It is a suggestion
+and never an assumption: with `--tensor-split` unset the estimate still
+models the engines' own free-VRAM proportion, and the suggestion only ever
+appears alongside that estimate, never in place of it.
+
+A candidate is one of the whole-layer boundaries that leave no visible card
+empty. It scores first on whether every card fits at the profile's context.
+Among the candidates that fit, the next term is the minimum per-card
+capacity, a card's margin (its free VRAM less its estimated total) divided
+by its marginal cost per token, taking the minimum over the cards whose
+marginal cost is non-zero, and then the minimum margin. A candidate that
+leaves a card over budget is ranked on its minimum margin alone: a negative
+margin divided by a cost is not a capacity, and treating it as one would
+prefer the split with the deeper shortfall. A card's marginal cost per
+token is measured at that candidate's
+own split: its KV and state priced at the profile's context plus 4096
+tokens, less the same figure at the profile's own context, divided by the
+step, so window caps, cache types and slot rules need no second formula.
+
+The search starts at the split the profile itself would use, and each
+round takes the best single-layer move across any boundary while one
+scores strictly better than the current candidate, stopping after at most
+32 moves. On two cards with a single-peaked capacity curve this reaches
+the best candidate; on three or more cards, on a curve with more than one
+peak, or where the best candidate lies further than the move budget, it
+can stop at a lower peak instead of the best one.
+
+The value is rendered as layer counts per card, for example `38,28`: a
+boundary given that way cannot round onto the wrong layer the way a
+fractional `--tensor-split` value can. `--estimate --json` carries it
+under `balanced_split` with the keys `value`, `layers_per_card`,
+`boundary_layers` and `fits` (whether the split alone fits with no
+offload); the key is absent whenever no split is computed, which covers
+the `row` and `none` split modes, fewer than two visible cards, fewer
+placed layers than cards, and an unknowable estimate.
+
+A card shortfall message names the balanced split only where applying it
+would be an improvement: it must place layers differently from the split
+the profile already resolves to, and it must either fit on its own or need
+a smaller offload count than the profile's own split does. A suggestion
+that reproduces the placement the engine already performs is not offered,
+since following it would cost the user `--fit` and change nothing else.
+Where the split is named, the message says whether it fits on its own,
+names the profile's current `--tensor-split` where one is set and says the
+suggestion replaces it, and, where `--fit` would otherwise act, adds that
+setting `--tensor-split` keeps it from acting. When the balanced split does
+not fit on its own, the offload count search described above runs at both
+splits, and text naming a count found at the balanced split says which
+split it was found at.
+
 ## What the messages mean
 
 A card shortfall names the card and how far its estimate exceeds that
@@ -229,7 +284,9 @@ token and changes nothing about the buffer lines themselves.
   `weights`, `kv`, `compute`, `overhead`, `state`;
 - `ram`: `est`, `available`, `margin`, `fits`, `weights`, `kv`, `buffers`,
   `state`, `checkpoints`;
-- `messages`: a list of the message strings shown in the readout.
+- `messages`: a list of the message strings shown in the readout;
+- `balanced_split`, only when a split is computed: `value`,
+  `layers_per_card`, `boundary_layers`, `fits`.
 
 ## Known limits
 
@@ -261,3 +318,6 @@ token and changes nothing about the buffer lines themselves.
   that lives outside that naming convention is still missed.
 - `--device` is not modelled: every visible card is counted and gets the
   per-card overhead even when the launch excludes it.
+- The balanced split moves whole layers only; moving tensor families
+  across the boundary with `--override-tensor` is not modelled, out of
+  scope by SPEC section 4.

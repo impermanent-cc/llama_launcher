@@ -284,6 +284,52 @@ total, the dialog and `--estimate --json` (card key `state`, RAM keys
 include the state and exclude the checkpoints. A per-layer KV head-count
 array sizes each layer's cache by its own count.
 
+2.33 A balanced `--tensor-split` is computed whenever the estimate is
+knowable, at least two cards are visible, at least as many layers are placed
+on cards as there are cards, and the split mode places layers in contiguous
+runs, which by 2.16 is every mode but `row` and `none`. The candidates are
+the whole-layer boundaries that leave no visible card empty, and a candidate
+is feasible when every card fits at the profile's context. A candidate
+scores as its feasibility first. Among candidates where every card fits, the
+next term is the minimum per-card capacity, a card's margin (its free VRAM
+less its estimated total) divided by its marginal cost per token, taking the
+minimum over cards whose marginal cost is non-zero, and then the minimum
+margin, which decides where no card has a non-zero marginal cost. A
+candidate that leaves any card over budget scores on its minimum margin
+alone, since a negative margin over a cost is not a capacity and ranking it
+as one would favour the split with the deeper shortfall. The search starts
+at the split the profile itself would use, scores every candidate one layer
+away across any boundary, takes the best of those while one scores strictly
+better than the current candidate, and stops when none does or after 32
+moves. On two cards whose capacity curve has a single peak, that peak is the
+candidate it returns; on three or more cards, on a curve with more than one
+peak, or where the best candidate lies more than 32 moves from the start, it
+can stop at a lower peak. A card's marginal cost per token is measured at
+the candidate's own split: the difference between its KV and state priced at
+the profile's context plus 4096 tokens and the same figure at that context,
+divided by the step, so the window caps, cache types and slot rules of 2.18,
+2.19 and 2.32 need no second formula. The value is rendered as layer counts
+per card (`38,28`), whose boundary cannot round onto another layer.
+
+2.34 The balanced split of 2.33 is a suggestion and never an assumption:
+with `--tensor-split` unset the distribution of 2.16 stays the engines'
+free-VRAM proportion. `--estimate --json` carries it as `balanced_split`
+with the keys `value`, `layers_per_card`, `boundary_layers` and `fits`, the
+last being whether the split alone fits with no offload; the key is absent
+whenever 2.33 computes no split. When every card fits, the readout and its
+messages are unchanged and the split is carried in the JSON alone. A card
+shortfall message names the balanced split only where applying it would be
+an improvement: it places layers differently from the split the profile
+already resolves to, and it either fits on its own or needs a smaller
+offload count than the profile's own split does. Where it is named, the
+message states the profile's current `--tensor-split` value if one is set
+and that the suggestion replaces it, and, where `--fit` would otherwise act
+by 2.22, states that an applied split keeps it from acting. When the
+balanced split does not fit on its own, the offload count search of 2.21
+runs once at that split as well as at the profile's, without re-balancing
+per count; the message names the count and the split together when the
+balanced split is named, and names the profile's own count otherwise.
+
 ## 3. Constraints
 
 3.1 Python 3.12 and 3.13 are the tested floor and ceiling; the code needs
@@ -321,6 +367,10 @@ sanity job.
 - A sliding-window model whose header carries no `sliding_window_pattern`
   array (the pattern is hardcoded upstream); its KV estimate is the
   labelled upper bound of 2.18.
+- Balancing finer than a whole layer: moving tensor families across the
+  split boundary with `--override-tensor`, which needs measured probes
+  rather than the static estimate, and any balanced split for split modes
+  `row` and `none`, which have no layer boundary to move.
 - Multi-head latent attention caches (deepseek2 and kin): the estimate
   prices them at the header's key and value lengths per head, far above
   the latent cache the engine keeps, and labels nothing.

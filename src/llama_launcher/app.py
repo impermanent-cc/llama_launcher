@@ -319,6 +319,7 @@ def _do_estimate(p, base_dir, as_json=False):
         draft_meta=draft_meta,
         draft_weights=draft_weights or 0,
         mmproj_bytes=mmproj_bytes or 0,
+        with_balanced=True,
     )
     if report is None:
         return _emit(

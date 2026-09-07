@@ -51,6 +51,10 @@ not on the release page, so the two never drift.
   the flag; with `--fit` active the message says what llama.cpp will shrink.
 - The draft offload rows accept upstream's `--override-tensor-draft`,
   `--n-cpu-moe-draft` and `--cpu-moe-draft` spellings as aliases.
+- The memory estimate suggests a capacity-balanced `--tensor-split`: a card
+  shortfall message names it, and `--estimate --json` carries it as
+  `balanced_split`. It is a suggestion; what the estimate assumes about an
+  unset split is unchanged.
 
 ### Changed
 

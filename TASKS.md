@@ -2,23 +2,43 @@
 
 ## Current phase
 
-Branch fix/swa-kv-head-size, ready for the finish gate: SPEC.md 2.18 and
-2.19 as amended on 2026-09-06 are implemented. A sliding-window model's
-window layers are priced at the header's window head sizes and, without
---swa-full, at the window plus a micro-batch per slot; shared_kv_layers
-layers hold no cache; the upper-bound label is left only for a header with
-no window pattern or for ik_llama.cpp. The Gemma 4 12B and 26B-A4B runs of
-2026-09-06 are calibration records, and the KV figure matches the logs
-exactly on the 12B and 26B-A4B runs, and on the CPU-only E2B model, where
-it read about twice high before. The
-compute formula gains a vocabulary-sized activation charged to each card
-and excluded from the host buffer, and every term was refitted against all
-six records: nothing reads low and the worst over-read is 2.468 against
-the ceiling of 2.5. Next: cumulative review, then localci and the commit
-behind owner consent.
+Idle: no cycle open. The last cycle, feat/tensor-split-rebalance, landed on
+2026-09-07: the memory estimate computes a capacity-balanced
+`--tensor-split` and offers it, in `--estimate --json` always and in a card
+shortfall message, without changing anything about what the estimate
+assumes. SPEC.md 2.33 and 2.34 carry the rules and section 4 carries the
+new out-of-scope bullet. Next: the owner smoke below decides whether the
+run becomes a seventh calibration record.
 
 ## Open items
 
+- [ ] Where no offload count fits at the profile's own split but the named
+      balanced split fits on its own, the shortfall message pairs "no
+      offload count fits; lower the context or the KV cache type" with a
+      split that already solves it. Both sentences are true, the advice is
+      stale: seven such states in a 360 case sweep.
+- [ ] The ik_llama.cpp fit-on MoE branch emits a card shortfall message
+      that names no balanced split, although FitReport.balanced and the
+      JSON carry one for the same profile.
+- [ ] The balanced-split sentence names only the first boundary layer, so
+      on three or more cards it describes one boundary of several; no test
+      exercises fit_report with three cards.
+- [ ] balance.marginal_bytes_per_token's step parameter is passed by no
+      caller or test, and _at_least_one's len(out) > total guard is
+      unreachable from its only caller.
+- [ ] No test pins that draft_meta, draft_weights and mmproj_bytes reach
+      the balanced search: dropping them from the fit_report call would
+      break nothing.
+- [ ] One debounced render runs the balanced search twice on a shortfall.
+      configure_panel's _set_fit_line emits fit_rendered, main_window wires
+      it to benchmark_controller.refresh_sweep, and its sweep_prefill calls
+      panel._current_fit_report() again: two fit_report calls, two
+      searches, twelve estimate_memory calls.
+- [ ] balance.balanced_split reaches the highest-scoring candidate on two
+      cards with a single-peaked capacity curve, and can stop at a lower
+      peak on three or more cards, on a curve with more than one peak, or
+      where the best candidate lies more than 32 moves from the start
+      (SPEC 2.33 as written).
 - [ ] validation._is_active re-derives command_builder's emit rule rather
       than calling it, and does not model the load-mode suppression of
       no-mmap and mlock or the engine_value SKIP that drops an enum left at
@@ -40,7 +60,9 @@ behind owner consent.
       0.7 s on a model with tens of thousands of tensors (the suggestion
       bisection re-places every tensor up to eight times); cache the
       placement per tensor table and settings, or move the render off
-      thread.
+      thread. A shortfall now also runs the balanced search and two offload
+      bisections: measured 0.077 s stubbed against 0.443 s on a 32k-tensor
+      table.
 - [ ] The launch click probes the GPUs and RAM synchronously on the UI
       thread (two ssh round trips on a remote node, up to ten seconds
       frozen); the Configure panel's off-thread gather with its TTL cache
@@ -124,18 +146,6 @@ behind owner consent.
 - [ ] recurrent_layer_mask treats any layer with a non-zero per-layer
       feed-forward width as not recurrent, so a hybrid whose recurrent block
       also carries an MLP would be charged no state (SPEC 2.32 as written).
-- [ ] Gemma 4 prices its sliding-window layers at attention.key_length (512)
-      although the header gives key_length_swa and value_length_swa (256)
-      plus a sliding_window_pattern bool array; with --swa-full the KV
-      estimate reads 2.2x high on the 12B and 1.9x on the 26B-A4B, and
-      the 26B message suggested --n-cpu-moe 22 for a model that loaded
-      whole. Reading the three keys makes the swa-full case exact and gives
-      the per-layer window for the non-swa-full case (ROADMAP item).
-- [ ] The compute estimate reads low on the non-output card: 23 to 68 MiB
-      against about 410 MiB measured on both Gemma 4 runs, whose measured
-      compute is symmetric across cards (407/407, 413/413) with the output
-      layer on card 1. That breaks SPEC 2.19's never-low rule once these
-      runs become records.
 - [ ] An MTP draft (--spec-type draft-mtp, gemma4-assistant) reserves a
       3320 MiB compute buffer on card 0 for 58 MiB of weights and shares the
       main model's KV (shared_kv_layers 4); the estimate has no term for it
@@ -179,6 +189,16 @@ behind owner consent.
 
 ## Pending owner smokes
 
+- [ ] Take a profile that is over budget on one card on the 5080 plus
+      A2000 box, apply the suggested `--tensor-split` from
+      `--estimate --json`, launch at Verbosity 4 and check the per-card
+      model buffer lines against the predicted boundary layer and the KV
+      figures against the predicted per-card marginal cost. The boundary
+      layer must match exactly and each card's model buffer must land
+      inside the tolerance the calibration records use. With complete
+      buffer lines the run becomes a seventh entry in
+      tests/core/calibration_records.py; without them it stays a reported
+      smoke.
 - [ ] Re-run `--estimate --json` for the 27B dense and 35B-A3B profiles on
       the 5080 plus A2000 box and compare each card's `kv + state + compute`
       and the RAM `buffers` against the sweep files' measured figures; then
@@ -260,27 +280,23 @@ behind owner consent.
 
 ## Done this cycle
 
-- The VRAM estimate charges KV only to layers that hold a cache, from the
-  header's full-attention interval or a per-layer head-count array, sizes
-  entries from the header's key and value lengths and the cache types, and
-  adds the recurrent state of Gated DeltaNet layers per request slot and,
-  in RAM, the context checkpoints the server keeps for them. On the two
-  Qwen3.5 and 3.6 hybrids measured on 2026-09-06 the KV sum now lands
-  within 2.5 percent of the server's own figure; before, it read six times
-  high on the 27B dense.
-- The compute term charges the logits buffer to the card that holds the
-  output tensor only, gains a recurrent-activations term, and is scaled per
-  engine (ik_llama.cpp 0.7). RAM carries a host compute buffer as a fraction
-  of the card formula and an output buffer of vocabulary times four bytes
-  times request slots, in place of the 2 GiB batch-sized buffer of before.
-- A calibration records module holds the four measured runs and a fit
-  script refits the term table against them; every record reads never low,
-  compute and host at most 2.45 times high, KV plus state within a quarter.
-- The sweep parser reads ik_llama.cpp's buffer lines and recurrent-state
-  lines; sweep launches raise log verbosity on mainline llama.cpp only; the
-  sweep's estimated column includes the recurrent state.
-- The GGUF reader exposes the interval, per-layer KV heads, head sizes and
-  recurrent sizes; the readout, tooltip and JSON show state and
-  checkpoints; VRAM.md documents the terms and a per-engine calibration
-  procedure.
-- The suite went from 1994 to 2039 tests.
+- The memory estimate computes a capacity-balanced `--tensor-split`: the
+  candidates are whole-layer boundaries leaving no card empty, scored on
+  feasibility, then the minimum per-card capacity (a card's margin over its
+  marginal bytes per token, minimized over the cards whose cache grows with
+  the context), then the minimum margin. The search starts at the split the
+  profile itself would use and takes the best single-layer move while one
+  scores strictly better, to a bound of 32 moves.
+- A card's marginal cost per token is measured, not derived a second time:
+  its KV and state priced one 4096-token step away, divided by the step, so
+  window caps, `--swa-full`, unified against per-slot caches and quantized
+  cache types follow the rules already calibrated.
+- The split is a suggestion and never an assumption: with `--tensor-split`
+  unset the estimate still models the engines' free-VRAM proportion.
+  `--estimate --json` carries it as `balanced_split`; a card shortfall
+  message names it, says whether it fits alone, names the value it
+  replaces, and adds the `--fit` note only where `--fit` would otherwise
+  act. Where the split does not fit alone, the offload count of SPEC 2.21
+  is searched at that split and the message names both.
+- New pure module core/balance.py, 29 tests of its own; the suite went from
+  2039 to 2103 tests.

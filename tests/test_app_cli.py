@@ -550,6 +550,32 @@ def test_estimate_json(monkeypatch, capsys):
     assert obj["warnings"] == [] and obj["error"] is None
 
 
+def test_estimate_json_carries_the_balanced_split(monkeypatch, capsys):
+    """A two-card --estimate --json readout carries balanced_split with a
+    value string that matches its own layers_per_card, one boundary between
+    the two cards and a bool fits flag."""
+    _profiles(monkeypatch, [_server("s")])
+    _estimate_env(monkeypatch, free_mib=(30000, 12000))
+    assert app.main(["--estimate", "--profile", "s", "--json"]) == 0
+    obj = json.loads(capsys.readouterr().out)
+    b = obj["estimate"]["balanced_split"]
+    assert set(b) == {"value", "layers_per_card", "boundary_layers", "fits"}
+    assert b["value"] == ",".join(str(n) for n in b["layers_per_card"])
+    assert len(b["layers_per_card"]) == 2
+    assert len(b["boundary_layers"]) == 1
+    assert b["fits"] is True
+
+
+def test_estimate_json_single_card_has_no_balanced_split(monkeypatch, capsys):
+    """A one-card --estimate --json readout has no split to balance, so the
+    balanced_split key is absent from the estimate object."""
+    _profiles(monkeypatch, [_server("s")])
+    _estimate_env(monkeypatch, free_mib=(30000,))
+    assert app.main(["--estimate", "--profile", "s", "--json"]) == 0
+    obj = json.loads(capsys.readouterr().out)
+    assert "balanced_split" not in obj["estimate"]
+
+
 def test_estimate_exit_3_when_over(monkeypatch, capsys):
     _profiles(monkeypatch, [_server("s", **{"fit": "off"})])
     _estimate_env(monkeypatch, free_mib=(512,))
