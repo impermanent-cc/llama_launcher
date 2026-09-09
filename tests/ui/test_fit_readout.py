@@ -7,6 +7,8 @@ ever clicking Launch.
 import dataclasses
 import time
 
+from PySide6.QtCore import Qt
+
 import llama_launcher.services.gpu as _gpu
 import llama_launcher.ui.main_window as mw
 from llama_launcher.core import memory_fit
@@ -69,6 +71,7 @@ def _patch_model(monkeypatch, weights_gib=20):
         n_embd=8192,
         ctx_train=131072,
         quant="Q8_0",
+        size_label="70B",
         tensors=tuple(tensors),
     )
     draft_meta = GgufMeta(
@@ -651,3 +654,125 @@ def test_the_off_thread_probe_lands_as_one_tuple_on_the_gui_thread(
     assert panel._fit_gpus_ssh == "me@10.0.0.2"
     assert panel._fit_ram == 8 * 1024**3
     assert panel.cached_probe("me@10.0.0.2") == (gpus, 8 * 1024**3)
+
+
+def test_meta_line_carries_the_layer_count(main_window, monkeypatch):
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    panel.apply_model_caps()
+    text = panel._meta_text
+    assert "80 layers" in text
+    assert text.index("GiB") < text.index("80 layers")
+    assert text.index("Q8_0") < text.index("80 layers")
+    assert text.index("70B") < text.index("80 layers")
+
+
+def test_details_section_starts_collapsed_and_holds_the_details(
+    main_window, monkeypatch
+):
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096, **{"tensor-split": "60,40"}))
+    _seed_gpus(panel, [_gpu_stat(30000), _gpu_stat(20000)])
+    panel._refresh_fit_line()
+    assert panel.fit_details_section.is_expanded() is False
+    assert panel.fit_details_label.textFormat() == Qt.PlainText
+    details = panel.fit_details_label.text()
+    assert details.startswith("KV per 1024 tokens:")
+    assert "per layer over" in details
+    assert details.splitlines()[-1].startswith("output tensor ")
+    assert "formula" not in details
+    assert "layers 0 to" in panel.model_meta_label.text()
+
+
+def test_details_clear_when_no_report(main_window, monkeypatch):
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    _seed_gpus(panel, [_gpu_stat(30000)])
+    panel._refresh_fit_line()
+    assert panel.fit_details_label.text()
+    panel.model_edit.setText("")
+    panel.apply_model_caps()
+    assert panel.fit_details_label.text() == ""
+
+
+def test_details_clear_in_router_mode(main_window, monkeypatch):
+    """A router render clears the single-server Details text: the
+    leftover form model's breakdown must not linger next to the
+    member-based fit line."""
+    from llama_launcher.core.spec import RouterMember
+    from llama_launcher.store import profiles as store
+
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    _seed_gpus(panel, [_gpu_stat(30000)])
+    panel._refresh_fit_line()
+    assert panel.fit_details_label.text() != ""
+
+    _patch_models_by_path(monkeypatch, {"/mnt/models/small.gguf": 4})
+    store.save_profile(
+        Profile(
+            name="Small",
+            image="img",
+            model="/models/small.gguf",
+            mounts=[Mount(host="/mnt/models", container="/models", role="model")],
+            settings={"ctx-size": 4096},
+        ),
+        main_window.router_base_dir(),
+    )
+    panel.mode_combo.setCurrentIndex(panel.mode_combo.findData("router"))
+    panel._add_member_item(RouterMember(profile="Small"))
+    panel._refresh_fit_line()
+    assert panel.fit_details_label.text() == ""
+
+
+def test_details_clear_when_router_mode_has_no_members_yet(main_window, monkeypatch):
+    """Switching to router mode before any member is added clears a
+    Details text left over from an earlier single-server render, along
+    with the blank fit line."""
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    _seed_gpus(panel, [_gpu_stat(30000)])
+    panel._refresh_fit_line()
+    assert panel.fit_details_label.text() != ""
+
+    panel.mode_combo.setCurrentIndex(panel.mode_combo.findData("router"))
+    panel._refresh_fit_line()
+    assert panel.fit_details_label.text() == ""
+
+
+def test_details_clear_when_estimate_becomes_unknowable(main_window, monkeypatch):
+    """A render whose estimate is unknowable (no model metadata) clears a
+    Details text left over from an earlier, successful render."""
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    _seed_gpus(panel, [_gpu_stat(30000)])
+    panel._refresh_fit_line()
+    assert panel.fit_details_label.text() != ""
+
+    panel._fit_meta = None
+    panel._render_fit_line()
+    assert panel.fit_details_label.text() == ""
+
+
+def test_details_clear_when_meta_is_missing_before_any_gpu_probe(
+    main_window, monkeypatch
+):
+    """A form with no readable model metadata clears a Details text left
+    over from an earlier, successful render as soon as it is next asked
+    to render, before any GPU probe runs."""
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    _seed_gpus(panel, [_gpu_stat(30000)])
+    panel._refresh_fit_line()
+    assert panel.fit_details_label.text() != ""
+
+    panel._fit_meta = None
+    panel._refresh_fit_line()
+    assert panel.fit_details_label.text() == ""

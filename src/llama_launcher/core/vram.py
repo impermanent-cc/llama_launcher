@@ -1,3 +1,4 @@
+import re
 from dataclasses import dataclass
 
 from . import placement as _pl
@@ -294,6 +295,42 @@ _F32 = 4
 
 
 @dataclass(frozen=True)
+class LayerLayout:
+    """Where the main model's block layers and output layer sit. A layer's
+    home is the card the engine assigns it to, which is where card_layers
+    and ram_layers place it even under --no-kv-offload: that flag moves the
+    cache itself into host RAM without changing the layer's assigned card.
+    card_layers holds, per card, the block layer indices whose KV cache the
+    card keeps; ram_layers the block layers left on the host. output_device
+    is the card charged the output layer's logits, None when the host keeps
+    it. card_layer_bytes is, per card, the weight bytes of the block layers
+    the card holds, counting only a layer whose KV cache the card keeps, so
+    a host layer's weights promoted onto a card by --override-tensor never
+    join a card's total; zero on every card with no tensor table, since no
+    per-layer split exists to charge. expert_layer_bytes is the expert
+    weight of one block layer, zero on a dense model; output_bytes is the
+    output tensor's size, zero with no tensor table, where no tensor is
+    separately sized. per_layer_known is False with no tensor table, where
+    the per-card weight split is unknown rather than zero."""
+
+    n_layers: int
+    card_layers: tuple
+    ram_layers: tuple
+    output_device: int | None
+    row_split: bool
+    card_layer_bytes: tuple
+    expert_layer_bytes: int
+    output_bytes: int
+    per_layer_known: bool = True
+
+    @property
+    def gpu_layers(self) -> tuple:
+        """The block layer indices held by any card, sorted and de-duplicated
+        across cards: under row split every card shares this same range."""
+        return tuple(sorted({il for held in self.card_layers for il in held}))
+
+
+@dataclass(frozen=True)
 class CardEstimate:
     """Card side of an estimate. `state` is the recurrent state of the
     layers the card holds, at one copy per request slot; the context
@@ -351,6 +388,7 @@ class MemoryEstimate:
     ram: RamEstimate
     ctx: int
     kv_upper_bound: bool
+    layout: LayerLayout | None = None
 
     @property
     def gpu_total(self) -> int:
@@ -638,6 +676,98 @@ def _output_card(part, used_cards, *, split_mode, main_idx):
     return card
 
 
+_EXPS_RE = re.compile(_pl.EXPS_REGEX)
+_EXPERT_MEMO: dict = {}
+
+
+def _compute_first_expert_layer_bytes(tensors, n_layers) -> int:
+    """The expert weight of the lowest block layer that carries any expert
+    tensor, matched by placement's own EXPS_REGEX rather than a name
+    substring, so the `_chexps` spelling counts too. Zero on a dense model,
+    and zero when a model's leading layers are dense: the scan finds the
+    first layer that actually carries experts rather than assuming layer 0
+    does."""
+    per_layer: dict = {}
+    for t in tensors or ():
+        if not _EXPS_RE.search(t.name):
+            continue
+        il = _pl.layer_index(t.name, n_layers)
+        if il is None:
+            continue
+        per_layer[il] = per_layer.get(il, 0) + t.nbytes
+    if not per_layer:
+        return 0
+    return per_layer[min(per_layer)]
+
+
+def _first_expert_layer_bytes(tensors, n_layers) -> int:
+    """`_compute_first_expert_layer_bytes`, memoised on the table's identity
+    and the layer count together, so a fit or balance loop that calls this
+    once per candidate on the same table pays the regex walk once, and a
+    caller that narrows n_layers on the same table object never reads back
+    the wider table's answer. The memo keeps a reference to the table so
+    its identity cannot be reused while the entry lives, and empties itself
+    past the same entry limit placement's own memos use."""
+    key = (id(tensors), int(n_layers))
+    hit = _EXPERT_MEMO.get(key)
+    if hit is not None:
+        return hit[1]
+    value = _compute_first_expert_layer_bytes(tensors, n_layers)
+    if len(_EXPERT_MEMO) >= _pl.MEMO_LIMIT:
+        _EXPERT_MEMO.clear()
+    _EXPERT_MEMO[key] = (tensors, value)
+    return value
+
+
+def _layer_layout(part, meta, output_card, *, split_mode, n_cards) -> LayerLayout:
+    """The main model's layer homes from its placement and distribution: a
+    block layer's home is the card the engine assigns it to (via its KV
+    cache), so a promoted weight share never moves a host layer and
+    --no-kv-offload, which only relocates the cache bytes, never moves it
+    either. Per-card layer bytes sum the weight shares of the GPU block
+    layers alone, the layers a card keeps the KV cache of, so a host
+    layer's weights promoted by --override-tensor never join a card's
+    total; this also gives each card its own row-split share, since
+    weight_share already spreads a row-split layer's bytes over every
+    card. With no tensor table every card's layer bytes are zero and the
+    output tensor has no size of its own, since no per-layer split exists
+    to walk."""
+    placed, dist = part.placed, part.dist
+    n_layers = placed.n_layers
+    card_layers = [[] for _ in range(n_cards)]
+    ram_layers = []
+    for il in range(n_layers):
+        card = dist.kv_card[il]
+        if card is None:
+            ram_layers.append(il)
+        else:
+            card_layers[card].append(il)
+    per_layer_known = bool(meta.tensors)
+    if per_layer_known:
+        card_layer_bytes = [0] * n_cards
+        for il in range(n_layers):
+            if dist.kv_card[il] is None:
+                continue
+            for card, frac in enumerate(dist.weight_share[il]):
+                card_layer_bytes[card] += int(placed.layer_gpu[il] * frac)
+        output_bytes = int(placed.output_gpu + placed.output_cpu)
+    else:
+        card_layer_bytes = [0] * n_cards
+        output_bytes = 0
+    expert = _first_expert_layer_bytes(meta.tensors, n_layers)
+    return LayerLayout(
+        n_layers=n_layers,
+        card_layers=tuple(tuple(c) for c in card_layers),
+        ram_layers=tuple(ram_layers),
+        output_device=output_card,
+        row_split=split_mode == "row",
+        card_layer_bytes=tuple(card_layer_bytes),
+        expert_layer_bytes=int(expert),
+        output_bytes=output_bytes,
+        per_layer_known=per_layer_known,
+    )
+
+
 def _charge_compute(
     part,
     meta,
@@ -656,7 +786,8 @@ def _charge_compute(
     its logits term, to every card the model puts weights or a KV cache on
     (only --main-gpu under row mode, where the buffer counts once), charges
     the logits term to the card holding the output layer, and returns the
-    logits bytes RAM carries when no card does."""
+    logits bytes RAM carries and the card charged the output layer, None
+    when the host keeps it."""
     if split_mode == "row":
         used = {main_idx} if weights[main_idx] or kv[main_idx] else set()
     else:
@@ -670,9 +801,9 @@ def _charge_compute(
     logits = engine_scaled(logits_bytes(meta, ubatch), engine)
     card = _output_card(part, used, split_mode=split_mode, main_idx=main_idx)
     if card is None:
-        return logits
+        return logits, None
     compute[card] += logits
-    return 0
+    return 0, card
 
 
 def estimate_memory(
@@ -686,18 +817,22 @@ def estimate_memory(
     draft_meta=None,
     draft_weights=0,
     mmproj_bytes=0,
+    ctx=None,
 ):
     """Weights, KV, compute, overhead and recurrent state per card plus
     weights, KV, state, checkpoints and the host compute and output buffers
     in RAM for a profile, with the draft model placed by its own flags and
     the projector on --main-gpu unless kept off the card. None when the
-    metadata cannot support an estimate."""
+    metadata cannot support an estimate. `ctx` replaces the context the
+    settings would produce."""
     if meta is None or not meta.n_layers or not meta.n_embd:
         return None
     eff = _pl.effective_settings(settings, raw_args)
     free = [int(b) for b in free_bytes_per_gpu] or [0]
     n_cards = len(free)
-    ctx = effective_ctx_size(eff, engine) or meta.ctx_train or 4096
+    ctx = (
+        int(ctx) if ctx else (effective_ctx_size(eff, engine) or meta.ctx_train or 4096)
+    )
     batch = positive_int(eff.get("batch-size")) or int(CATALOG["batch-size"].default)
     ubatch = positive_int(eff.get("ubatch-size")) or int(CATALOG["ubatch-size"].default)
     batch = min(batch, ctx)
@@ -721,7 +856,7 @@ def estimate_memory(
     split_mode = eff.get("split-mode", "layer")
     main_idx = positive_int(eff.get("main-gpu")) or 0
     main_idx = main_idx if 0 <= main_idx < n_cards else 0
-    ram_logits = _charge_compute(
+    ram_logits, output_card = _charge_compute(
         part,
         meta,
         compute,
@@ -751,7 +886,7 @@ def estimate_memory(
             draft=True,
         )
         dw, dkv = dpart.weights, dpart.kv
-        ram_logits += _charge_compute(
+        draft_logits, _ = _charge_compute(
             dpart,
             draft_meta,
             compute,
@@ -764,6 +899,7 @@ def estimate_memory(
             split_mode=split_mode,
             main_idx=main_idx,
         )
+        ram_logits += draft_logits
         for i in range(n_cards):
             weights[i] += dw[i]
             kv[i] += dkv[i]
@@ -806,4 +942,11 @@ def estimate_memory(
         state=ram_state,
         checkpoints=ram_ckpt,
     )
-    return MemoryEstimate(cards, ram, int(ctx), swa)
+    layout = _layer_layout(
+        part,
+        meta,
+        output_card,
+        split_mode=split_mode,
+        n_cards=n_cards,
+    )
+    return MemoryEstimate(cards, ram, int(ctx), swa, layout)

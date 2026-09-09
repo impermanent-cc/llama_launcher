@@ -1,5 +1,6 @@
 from types import SimpleNamespace
 
+from llama_launcher.core import vram
 from llama_launcher.core.gguf import GgufMeta, TensorInfo
 from llama_launcher.core.vram import (
     CARD_OVERHEAD_BYTES,
@@ -1452,3 +1453,241 @@ def test_host_buffer_carries_no_vocabulary_activation(monkeypatch):
     m = _meta(n_vocab=1000, n_ff=0, n_embd=8)
     host = host_compute_bytes(m, ubatch=512, ctx=4096, flash_attn=True)
     assert host == int(4 * 512 * COMPUTE_TERMS["residual"] * 8)
+
+
+def _layout_meta(n_layers=8, moe=False):
+    ts = [TensorInfo("token_embd.weight", 1, 0, 10 * MIB)]
+    for i in range(n_layers):
+        ts.append(TensorInfo(f"blk.{i}.attn_q.weight", 1, 0, 100 * MIB))
+        name = f"blk.{i}.ffn_up_exps.weight" if moe else f"blk.{i}.ffn_up.weight"
+        ts.append(TensorInfo(name, 1, 0, 400 * MIB))
+    ts.append(TensorInfo("output.weight", 1, 0, 100 * MIB))
+    return _meta(
+        n_layers=n_layers,
+        n_head=8,
+        n_head_kv=8,
+        n_embd=512,
+        n_vocab=1000,
+        expert_count=64 if moe else None,
+        tensors=tuple(ts),
+    )
+
+
+def _layout(free=(16 * GIB, 16 * GIB), engine="llama.cpp", meta=None, **settings):
+    est = vram.estimate_memory(
+        meta or _layout_meta(),
+        0,
+        settings={"ctx-size": 4096, **settings},
+        engine=engine,
+        free_bytes_per_gpu=list(free),
+    )
+    return est.layout
+
+
+def test_layout_splits_layers_by_the_split_and_names_the_output_card():
+    """The layout tracks a card's block layers by tensor-split fraction and
+    the output layer's device by the largest share of its weights."""
+    lay = _layout(**{"tensor-split": "40,60"})
+    assert lay.n_layers == 8
+    assert lay.card_layers == ((0, 1, 2, 3), (4, 5, 6, 7))
+    assert lay.ram_layers == ()
+    assert lay.output_device == 1
+    assert lay.row_split is False
+    assert lay.card_layer_bytes == (4 * 500 * MIB, 4 * 500 * MIB)
+    assert lay.expert_layer_bytes == 0
+    assert lay.output_bytes == 100 * MIB
+    assert lay.per_layer_known is True
+    assert lay.gpu_layers == (0, 1, 2, 3, 4, 5, 6, 7)
+
+
+def test_layout_leaves_the_first_layers_in_ram_under_a_partial_offload():
+    lay = _layout(free=(16 * GIB,), **{"n-gpu-layers": 5})
+    assert lay.card_layers == ((4, 5, 6, 7),)
+    assert lay.ram_layers == (0, 1, 2, 3)
+    assert lay.output_device == 0
+    assert lay.card_layer_bytes == (4 * 500 * MIB,)
+
+
+def test_layout_keeps_everything_on_the_host_with_no_offload():
+    lay = _layout(free=(16 * GIB,), **{"n-gpu-layers": 0})
+    assert lay.card_layers == ((),)
+    assert lay.ram_layers == (0, 1, 2, 3, 4, 5, 6, 7)
+    assert lay.output_device is None
+    assert lay.card_layer_bytes == (0,)
+
+
+def test_layout_promoted_weights_do_not_move_a_host_layer():
+    """A promoted host layer's weights sit outside every GPU card's
+    card_layer_bytes: only the block layers a card holds via its KV cache
+    count towards the card's weight total."""
+    lay = _layout(
+        free=(16 * GIB,),
+        **{"n-gpu-layers": 5, "override-tensor": r"blk\.1\.ffn_up=CUDA0"},
+    )
+    assert lay.ram_layers == (0, 1, 2, 3)
+    assert lay.card_layers == ((4, 5, 6, 7),)
+    assert lay.card_layer_bytes == (4 * 500 * MIB,)
+
+
+def test_layout_row_split_flags_every_card():
+    """Under row split every card holds every layer's weight share, and the
+    output layer's KV cache and logits sit on --main-gpu."""
+    lay = _layout(**{"split-mode": "row", "tensor-split": "50,50"})
+    assert lay.row_split is True
+    assert lay.card_layers == ((0, 1, 2, 3, 4, 5, 6, 7), ())
+    assert lay.output_device == 0
+    assert lay.card_layer_bytes == (4 * 500 * MIB, 4 * 500 * MIB)
+    assert lay.gpu_layers == (0, 1, 2, 3, 4, 5, 6, 7)
+
+
+def test_layout_expert_bytes_are_one_layers_experts():
+    """expert_layer_bytes is one block layer's expert weight, not the sum
+    across every layer's experts."""
+    lay = _layout(meta=_layout_meta(moe=True), **{"tensor-split": "40,60"})
+    assert lay.expert_layer_bytes == 400 * MIB
+
+
+def test_layout_expert_bytes_skip_dense_leading_layers():
+    """A model whose leading block layers are dense reports the expert
+    weight of the first layer that actually carries experts, not layer 0."""
+    ts = [TensorInfo("token_embd.weight", 1, 0, 10 * MIB)]
+    for i in range(8):
+        ts.append(TensorInfo(f"blk.{i}.attn_q.weight", 1, 0, 100 * MIB))
+        if i < 3:
+            ts.append(TensorInfo(f"blk.{i}.ffn_up.weight", 1, 0, 400 * MIB))
+        else:
+            ts.append(TensorInfo(f"blk.{i}.ffn_up_exps.weight", 1, 0, 400 * MIB))
+    ts.append(TensorInfo("output.weight", 1, 0, 100 * MIB))
+    meta = _meta(
+        n_layers=8,
+        n_head=8,
+        n_head_kv=8,
+        n_embd=512,
+        n_vocab=1000,
+        expert_count=64,
+        tensors=tuple(ts),
+    )
+    lay = _layout(meta=meta, **{"tensor-split": "40,60"})
+    assert lay.expert_layer_bytes == 400 * MIB
+
+
+def test_layout_expert_bytes_match_the_chexps_spelling():
+    """The expert scan matches EXPS_REGEX, which also covers the `_chexps`
+    spelling some architectures use, not just `_exps`."""
+    ts = [TensorInfo("token_embd.weight", 1, 0, 10 * MIB)]
+    for i in range(8):
+        ts.append(TensorInfo(f"blk.{i}.attn_q.weight", 1, 0, 100 * MIB))
+        ts.append(TensorInfo(f"blk.{i}.ffn_up_chexps.weight", 1, 0, 400 * MIB))
+    ts.append(TensorInfo("output.weight", 1, 0, 100 * MIB))
+    meta = _meta(
+        n_layers=8,
+        n_head=8,
+        n_head_kv=8,
+        n_embd=512,
+        n_vocab=1000,
+        expert_count=64,
+        tensors=tuple(ts),
+    )
+    lay = _layout(meta=meta, **{"tensor-split": "40,60"})
+    assert lay.expert_layer_bytes == 400 * MIB
+
+
+def test_expert_layer_bytes_scan_is_memoised_on_the_table_identity():
+    """Two calls on the same tensor table object return the same value and
+    share one memo entry, so a fit or balance loop pays the regex walk once
+    per table rather than once per candidate."""
+    meta = _layout_meta(moe=True)
+    vram._EXPERT_MEMO.clear()
+    first = vram._first_expert_layer_bytes(meta.tensors, meta.n_layers)
+    second = vram._first_expert_layer_bytes(meta.tensors, meta.n_layers)
+    assert first == second == 400 * MIB
+    assert len(vram._EXPERT_MEMO) == 1
+    assert vram._EXPERT_MEMO[(id(meta.tensors), meta.n_layers)][0] is meta.tensors
+
+
+def test_expert_layer_bytes_memo_keys_on_layer_count_too():
+    """Two metas sharing one tensor table object memoise separately by
+    n_layers, so a caller that narrows the layer count on the same table
+    does not read back the wider table's answer."""
+    ts = [TensorInfo("token_embd.weight", 1, 0, 10 * MIB)]
+    for i in range(8):
+        ts.append(TensorInfo(f"blk.{i}.attn_q.weight", 1, 0, 100 * MIB))
+        if i in (6, 7):
+            ts.append(TensorInfo(f"blk.{i}.ffn_up_exps.weight", 1, 0, 400 * MIB))
+        else:
+            ts.append(TensorInfo(f"blk.{i}.ffn_up.weight", 1, 0, 400 * MIB))
+    ts.append(TensorInfo("output.weight", 1, 0, 100 * MIB))
+    tensors = tuple(ts)
+    vram._EXPERT_MEMO.clear()
+    wide = vram._first_expert_layer_bytes(tensors, 8)
+    narrow = vram._first_expert_layer_bytes(tensors, 4)
+    assert wide == 400 * MIB
+    assert narrow == 0
+
+
+def test_layout_reports_unknown_per_layer_bytes_with_no_tensor_table():
+    """With no tensor table no per-layer split exists to walk: layout
+    reports a zero weight share for every card and no separate output
+    tensor size, and flags per_layer_known False so a renderer knows the
+    per-card weight figures are unknown rather than zero."""
+    meta = _meta(
+        n_layers=8, n_head=8, n_head_kv=8, n_embd=512, n_vocab=1000, tensors=()
+    )
+    est = vram.estimate_memory(
+        meta,
+        8 * GIB,
+        settings={"ctx-size": 4096, "tensor-split": "40,60"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[16 * GIB, 16 * GIB],
+        draft_meta=_layout_meta(n_layers=2),
+        draft_weights=64 * MIB,
+        mmproj_bytes=64 * MIB,
+    )
+    lay = est.layout
+    assert lay.output_bytes == 0
+    assert lay.card_layer_bytes == (0, 0)
+    assert lay.per_layer_known is False
+    # The draft model's and the projector's weights land on the cards
+    # alongside the main model's, so the cards' own totals run ahead of the
+    # zeroed layout figures.
+    assert sum(c.weights for c in est.cards) > sum(lay.card_layer_bytes)
+
+
+def test_layout_layer_homes_survive_no_kv_offload():
+    """--no-kv-offload moves the KV cache into host RAM without moving the
+    layer's home off the card the engine assigned it to."""
+    lay = _layout(free=(16 * GIB,), **{"no-kv-offload": True})
+    assert lay.card_layers == ((0, 1, 2, 3, 4, 5, 6, 7),)
+    assert lay.ram_layers == ()
+
+
+def test_layout_split_mode_none_puts_everything_on_main_gpu():
+    """Under split-mode none every GPU layer and the output land on
+    --main-gpu, and the other card holds nothing."""
+    lay = _layout(**{"split-mode": "none"})
+    assert lay.card_layers == ((0, 1, 2, 3, 4, 5, 6, 7), ())
+    assert lay.card_layer_bytes == (8 * 500 * MIB, 0)
+    assert lay.output_device == 0
+
+
+def test_estimate_ctx_override_replaces_the_settings_context():
+    """estimate_memory's ctx keyword, when given, replaces the context the
+    settings would otherwise produce."""
+    meta = _layout_meta()
+    base = vram.estimate_memory(
+        meta,
+        0,
+        settings={"ctx-size": 4096},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[16 * GIB],
+    )
+    more = vram.estimate_memory(
+        meta,
+        0,
+        settings={"ctx-size": 4096},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[16 * GIB],
+        ctx=8192,
+    )
+    assert more.ctx == 8192 and base.ctx == 4096
+    assert more.cards[0].kv == 2 * base.cards[0].kv

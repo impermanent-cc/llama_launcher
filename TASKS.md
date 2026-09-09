@@ -2,15 +2,44 @@
 
 ## Current phase
 
-Idle: no cycle open. The last cycle, feat/config-jump-bar-and-cleanup,
-landed on 2026-09-08: a search and jump-to bar on the Configure tab, the
-memory estimate priced from one tensor-table walk per render, the balanced
-split scored exhaustively on two cards, and thirty-one open items closed.
-Next: the owner smokes below, then grill the mounted-but-missing file gap of
-SPEC 2.35 or pick the next ROADMAP item.
+Idle: no cycle open. The last cycle, feat/configure-density-and-readout,
+landed on 2026-09-09: the suggestion dot beside its editor and the tools
+boxes in two columns, a finer --ctx-size ladder, the layer count on the
+meta line with per-card layer ranges in the readout and a collapsible
+Details section, --estimate printing the details with new JSON keys, and
+bounded widths for the Environment column and the top bar fields. Next:
+the owner's GPU smoke below, then a release commit on main that sets
+pyproject to 0.2.0 and dates the CHANGELOG section, then the v0.2.0 tag
+and the GitHub release, each on the owner's yes.
 
 ## Open items
 
+- Owner: the main window's minimum width rose from about 843 to 1032 px,
+      driven by the top bar's Name and profile picker minimums (160 and
+      200 px) plus six buttons, so a 1024 px display no longer fits the
+      window. Lowering NAME_EDIT_BOUNDS[0] or letting the buttons collapse
+      fixes it; ENV_COLUMN_MIN (420) is inert while that minimum stands.
+- [ ] The readout's layer ranges follow the KV cache placement while a model
+      with no tensor table parks its whole weight blob at the output
+      position, so a partial offload of such a model names host layers with
+      "weights 0.0" behind them (VRAM.md's fallback). The Details block
+      already says the per-layer weights are unknown there.
+- [ ] A card holding a draft model or projector but no main-model layer reads
+      "no layers" beside non-zero weights and KV per 1024 tokens; SPEC 2.24
+      says the ranges cover the main model, and the line does not.
+- [ ] Group box titles carrying "&" ("Server & Tools", "Model & Context")
+      render the ampersand as a mnemonic underscore on some platforms
+      (seen offscreen); QGroupBox titles need "&&".
+- [ ] memory_fit.render_lines and render_details guard against an estimate
+      with no layout or an empty kv_per_1k, which fit_report never produces;
+      to_json's bytes_per_layer indexes card_layer_bytes by card["index"]
+      inside a positional zip, and _kv_per_1k zips with strict=False where
+      strict=True would surface a length mismatch.
+- [ ] The Speculative Decoding group is now the widest in the settings
+      column (436 px offscreen), from bool rows whose checkbox text repeats
+      the flag beside the row label (ROADMAP Later).
+- [ ] placement.layer_index is a public alias of _layer_of with one caller
+      in vram; renaming _layer_of would remove the pair.
 - [ ] --device is not modelled: every visible card is counted and gets the
       per-card overhead even when the launch excludes it (VRAM.md, known
       limits).
@@ -132,6 +161,16 @@ SPEC 2.35 or pick the next ROADMAP item.
 
 ## Pending owner smokes
 
+- [ ] On the 5080 plus A2000 box, load the 27B dense profile and the
+      35B-A3B profile and compare the readout's per-card layer ranges
+      against the per-card model buffer lines of a Verbosity 4 launch (the
+      boundary layer must match), the Details block's KV per 1024 tokens
+      against the KV growth between two context sizes in the log, and the
+      per-layer weight against one layer moved by --tensor-split. Also
+      confirm the settings column shows no horizontal scrollbar at your
+      usual window size, the Environment column and the top bar fields stop
+      at their maxima, and the 1032 px window minimum is acceptable on your
+      display.
 - [ ] Take a profile that is over budget on one card on the 5080 plus
       A2000 box, apply the suggested `--tensor-split` from
       `--estimate --json`, launch at Verbosity 4 and check the per-card
@@ -223,44 +262,41 @@ SPEC 2.35 or pick the next ROADMAP item.
 
 ## Done this cycle
 
-- A search field with a match counter above the settings on the Configure
-  tab: a case-insensitive substring of a flag, alias or group title scrolls
-  to and tints the match, Enter and Shift+Enter cycle, Escape clears, hidden
-  rows never match, and focus never leaves the field. Driven live on the
-  dev box's display: "ngl" found --n-gpu-layers and --gpu-layers-draft, the
-  cycle wrapped, Escape cleared.
-- The memory estimate walks a model's tensor table once per render: per-layer
-  sums split by the counted rule's family, memoised per table, price every
-  balanced-split candidate and offload count. fit_report on a 32k-tensor
-  two-card shortfall went from 0.63 s to 0.04 s.
-- The balanced split scores every two-card candidate; on three or more cards
-  the climb runs as many moves as there are entries placed on cards.
-- Shortfall messages: the balanced split is named on ik_llama.cpp with --fit
-  too, no offload count is suggested where the named split already fits,
-  every card boundary is named, the --override-tensor suggestion is
-  shell-quoted whole, amounts under 1 GiB render in MiB, and an unmounted
-  draft model or projector produces a dialog-level message in the readout,
-  the launch dialog and the CLI.
-- --estimate exits 6 when every card fits and RAM is over budget; README's
-  exit table carries the row.
-- The router readout charges the per-card overhead once per card; recurrent
-  state is no longer charged to a shared-KV tail layer.
-- The launch preflight reuses the Configure tab's GPU and RAM probe while
-  it is fresh for the profile's node, and one debounced render costs one
-  fit report and one profile read in the panel.
-- validation's active-setting rule is command_builder's emit rule (load-mode
-  suppression, enum defaults, engine gate) and treats a zero count, typed or
-  string, as idle; the argv rendering shares the same helper.
-- An embedding model shows no offload recommendation dot; the context
-  suggestion reads the effective context from --kv-unified-per-slot.
-- Sweep: one wait_ready shared with the headless path, the stored sweep's
-  timestamp labelled in the Benchmark tab, the terminal message survives the
-  end-of-run refresh, a card's output buffer counts into measured compute,
-  one prompt-sizes parser with its own refusal for a bad token, and tests
-  for _read_log, _stop_and_remove, the store's mode and overwrite.
-- Hygiene: the purity subset test, the build_catalog tooltip test, the
-  video-timestamp-interval tooltip (0 disables), calibration_records without
-  output_card, the calibration slack priced at the largest cached layer,
-  fit_compute_terms' best-effort point computed only until a feasible one
-  exists.
-- The suite went from 2103 to 2212 tests.
+- The suggestion dot sits 16 px wide directly after its editor with the
+  row's stretch after it, and multiselect settings lay out in two columns,
+  so the settings column's minimum width fell from 613 to 487 px offscreen
+  and needs no horizontal scrollbar. Driven offscreen at 1600 px on the
+  e2b profile with a screenshot of the Configure tab.
+- --ctx-size presets: 1024 and the midpoints 12288, 24576, 49152, 98304 and
+  196608 join the ladder.
+- The Environment column is bounded to 420 to 640 px with the settings
+  column absorbing the rest (measured: 640 from a 1400 px window on); the
+  Name edit and the profile combo grow to 260 and 340 px and stop, with a
+  stretch before the status label.
+- The estimate carries a LayerLayout: each block layer's card from its KV
+  placement, host layers, the output device, row split, per-card weight
+  bytes over the layers the card holds (promoted host-layer bytes excluded),
+  one layer's expert share (lowest expert layer, EXPS_REGEX, memoised per
+  table and layer count) and the output tensor's size; a no-table model
+  reports per-layer weights as unknown. estimate_memory takes a ctx
+  override.
+- fit_report prices the KV cost of the next 1024 tokens per device as the
+  marginal cost at the profile's context, only with with_details, and
+  carries the meta for the header facts.
+- The meta line carries the layer count; each card line opens its bracket
+  with the layer range ("layers 4 to 7 plus output", "layers 0 to 7, row
+  split"), the RAM line names the host layers; a collapsible Details section
+  (collapsed at start, plain text) holds the KV per 1024 tokens, per-layer
+  weights with the expert share, the head, embedding and vocabulary counts,
+  the sliding window and the output tensor; --estimate prints the block
+  after the lines and --json carries n_layers, per-card layers and
+  bytes_per_layer, ram layers, kv_per_1k and output_device. On the e2b
+  profile: "layers 0 to 20" and "layers 21 to 34 plus output" at 60,40,
+  KV per 1024 tokens 6 MiB, 24 and 35 MiB per layer, output 216 MiB.
+- Two plan errors caught by the tests: the engine offloads the last block
+  layers first (so -ngl 5 on eight layers holds 4 to 7 plus the output), and
+  the default four slots share the context, so a sliding window binds only
+  from 8192 tokens with a 1024 window.
+- Docs: CHANGELOG [Unreleased], VRAM.md JSON keys and readout paragraph,
+  README's --estimate clause, SPEC 2.24, 2.25, 2.38 to 2.42, ROADMAP Later
+  (benchmark prompts, queued runs, the Speculative Decoding group width).

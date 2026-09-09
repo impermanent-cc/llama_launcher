@@ -330,6 +330,7 @@ def _do_estimate(p, base_dir, as_json=False):
         draft_weights=draft_weights or 0,
         mmproj_bytes=mmproj_bytes or 0,
         with_balanced=True,
+        with_details=True,
         uncounted=uncounted,
     )
     if report is None:
@@ -357,6 +358,8 @@ def _do_estimate(p, base_dir, as_json=False):
         print(json.dumps(obj))
         return code
     for line in memory_fit.plain_lines(report):
+        print(line)
+    for line in memory_fit.render_details(report):
         print(line)
     for m in report.messages:
         print(m.text)

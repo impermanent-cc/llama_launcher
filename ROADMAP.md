@@ -60,6 +60,14 @@ settled, then to TASKS.md when a cycle picks them up.
   parse; GpuStat's integer fields would have to admit None.
 - Settle pool_preflight's double count on a worker that both pledges memory
   and is probed, during live node testing.
+- Benchmark with the user's own prompt or prompts, so the run reports what
+  the model did with them rather than a bare throughput figure.
+- Queue models or profiles to run one after another, with a way to show
+  each finished run's answers, for example by opening the web UI on the
+  finished chats.
+- The Speculative Decoding group is the widest in the settings column once
+  the tools row is two columns, from bool rows whose checkbox text repeats
+  the flag beside the row label; shorten or wrap them.
 
 ## Not planned
 

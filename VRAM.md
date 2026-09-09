@@ -280,14 +280,33 @@ token and changes nothing about the buffer lines themselves.
 `memory_fit.to_json`, surfaced under the `estimate` key of `--estimate
 --json`, carries:
 
-- `fits`, `ctx`, `kv_upper_bound`;
+- `fits`, `ctx`, `kv_upper_bound`, `n_layers` (the model's block layer
+  count), `output_device` (the card index charged the output layer, or
+  `"ram"`);
 - `cards`: a list, each with `index`, `est`, `free`, `margin`, `fits`,
-  `weights`, `kv`, `compute`, `overhead`, `state`;
+  `weights`, `kv`, `compute`, `overhead`, `state`, `layers` (the block
+  layer indices the card holds), `bytes_per_layer` (the average weight
+  bytes of those layers);
 - `ram`: `est`, `available`, `margin`, `fits`, `weights`, `kv`, `buffers`,
-  `state`, `checkpoints`;
+  `state`, `checkpoints`, `layers` (the block layers left on the host);
 - `messages`: a list of the message strings shown in the readout;
+- `kv_per_1k`, only when the report prices one: `total`, `cards` (one
+  entry per card) and `ram`, the KV bytes the next 1024 tokens of context
+  add on each device, priced as the estimate at the profile's context
+  plus 1024 less the estimate at that context;
 - `balanced_split`, only when a split is computed: `value`,
   `layers_per_card`, `boundary_layers`, `fits`.
+
+Each card line in the readout opens its bracket with the layer range the
+card holds, and "plus output" on the card holding the output layer; under
+`--split-mode row` the range lists the offloaded layers followed by "row
+split", since every card holds a share of each. The ranges cover the main
+model; a draft model's or projector's bytes sit in the weights figure
+without a range. The RAM line names the layers left on the host. The
+collapsible Details section under the readout lines mirrors the keys above:
+it carries those figures in plain lines, plus the model's head, embedding
+and vocabulary counts, any
+sliding window, and the output tensor's size.
 
 ## Known limits
 
