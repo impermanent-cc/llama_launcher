@@ -2,11 +2,11 @@
 
 The fit rule for every calibration record: KV plus recurrent state reads high
 by at most a quarter and never low over the sum across cards, or over the RAM
-figure for a record with no card figures, and per card within one layer's KV
-of that band; the per-card compute buffers, the host compute buffer and the
-output buffer, each compared on its own so no term can cover another's
-shortfall, never read low and read at most two and a half times high, on
-every record.
+figure for a record with no card figures, and per card within the largest
+layer's KV of that band; the per-card compute buffers, the host compute
+buffer and the output buffer, each compared on its own so no term can cover
+another's shortfall, never read low and read at most two and a half times
+high, on every record.
 """
 
 from types import SimpleNamespace
@@ -14,6 +14,7 @@ from types import SimpleNamespace
 import pytest
 
 from llama_launcher.core import vram
+from llama_launcher.core.settings_catalog import CATALOG, accepts
 from tests.core.calibration_records import RECORDS
 
 COMPUTE_TOLERANCE = 2.5
@@ -37,20 +38,81 @@ def estimate_for(record):
 
 
 def layer_kv_bytes(record, ctx):
-    """One layer's KV cache at the record's head sizes, cache types and
-    context: the slack a card's KV figure is allowed, since a layer lands
-    whole on one card or the other."""
+    """The largest single layer's KV cache at the record's head sizes, cache
+    types and context, a window layer priced at its window: the slack a
+    card's KV figure is allowed, since a layer lands whole on one card."""
     meta = record["meta"]
+    ns = SimpleNamespace(**meta)
+    n = int(meta["n_layers"])
     heads = meta["n_head_kv"] or meta["n_head"]
+    layer_heads = meta.get("kv_layer_heads")
     settings = record["settings"]
-    return vram.kv_cache_bytes(
-        1,
-        heads,
-        meta["head_dim_k"],
-        ctx,
-        settings.get("cache-type-k", "f16"),
-        settings.get("cache-type-v", "f16"),
+    engine = record["engine"]
+    k_q = settings.get("cache-type-k", "f16")
+    v_q = settings.get("cache-type-v", "f16")
+    windowed = vram.window_layer_mask(ns, n)
+    cached = vram.kv_layer_mask(ns, n)
+    window = int(meta.get("sliding_window") or 0)
+    swa_full = accepts(CATALOG["swa-full"], engine) and bool(settings.get("swa-full"))
+    if window and any(windowed) and not swa_full and engine != "ik_llama.cpp":
+        unified = accepts(CATALOG["kv-unified"], engine) and bool(
+            settings.get("kv-unified")
+        )
+        batch = int(settings.get("batch-size") or CATALOG["batch-size"].default)
+        ubatch = int(settings.get("ubatch-size") or CATALOG["ubatch-size"].default)
+        batch = min(batch, int(ctx))
+        ubatch = min(ubatch, batch)
+        w_tokens = vram.window_tokens(
+            ctx, window, ubatch, vram.slot_count(settings, engine), unified
+        )
+    else:
+        w_tokens = int(ctx)
+    sizes = []
+    for il in range(n):
+        if not cached[il]:
+            continue
+        nh = heads
+        if layer_heads and il < len(layer_heads) and int(layer_heads[il]):
+            nh = int(layer_heads[il])
+        if windowed[il]:
+            dk = meta.get("head_dim_k_swa") or meta["head_dim_k"]
+            dv = meta.get("head_dim_v_swa") or meta["head_dim_v"]
+            sizes.append(
+                vram.kv_side_bytes(1, nh, dk, w_tokens, k_q)
+                + vram.kv_side_bytes(1, nh, dv, w_tokens, v_q)
+            )
+        else:
+            sizes.append(
+                vram.kv_side_bytes(1, nh, meta["head_dim_k"], ctx, k_q)
+                + vram.kv_side_bytes(1, nh, meta["head_dim_v"], ctx, v_q)
+            )
+    return max(sizes, default=0)
+
+
+def test_layer_kv_bytes_returns_the_largest_cached_layer_not_the_smallest():
+    """layer_kv_bytes picks the biggest cached layer's KV size: a
+    two-layer header with a per-layer head count array returns the size of
+    the layer with more heads, not the one with fewer."""
+    meta = dict(
+        n_layers=2,
+        n_head=4,
+        n_head_kv=None,
+        kv_layer_heads=(2, 8),
+        full_attention_interval=None,
+        shared_kv_layers=None,
+        sliding_window=None,
+        sliding_window_pattern=None,
+        head_dim_k=64,
+        head_dim_v=64,
+        head_dim_k_swa=None,
+        head_dim_v_swa=None,
     )
+    record = {"meta": meta, "settings": {}, "engine": "llama.cpp"}
+    ctx = 1000
+    larger_layer = vram.kv_side_bytes(1, 8, 64, ctx, "f16") * 2
+    smaller_layer = vram.kv_side_bytes(1, 2, 64, ctx, "f16") * 2
+    assert larger_layer > smaller_layer
+    assert layer_kv_bytes(record, ctx) == larger_layer
 
 
 def assert_within(estimated, measured, tolerance, what):
@@ -60,6 +122,11 @@ def assert_within(estimated, measured, tolerance, what):
     assert estimated <= tolerance * measured + LOG_PRECISION, (
         f"{what} {estimated} over {tolerance} x {measured}"
     )
+
+
+@pytest.mark.parametrize("rec", RECORDS, ids=[r["name"] for r in RECORDS])
+def test_records_carry_no_output_card_key(rec):
+    assert "output_card" not in rec
 
 
 @pytest.mark.parametrize("rec", RECORDS, ids=[r["name"] for r in RECORDS])

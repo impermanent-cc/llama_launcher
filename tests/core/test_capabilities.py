@@ -1,3 +1,4 @@
+from llama_launcher.core import capabilities
 from llama_launcher.core.capabilities import (
     RELEVANCE_CONTRIBUTORS,
     SUGGESTION_DETECTORS,
@@ -159,3 +160,32 @@ def test_reranker_suggestion_sets_trio():
 def test_no_embedding_suggestion_for_generation_model():
     caps = derive_caps(GgufMeta(arch="qwen3"), [])
     assert not any(s.settings.get("embeddings") for s in suggestions(caps, {}))
+
+
+def test_ctx_suggestion_reads_the_effective_context():
+    caps = derive_caps(GgufMeta(ctx_train=8192), [])
+    s = {"kv-unified-per-slot": 4096, "parallel": 4}
+    sgs = suggestions(caps, s, engine="llama.cpp")
+    # no explicit ctx-size: the overflow comes from kv-unified-per-slot *
+    # parallel, so the wording names the effective context, not ctx-size.
+    assert any("effective context exceeds trained max" in sg.text for sg in sgs)
+    assert not suggestions(caps, s, engine="ik_llama.cpp")
+
+
+def test_ctx_suggestion_names_ctx_size_when_it_is_the_source():
+    caps = derive_caps(GgufMeta(ctx_train=8192), [])
+    sgs = suggestions(caps, {"ctx-size": 999999})
+    # an explicit ctx-size that overflows keeps naming ctx-size itself.
+    assert any("ctx-size exceeds trained max" in sg.text for sg in sgs)
+
+
+def test_an_embedding_model_gets_no_offload_recommendation():
+    caps = derive_caps(GgufMeta(arch="bert"), [])
+    rel = relevance(caps)
+    for key in ("n-cpu-moe", "cpu-moe", "override-tensor", "n-cpu-ffn"):
+        assert key not in rel
+
+
+def test_offload_relevance_helper_is_named_for_what_it_returns():
+    assert hasattr(capabilities, "_rel_offload")
+    assert not hasattr(capabilities, "_rel_moe")

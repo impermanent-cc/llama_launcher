@@ -73,7 +73,10 @@ that the KV pool size is unknown where `--parallel` is auto.
 is not symmetric: `--n-cpu-moe` is recommended on a MoE model and
 inapplicable on a dense one, which has no experts for it to move;
 `--n-cpu-ffn` is recommended on a dense model and a tuning knob on a MoE
-one, whose non-expert layers still carry dense FFN weights.
+one, whose non-expert layers still carry dense FFN weights. A model the
+capabilities mark as an embedding model (an embedding architecture or a
+header pooling type) gets no recommendation on either knob; both stay
+usable.
 
 2.13 Every catalogued flag that centralizes memory on the head
 (`--cpu-moe`, `--n-cpu-moe`, `--n-cpu-ffn`, `--no-kv-offload`,
@@ -180,7 +183,11 @@ model) or `--n-cpu-ffn` value (dense model) at which every card fits,
 found by evaluating the placement function for increasing counts. On an
 engine that lacks `--n-cpu-ffn` the message gives the equivalent
 `--override-tensor` value, an explicit alternation of layer indices with
-upstream's dense FFN regex. When no count fits, the message says so.
+upstream's dense FFN regex, rendered in single quotes as the whole value
+the search evaluated, the profile's own rules followed by the alternation,
+so a paste reproduces the searched state. When no count fits, the message
+says so. A shortfall amount under 1 GiB renders in MiB, never as "~0.0
+GiB".
 
 2.22 On mainline, `--fit` acts only on values left unset: it is active when
 `--fit` is unset or on and none of `--n-gpu-layers`, `--override-tensor`,
@@ -210,13 +217,18 @@ and the setting's tooltip states each engine's default.
 brackets), and one RAM line, with word wrap on so no line widens the
 window; the label's tooltip carries the full part list with the
 approximate and upper-bound notes. The launch preflight dialog shows the
-same breakdown. The router readout sums per-member card totals and the
-pool fit consumes the same breakdown with unchanged semantics. One pure
+same breakdown. The router readout charges each card's per-card overhead
+once and sums weights, KV and compute across members; the pool fit consumes
+the same breakdown with unchanged semantics. One pure
 core function renders these lines for the readout, the tooltip, the
 dialog and the CLI.
 
 2.25 `--estimate --profile NAME` prints the breakdown of 2.24 for the
-profile's launch node, and with `--json` prints it as JSON.
+profile's launch node, and with `--json` prints it as JSON. It exits 0 when
+every card fits and RAM fits or is unknown, 6 when every card fits and RAM
+is over budget, and 3 when any card is over budget whatever RAM does; the
+JSON `ok` is true whenever every card fits, since a RAM shortfall is a
+warning by 2.20. README's exit table lists the codes.
 
 2.26 An offload sweep launches the current profile once per count as a
 detached container named `llama-<slug>-sweep`, waits for `/health` up to a
@@ -256,8 +268,9 @@ KV figure.
 benchmark history, which the sweep never touches: the knob, the counts, and
 per point the status, the ready seconds, the benchmark rows, the measured
 memory and the estimate's per-card model plus KV plus compute and its
-RAM total for that count. The winner is the ok point with the highest generation tokens per second at the
-largest prompt size.
+RAM total for that count, and the timestamp taken when the sweep started.
+The winner is the ok point with the highest generation tokens per second at
+the largest prompt size.
 
 2.31 The Benchmark tab carries a sweep control row (knob label, from, to,
 step, ready timeout, Run sweep or Cancel, Apply) and a sweep table under
@@ -266,10 +279,14 @@ tooltip, ready seconds, prompt and generation tokens per second at the
 largest prompt size, per card measured against estimated GiB for model plus
 KV (recurrent state included) plus compute, without the per-card overhead
 and checkpoint terms the log never reports, and RAM measured against
-estimated; the winning row is marked. Apply writes the winner's count into the Configure form and saves
-the profile. The compute constants of 2.19 are not changed by a sweep.
+estimated; the winning row is marked. Apply writes the winner's count into
+the Configure form and saves the profile. Selecting a profile loads its
+stored sweep of 2.30 into the table, labelled with that sweep's timestamp;
+a profile without one shows an empty table and no label. The compute constants of 2.19
+are not changed by a sweep.
 
-2.32 A recurrent layer (a layer without a KV cache, and without a dense
+2.32 A recurrent layer (a layer the attention rules of 2.18 leave uncached,
+before the shared-KV tail is cleared, and without a dense
 feed-forward width where the header carries per-layer widths, on a model
 whose header carries recurrent-state sizes; every layer on a model with
 state sizes and no attention heads) adds its state in f32, the convolution
@@ -297,19 +314,20 @@ minimum over cards whose marginal cost is non-zero, and then the minimum
 margin, which decides where no card has a non-zero marginal cost. A
 candidate that leaves any card over budget scores on its minimum margin
 alone, since a negative margin over a cost is not a capacity and ranking it
-as one would favour the split with the deeper shortfall. The search starts
-at the split the profile itself would use, scores every candidate one layer
-away across any boundary, takes the best of those while one scores strictly
-better than the current candidate, and stops when none does or after 32
-moves. On two cards whose capacity curve has a single peak, that peak is the
-candidate it returns; on three or more cards, on a curve with more than one
-peak, or where the best candidate lies more than 32 moves from the start, it
-can stop at a lower peak. A card's marginal cost per token is measured at
+as one would favour the split with the deeper shortfall. On two cards every
+candidate is scored and the best-scoring one is returned. On three or more
+cards the search starts at the split the profile itself would use, scores
+every candidate one layer away across any boundary, takes the best of those
+while one scores strictly better than the current candidate, and stops when
+none does or after as many moves as there are entries placed on cards; on a curve with
+more than one peak it can stop at a lower peak. A card's marginal cost per
+token is measured at
 the candidate's own split: the difference between its KV and state priced at
 the profile's context plus 4096 tokens and the same figure at that context,
 divided by the step, so the window caps, cache types and slot rules of 2.18,
 2.19 and 2.32 need no second formula. The value is rendered as layer counts
-per card (`38,28`), whose boundary cannot round onto another layer.
+per card (`38,28`), whose boundary cannot round onto another layer, and a
+message sentence naming it names every card boundary.
 
 2.34 The balanced split of 2.33 is a suggestion and never an assumption:
 with `--tensor-split` unset the distribution of 2.16 stays the engines'
@@ -318,8 +336,9 @@ with the keys `value`, `layers_per_card`, `boundary_layers` and `fits`, the
 last being whether the split alone fits with no offload; the key is absent
 whenever 2.33 computes no split. When every card fits, the readout and its
 messages are unchanged and the split is carried in the JSON alone. A card
-shortfall message names the balanced split only where applying it would be
-an improvement: it places layers differently from the split the profile
+shortfall message, on either engine and whether or not ik keeps experts in
+RAM by 2.23, names the balanced split only where applying it would be an
+improvement: it places layers differently from the split the profile
 already resolves to, and it either fits on its own or needs a smaller
 offload count than the profile's own split does. Where it is named, the
 message states the profile's current `--tensor-split` value if one is set
@@ -328,7 +347,30 @@ by 2.22, states that an applied split keeps it from acting. When the
 balanced split does not fit on its own, the offload count search of 2.21
 runs once at that split as well as at the profile's, without re-balancing
 per count; the message names the count and the split together when the
-balanced split is named, and names the profile's own count otherwise.
+balanced split is named, and names the profile's own count otherwise. Where
+the named balanced split fits on its own, the message carries no offload
+count clause at all.
+
+2.35 A draft model or projector whose path lies under no configured folder
+counts as zero bytes in the estimate and produces a dialog-level message
+naming the setting and the path and stating that its bytes are not
+counted, in the readout, the launch dialog and the CLI.
+
+2.36 The launch preflight reuses the Configure panel's GPU and RAM probe
+when the cached result is younger than the panel's TTL, and probes afresh
+only otherwise; a launch never repeats a probe the readout has just made.
+
+2.37 The Configure tab carries a search field above the settings scroll
+area on its right half, with a match counter reading "n of m" or "no
+match". The typed text matches as a case-insensitive substring against
+every setting's flag, its aliases and every group title, ignoring a typed
+leading dash; rows hidden for the current mode or engine never match.
+Matches are ordered top to bottom as laid out. The first match scrolls into
+view and its row label is tinted while the text still matches it; a group
+match scrolls the group box to the top and tints its title. Enter moves to
+the next match and Shift+Enter to the previous, Escape clears the field,
+and keyboard focus never moves into a setting widget. Clearing the field or
+changing the text removes the tint.
 
 ## 3. Constraints
 
@@ -356,6 +398,13 @@ reports nothing for `ruff check .` and `ruff format --check .` under the
 (line-length 88, rule sets E, F, W, I, UP, B and RUF, E501 ignored, *.md
 excluded) and is not narrowed here. CI runs both as a lint job next to the
 sanity job.
+
+3.7 One debounced Configure render, or one `--estimate` run, walks the
+tensor table once: per-layer, per-device byte sums are computed once per
+tensor table and settings, and every balanced-split candidate and offload
+search count is priced from those sums. On an engine without `--n-cpu-ffn`
+the offload search's appended `--override-tensor` entry is priced from a
+second set of sums, so such a report costs two walks and never more.
 
 ## 4. Out of scope
 

@@ -2,9 +2,7 @@
 
 Each record carries the model's header block, the profile settings that
 shaped the run, the free VRAM per card at launch and the buffer sizes the
-engine logged, all in bytes. `output_card` is the card whose measured
-compute buffer carries the output layer, or None when the output layer
-stayed in host RAM. Records are read by the calibration test and by
+engine logged, all in bytes. Records are read by the calibration test and by
 scripts/fit_compute_terms.py; nothing under src reads them.
 """
 
@@ -88,7 +86,6 @@ RECORDS = [
                 "output": 4 * MIB,
             },
         },
-        "output_card": None,
     },
     {
         "name": "qwen3.6-35B-A3B mxfp4 ik_llama.cpp fit",
@@ -124,7 +121,6 @@ RECORDS = [
                 "output": int(0.95 * MIB),
             },
         },
-        "output_card": 1,
     },
     {
         "name": "qwen3.6-35B-A3B mxfp4 mainline sweep n-cpu-moe 2",
@@ -151,7 +147,6 @@ RECORDS = [
                 "output": 3974103,
             },
         },
-        "output_card": 0,
     },
     {
         "name": "qwen3.5-27B q4_k_s mainline sweep n-cpu-ffn 0",
@@ -206,7 +201,6 @@ RECORDS = [
                 "output": 1992294,
             },
         },
-        "output_card": 1,
     },
     {
         # Gemma 4 12B UD-Q4_K_XL, mainline b10818, two cards by free-memory
@@ -273,7 +267,6 @@ RECORDS = [
                 "output": 1 * MIB,
             },
         },
-        "output_card": None,
     },
     {
         # Gemma 4 26B-A4B MXFP4_MOE, mainline b10818, two cards by free-memory
@@ -338,6 +331,5 @@ RECORDS = [
                 "output": 1 * MIB,
             },
         },
-        "output_card": None,
     },
 ]

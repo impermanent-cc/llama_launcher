@@ -2068,7 +2068,7 @@ _ALL = [
         600000,
         100,
         tooltip="Milliseconds between the text timestamps interleaved with "
-        "video frames.",
+        "video frames; 0 disables them.",
     ),
     Setting(
         "video-ffmpeg-dir",

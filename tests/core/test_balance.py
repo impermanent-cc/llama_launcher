@@ -23,13 +23,18 @@ def _tabled_estimate(margins, costs, *, base_ctx, free, default_margin, default_
     margin that moves for a card whose own layer count did not change
     between two tabled states, to pin the search's move-selection rule in
     isolation from whether the real estimator could ever produce that
-    landscape."""
+    landscape. A tabled or default margin and cost may each be given as a
+    single number for every card alike, rather than a per-card tuple."""
 
     def fake(meta, weights_bytes, *, settings, engine, **_kwargs):
         raw = settings.get("tensor-split", "")
         key = tuple(int(x) for x in raw.split(",")) if raw else None
         margin = margins.get(key, default_margin)
         cost = costs.get(key, default_cost)
+        if not isinstance(margin, (tuple, list)):
+            margin = (margin,) * len(free)
+        if not isinstance(cost, (tuple, list)):
+            cost = (cost,) * len(free)
         ctx = int(settings.get("ctx-size", base_ctx) or base_ctx)
         cards = tuple(
             CardEstimate(
@@ -432,11 +437,11 @@ def test_balanced_split_falls_back_to_margin_when_no_card_grows_a_cache():
 
 
 def test_search_is_bounded(monkeypatch):
-    """The search prices a bounded number of candidates: with two cards, the
-    starting candidate plus the two neighbours either side of the single
-    boundary, two estimate calls apiece since the base estimate a
+    """The search prices a bounded number of candidates: with two cards and
+    nine entries, every one of the eight non-empty splits is scored, seven
+    of them costing two estimate calls each since the base estimate a
     candidate's totals need is the same one its marginal cost is measured
-    from."""
+    from, plus the start's own two calls priced ahead of the loop."""
     calls = []
     real = balance.estimate_memory
 
@@ -446,32 +451,46 @@ def test_search_is_bounded(monkeypatch):
 
     monkeypatch.setattr(balance, "estimate_memory", counted)
     got = balance.balanced_split(
-        _meta(n_layers=48),
+        _meta(n_layers=8),
         0,
         settings={"ctx-size": 8192, "n-gpu-layers": "all"},
         engine="llama.cpp",
-        free_bytes_per_gpu=[40 * GIB, 4 * GIB],
+        free_bytes_per_gpu=[40 * GIB, 40 * GIB],
     )
     assert got is not None
-    assert got.layers_per_card == (45, 4)
-    assert len(calls) == 6
+    assert got.layers_per_card == (4, 5)
+    assert len(calls) == 16
 
 
-def test_balanced_split_stops_at_max_moves_short_of_the_true_peak():
-    """A split whose true best point is more than MAX_MOVES away from the
-    profile's own is not reached: the search stops after MAX_MOVES rounds,
-    short of the peak, rather than running until no neighbour improves."""
-    meta = _meta(n_layers=80)
-    got = balance.balanced_split(
-        meta,
-        0,
-        settings={"ctx-size": 8192, "n-gpu-layers": "all", "tensor-split": "1,99"},
-        engine="llama.cpp",
-        free_bytes_per_gpu=[200 * GIB, 200 * GIB],
+def test_three_cards_climb_as_many_moves_as_there_are_entries(monkeypatch):
+    """On three cards the climb's move cap is the number of entries placed
+    on cards: a peak that takes every one of those rounds to reach is
+    reached exactly, one round short of it is not."""
+    n = 40
+    meta = _meta(n_layers=n)
+    total = n + 1  # 40 block layers plus the output layer
+    free = [16 * GIB] * 3
+    margins = {}
+    # capacity is (total - a) + c: moving an entry off card 0, or moving one
+    # from card 1 onto card 2, always strictly improves it, so the climb
+    # drains card 0 to 1 first and then card 1 to 1, one entry per round,
+    # taking every round the cap allows to reach (1, 1, total - 2).
+    for a in range(1, total - 1):
+        for c in range(1, total - a):
+            b_ = total - a - c
+            if b_ < 1:
+                continue
+            score = (total - a) + c
+            margins[(a, b_, c)] = (score, score, score)
+    costs = {k: (1, 1, 1) for k in margins}
+    fake = _tabled_estimate(
+        margins, costs, base_ctx=8192, free=free, default_margin=1, default_cost=1
     )
-    assert got is not None
-    assert got.layers_per_card == (33, 48)
-    assert got.layers_per_card != (40, 41)
+    monkeypatch.setattr(balance, "estimate_memory", fake)
+    b = balance.balanced_split(
+        meta, 0, **_kwargs(free=free, **{"tensor-split": "4,36,1"})
+    )
+    assert b.layers_per_card == (1, 1, total - 2)
 
 
 def test_balanced_split_reaches_the_peak_of_a_mixed_cost_landscape():
@@ -595,6 +614,82 @@ def test_balanced_split_takes_the_best_neighbour_not_the_first_improving_one(
     assert got.layers_per_card == (3, 4, 2)
 
 
+def test_two_cards_skip_an_unknowable_candidate_and_use_the_best_of_the_rest(
+    monkeypatch,
+):
+    """A split whose estimate is unknowable is treated as absent, not as an
+    error: scoring every other two-card split still finds the best-scoring
+    one among them."""
+    meta = _meta(n_layers=8)
+    free = [16 * GIB, 12 * GIB]
+    margins = {
+        (5, 4): (10, 10),
+        (4, 5): (12, 12),
+        (6, 3): (9, 9),
+        (3, 6): (8, 8),
+        (2, 7): (20, 20),
+        (1, 8): (5, 5),
+        (7, 2): (4, 4),
+    }
+    costs = {k: (1, 1) for k in margins}
+    tabled = _tabled_estimate(
+        margins, costs, base_ctx=8192, free=free, default_margin=1, default_cost=1
+    )
+
+    def fake(meta, weights_bytes, *, settings, engine, **_kwargs):
+        if settings.get("tensor-split") == "2,7":
+            return None
+        return tabled(meta, weights_bytes, settings=settings, engine=engine, **_kwargs)
+
+    monkeypatch.setattr(balance, "estimate_memory", fake)
+    b = balance.balanced_split(meta, 0, **_kwargs(free=free, **{"tensor-split": "5,4"}))
+    assert b.layers_per_card == (4, 5)
+
+
+def test_three_cards_skip_an_unknowable_neighbour_and_use_the_best_of_the_rest(
+    monkeypatch,
+):
+    """A neighbour whose estimate is unknowable is treated as absent, not as
+    an error: the climb keeps evaluating the remaining neighbours in the
+    round and takes the best-scoring one among them."""
+    meta = _meta(n_layers=8)
+    free = [10_000_000, 10_000_000, 10_000_000]
+    margins = {
+        (3, 3, 3): (1000, 1000, 1000),
+        (2, 4, 3): (1001, 5000, 5000),
+        (3, 4, 2): (2000, 2000, 1500),
+    }
+    costs = {
+        (3, 3, 3): (10, 10, 10),
+        (2, 4, 3): (10, 10, 10),
+        (3, 4, 2): (10, 10, 10),
+    }
+    tabled = _tabled_estimate(
+        margins,
+        costs,
+        base_ctx=8192,
+        free=free,
+        default_margin=(-(10**9),) * 3,
+        default_cost=(1, 1, 1),
+    )
+
+    def fake(meta, weights_bytes, *, settings, engine, **_kwargs):
+        if settings.get("tensor-split") == "3,4,2":
+            return None
+        return tabled(meta, weights_bytes, settings=settings, engine=engine, **_kwargs)
+
+    monkeypatch.setattr(balance, "estimate_memory", fake)
+    got = balance.balanced_split(
+        meta,
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all", "tensor-split": "3,3,3"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=free,
+    )
+    assert got is not None
+    assert got.layers_per_card == (2, 4, 3)
+
+
 def test_balanced_split_rejects_a_move_that_only_ties_the_score(monkeypatch):
     """A candidate whose score exactly matches the current one is not
     accepted: the search keeps the profile's own split rather than marching
@@ -636,6 +731,50 @@ def test_balanced_split_rejects_a_move_that_only_ties_the_score(monkeypatch):
     assert got.layers_per_card == (18, 3)
 
 
+def test_three_cards_reject_a_move_that_only_ties_the_score(monkeypatch):
+    """On three cards, the climb also keeps the profile's own split rather
+    than taking a neighbour whose score exactly matches the current one."""
+    meta = _meta(n_layers=20)
+    free = [1_000_020_000, 1_000_010_000, 1_000_010_000]
+    margin = (2000, 1000, 1000)
+    cost = (20, 10, 10)
+    base_ctx = 8192
+
+    def fake(meta, weights_bytes, *, settings, engine, **_kwargs):
+        ctx = int(settings.get("ctx-size", base_ctx) or base_ctx)
+        cards = tuple(
+            CardEstimate(
+                weights=0,
+                kv=(free[i] - margin[i]) + max(0, ctx - base_ctx) * cost[i],
+                compute=0,
+                overhead=0,
+                state=0,
+            )
+            for i in range(len(free))
+        )
+        return MemoryEstimate(
+            cards=cards,
+            ram=RamEstimate(weights=0, kv=0, host=0),
+            ctx=ctx,
+            kv_upper_bound=False,
+        )
+
+    monkeypatch.setattr(balance, "estimate_memory", fake)
+    got = balance.balanced_split(
+        meta,
+        0,
+        settings={
+            "ctx-size": base_ctx,
+            "n-gpu-layers": "all",
+            "tensor-split": "10,7,4",
+        },
+        engine="llama.cpp",
+        free_bytes_per_gpu=free,
+    )
+    assert got is not None
+    assert got.layers_per_card == (10, 7, 4)
+
+
 def test_balanced_split_never_empties_a_card_even_when_the_score_would_improve(
     monkeypatch,
 ):
@@ -666,3 +805,44 @@ def test_balanced_split_never_empties_a_card_even_when_the_score_would_improve(
     )
     assert got is not None
     assert min(got.layers_per_card) >= 1
+
+
+def test_two_cards_return_the_global_best_across_two_peaks(monkeypatch):
+    """Scoring every two-card candidate reaches the higher of two peaks
+    even when the hill from the start split climbs to the lower one."""
+    meta = _meta(n_layers=8)
+    free = [16 * GIB, 12 * GIB]
+    # 8 block layers plus the output layer make 9 entries. capacities by
+    # counts: start (5,4)=10, its neighbours 12 and 9, then a dip at
+    # (3,6)=8 and the true peak at (2,7)=20 beyond it.
+    margins = {
+        (5, 4): (10, 10),
+        (4, 5): (12, 12),
+        (6, 3): (9, 9),
+        (3, 6): (8, 8),
+        (2, 7): (20, 20),
+        (1, 8): (5, 5),
+        (7, 2): (4, 4),
+    }
+    costs = {k: (1, 1) for k in margins}
+    fake = _tabled_estimate(
+        margins, costs, base_ctx=8192, free=free, default_margin=1, default_cost=1
+    )
+    monkeypatch.setattr(balance, "estimate_memory", fake)
+    b = balance.balanced_split(meta, 0, **_kwargs(free=free, **{"tensor-split": "5,4"}))
+    assert b.layers_per_card == (2, 7)
+
+
+def test_marginal_bytes_per_token_has_no_step_parameter():
+    """The step used to sample the far context is always STEP_TOKENS, not a
+    caller-supplied value."""
+    import inspect
+
+    assert "step" not in inspect.signature(balance.marginal_bytes_per_token).parameters
+
+
+def test_at_least_one_fills_each_empty_card_from_the_fullest():
+    """Every card that starts with no entries is given one, taken from
+    whichever card currently holds the most."""
+    assert balance._at_least_one((5, 0, 0)) == (3, 1, 1)
+    assert balance._at_least_one((2, 3)) == (2, 3)

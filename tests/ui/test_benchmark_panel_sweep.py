@@ -184,6 +184,46 @@ def test_reset_clears_the_sweep_table_and_apply(qtbot):
     assert panel._sweep_points == [] and panel._sweep_best_count is None
 
 
+def test_show_sweep_labels_the_stored_timestamp_and_clear_removes_it(qtbot):
+    panel = BenchmarkPanel()
+    qtbot.addWidget(panel)
+    panel.show_sweep({**_sweep(), "timestamp": "2026-09-07T12:00:00"}, 1)
+    assert "2026-09-07T12:00:00" in panel.sweep_stamp.text()
+    panel.clear_sweep()
+    assert panel.sweep_stamp.text() == ""
+
+
+def test_show_sweep_with_no_timestamp_leaves_the_stamp_blank(qtbot):
+    """The empty table shown while a fresh sweep starts carries no
+    timestamp, so the stamp stays blank instead of a bare 'stored'."""
+    panel = BenchmarkPanel()
+    qtbot.addWidget(panel)
+    panel.show_sweep({"points": []}, 1)
+    assert panel.sweep_stamp.text() == ""
+
+
+def test_show_sweep_with_stored_false_leaves_the_stamp_blank(qtbot):
+    """A cancelled sweep is shown but never written to disk, so its own
+    timestamp must not be labelled as a stored one."""
+    panel = BenchmarkPanel()
+    qtbot.addWidget(panel)
+    panel.show_sweep({**_sweep(), "timestamp": "2026-09-07T12:00:00"}, 1, stored=False)
+    assert panel.sweep_stamp.text() == ""
+
+
+def test_bad_prompt_sizes_do_not_emit_a_benchmark_run(qtbot):
+    """A prompt-size token that is not an int refuses the run silently: the
+    panel emits nothing rather than a run with a bad size."""
+    panel = BenchmarkPanel()
+    qtbot.addWidget(panel)
+    panel.set_benchmark_available(True)
+    panel.bench_sizes.setText("128, x")
+    got = []
+    panel.benchmark_run_requested.connect(got.append)
+    panel.bench_run_btn.click()
+    assert got == []
+
+
 def test_the_row_shown_is_the_last_of_equal_prompt_sizes(qtbot):
     """The table reads the same row best_point ranks on: tied prompt sizes
     resolve to the last one."""

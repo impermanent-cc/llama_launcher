@@ -4,10 +4,12 @@ off-thread) so the user can tune ctx/KV-quant until the model fits BEFORE
 ever clicking Launch.
 """
 
+import dataclasses
 import time
 
 import llama_launcher.services.gpu as _gpu
 import llama_launcher.ui.main_window as mw
+from llama_launcher.core import memory_fit
 from llama_launcher.core.gguf import GgufMeta, TensorInfo
 from llama_launcher.core.spec import Mount, Profile, Runtime
 from llama_launcher.services.gpu import GpuStat
@@ -425,13 +427,227 @@ def test_cached_meta_weights_invalidates_when_a_split_sibling_changes(
     )
     panel = main_window._configure_panel
     mounts = [Mount(host=str(tmp_path), container="/models", role="model")]
-    _meta1, weights1 = panel._cached_meta_weights(
+    _meta1, weights1 = panel.cached_meta_weights(
         "/models/m-00001-of-00002.gguf", mounts
     )
     assert weights1 == 30
 
     p2.write_bytes(b"b" * 50)  # replace part 2 with a bigger file
-    _meta2, weights2 = panel._cached_meta_weights(
+    _meta2, weights2 = panel.cached_meta_weights(
         "/models/m-00001-of-00002.gguf", mounts
     )
     assert weights2 == 60
+
+
+def test_router_pool_estimate_passes_gpu_working_and_the_overhead_is_added_once(
+    main_window, monkeypatch
+):
+    """Each router member contributes gpu_working (its total less its own
+    per-card overhead) to the pool sum; router_fit_summary then adds the
+    per-card overhead once per visible card rather than once per member."""
+    from llama_launcher.core import vram
+    from llama_launcher.core.spec import RouterMember
+    from llama_launcher.store import profiles as store
+
+    _patch_models_by_path(
+        monkeypatch, {"/mnt/models/a.gguf": 4, "/mnt/models/b.gguf": 6}
+    )
+    for name, path in (("A", "/models/a.gguf"), ("B", "/models/b.gguf")):
+        store.save_profile(
+            Profile(
+                name=name,
+                image="img",
+                model=path,
+                mounts=[Mount(host="/mnt/models", container="/models", role="model")],
+                settings={"ctx-size": 4096},
+            ),
+            main_window.router_base_dir(),
+        )
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    panel.mode_combo.setCurrentIndex(panel.mode_combo.findData("router"))
+    panel._add_member_item(RouterMember(profile="A"))
+    panel._add_member_item(RouterMember(profile="B"))
+    _seed_gpus(panel, [_gpu_stat(30000), _gpu_stat(30000)])
+
+    captured = {}
+    real_summary = vram.router_fit_summary
+
+    def _spy(member_estimates, **kw):
+        captured["member_estimates"] = list(member_estimates)
+        return real_summary(member_estimates, **kw)
+
+    monkeypatch.setattr(vram, "router_fit_summary", _spy)
+    panel._refresh_fit_line()
+
+    a_meta, a_weights = mw.model_info.read_model("/mnt/models/a.gguf")
+    b_meta, b_weights = mw.model_info.read_model("/mnt/models/b.gguf")
+    free = [30000 * _MIB, 30000 * _MIB]
+    a_est = vram.estimate_memory(
+        a_meta,
+        a_weights,
+        settings={"ctx-size": 4096},
+        engine="llama.cpp",
+        free_bytes_per_gpu=free,
+    )
+    b_est = vram.estimate_memory(
+        b_meta,
+        b_weights,
+        settings={"ctx-size": 4096},
+        engine="llama.cpp",
+        free_bytes_per_gpu=free,
+    )
+    assert sorted(captured["member_estimates"]) == sorted(
+        [a_est.gpu_working, b_est.gpu_working]
+    )
+    s = vram.router_fit_summary(
+        captured["member_estimates"], models_max=0, free_bytes_per_gpu=free
+    )
+    assert (
+        s.est_bytes
+        == a_est.gpu_working + b_est.gpu_working + 2 * vram.CARD_OVERHEAD_BYTES
+    )
+
+
+def test_one_render_costs_one_fit_report_and_a_profile_read_per_reader(
+    main_window, monkeypatch
+):
+    """A single _render_fit_line() call runs the balanced-search-bearing
+    fit_report exactly once, memoising the result for any listener the
+    render's own signal wakes. The form is read once by the render itself
+    and once by the sweep refresh that listener runs, two reads in all."""
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    _seed_gpus(panel, [_gpu_stat(30000)])
+    reports = []
+    real = memory_fit.fit_report
+    monkeypatch.setattr(
+        memory_fit, "fit_report", lambda *a, **k: reports.append(1) or real(*a, **k)
+    )
+    profiles = []
+    real_cp = panel.current_profile
+    monkeypatch.setattr(
+        panel, "current_profile", lambda: profiles.append(1) or real_cp()
+    )
+    panel._render_fit_line()
+    assert len(reports) == 1
+    assert len(profiles) == 2
+
+
+def test_one_render_costs_one_profile_read_even_when_the_profile_shortfalls(
+    main_window, monkeypatch
+):
+    """A render whose profile does not fit still costs exactly one fit_report
+    call and two current_profile reads: the sweep-prefill offload search that
+    a shortfall triggers reuses the render's own profile instead of reading
+    the form again."""
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    _seed_gpus(panel, [_gpu_stat(1024)])  # far too little free VRAM to fit
+    reports = []
+    real = memory_fit.fit_report
+    monkeypatch.setattr(
+        memory_fit, "fit_report", lambda *a, **k: reports.append(1) or real(*a, **k)
+    )
+    profiles = []
+    real_cp = panel.current_profile
+    monkeypatch.setattr(
+        panel, "current_profile", lambda: profiles.append(1) or real_cp()
+    )
+    panel._render_fit_line()
+    assert not panel._current_fit_report().fits
+    assert len(reports) == 1
+    assert len(profiles) == 2
+
+
+def test_the_memoised_report_is_dropped_when_the_form_changes(main_window, monkeypatch):
+    """The memoised FitReport stays identical across repeat reads until a
+    form edit schedules a refresh, which drops it."""
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    _seed_gpus(panel, [_gpu_stat(30000)])
+    panel._render_fit_line()
+    first = panel._current_fit_report()
+    assert panel._current_fit_report() is first
+    panel._widgets["ctx-size"].set_value(16384)
+    assert panel._current_fit_report() is not first
+
+
+def test_unmounted_draft_reaches_the_readout(main_window, monkeypatch):
+    """A draft model whose path lies under no configured mount produces the
+    dialog-level message in the readout's tooltip."""
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(
+        dataclasses.replace(_profile(4096), draft_model="/nowhere/d.gguf")
+    )
+    _seed_gpus(panel, [_gpu_stat(30000)])
+    panel._render_fit_line()
+    assert (
+        "Draft model /nowhere/d.gguf lies under no configured folder"
+        in panel.model_meta_label.toolTip()
+    )
+
+
+def test_an_empty_probe_renders_from_the_cache_within_the_ttl(main_window, monkeypatch):
+    """A node whose probe found no cards caches that empty reading like any
+    other: the debounced render serves it for the whole TTL instead of
+    spawning a fresh probe on every refresh."""
+    import llama_launcher.ui.panels.configure_panel as cp
+
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    _seed_gpus(panel, [], ram=None)
+    dispatched = []
+
+    class _Pool:
+        @staticmethod
+        def globalInstance():
+            return _Pool
+
+        @staticmethod
+        def start(runnable):
+            dispatched.append(runnable)
+
+    monkeypatch.setattr(cp, "QThreadPool", _Pool)
+    panel._refresh_fit_line()
+    panel._refresh_fit_line()
+    assert dispatched == []
+
+
+def test_the_off_thread_probe_lands_as_one_tuple_on_the_gui_thread(
+    main_window, monkeypatch
+):
+    """The pool thread writes the whole probe as a single tuple and the GUI
+    thread copies it into the cached fields, so a reader on the GUI thread
+    never pairs one node's cards with another node's key."""
+    import llama_launcher.ui.panels.configure_panel as cp
+    from llama_launcher.services import pool_preflight
+
+    _patch_model(monkeypatch)
+    panel = main_window._configure_panel
+    panel.load_profile(_profile(4096))
+    gpus = [_gpu_stat(30000)]
+    monkeypatch.setattr(_gpu, "query_gpus", lambda ssh_target="": gpus)
+    monkeypatch.setattr(
+        pool_preflight, "free_ram_bytes", lambda ssh_target="": 8 * 1024**3
+    )
+    panel._fit_gather_inflight = True
+
+    cp._FitGpusGather(panel, "me@10.0.0.2").run()  # the pool thread's write
+
+    assert panel._fit_probe_result[:3] == ("me@10.0.0.2", gpus, 8 * 1024**3)
+    assert panel._fit_gather_inflight is False
+    assert (panel._fit_gpus, panel._fit_gpus_ssh, panel._fit_ram) == (None, None, None)
+    assert panel.cached_probe("me@10.0.0.2") is None
+
+    panel._poll_fit_gather()  # the GUI thread's copy
+
+    assert panel._fit_gpus is gpus
+    assert panel._fit_gpus_ssh == "me@10.0.0.2"
+    assert panel._fit_ram == 8 * 1024**3
+    assert panel.cached_probe("me@10.0.0.2") == (gpus, 8 * 1024**3)

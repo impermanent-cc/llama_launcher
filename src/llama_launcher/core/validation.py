@@ -8,9 +8,10 @@ from .command_builder import (
     raw_arg_warnings,
     raw_flags,
     run_args_expose,
+    setting_emits,
 )
 from .router_preset import convert_raw_args
-from .settings_catalog import CATALOG, accepts
+from .settings_catalog import CATALOG
 from .spec import DEFAULT_PORT, Profile, member_model_id, profile_port
 from .vram import effective_ctx_size
 
@@ -449,25 +450,20 @@ _CATALOG_ORDER = {key: i for i, key in enumerate(CATALOG)}
 
 
 def _is_active(profile: Profile, key: str) -> bool:
-    """True when a setting will act on this launch: named in the raw args, or
-    set in the form to a value that does something on an engine that accepts
-    the flag. A False bool, a blank string and a zero count do nothing.
-
-    Deliberately not the whole emit rule in command_builder: it does not model
-    the load-mode suppression of no-mmap and mlock, nor the engine_value SKIP
-    that drops an enum left at its own default.
-    """
+    """True when a setting will act on this launch: named in the raw args,
+    or carried in the server argv by command_builder's rule with a value
+    that does something; an int count of zero does nothing."""
     setting = CATALOG[key]
     if setting.flag in raw_flags(profile.raw_args):
         return True
-    if not accepts(setting, profile.runtime.engine):
+    if not setting_emits(profile, key):
         return False
-    if key not in profile.settings:
-        return False
-    value = profile.settings[key]
-    if setting.type in ("bool", "int"):
-        return bool(value)
-    return bool(str(value).strip())
+    if setting.type == "int":
+        try:
+            return int(profile.settings[key]) != 0
+        except (TypeError, ValueError):
+            return True
+    return True
 
 
 def _validate_rpc(

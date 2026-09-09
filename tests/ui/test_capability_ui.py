@@ -160,6 +160,29 @@ def test_mtp_sibling_suggestion_fans_out_to_both_dots(qtbot, tmp_path):
     assert w._configure_panel.draft_model_edit.text() == "/models/m-mtp.gguf"
 
 
+def test_embedding_model_hides_the_n_cpu_ffn_dot(qtbot, tmp_path):
+    _write_plain_gguf(tmp_path / "m.gguf", arch="bert")
+    w = MainWindow()
+    qtbot.addWidget(w)
+    p = Profile(
+        name="t",
+        image="img",
+        runtime=Runtime(binary="podman", gpu_mode="cdi"),
+        mounts=[
+            Mount(host=str(tmp_path), container="/models", role="model", mode="ro")
+        ],
+        model="/models/m.gguf",
+        settings={"port": 8080},
+    )
+    w._configure_panel.load_profile(p)
+    # An embedding model recommends embeddings and leaves the offload knobs
+    # untouched (state "none": empty text, not muted).
+    embeddings_dot = w._configure_panel._widgets["embeddings"]._dot
+    assert embeddings_dot.text() == "\u25cf"
+    dot = w._configure_panel._widgets["n-cpu-ffn"]._dot
+    assert dot.text() == ""
+
+
 def test_no_model_hides_dots(qtbot):
     w = MainWindow()
     qtbot.addWidget(w)

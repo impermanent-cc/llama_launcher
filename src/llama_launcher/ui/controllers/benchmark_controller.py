@@ -166,6 +166,10 @@ class BenchmarkController:
         self._sweep_reason_shown = None
         # (profile, card count) the sweep table currently shows.
         self._sweep_shown = None
+        # The cancelled/failed message a finished sweep left, if any: cleared
+        # when the next sweep starts, re-applied after the thread-done
+        # refresh so that refresh's cleared status line does not erase it.
+        self._sweep_terminal_message = None
 
     def _resolve_benchmark_member(self, p: Profile, model_scope: str | None):
         """The child Profile for a router's loaded model, for build_snapshot().
@@ -387,7 +391,11 @@ class BenchmarkController:
             == "running"
         ):
             return "Stop the running instance first: the sweep uses the same port."
-        if not self._bench_cfg()["sizes"]:
+        sizes_text = self.window.benchmark_panel.bench_sizes.text()
+        sizes = core_sweep.parse_prompt_sizes(sizes_text)
+        if sizes is None:
+            return "Prompt sizes must be whole numbers separated by commas."
+        if not sizes:
             return "Set at least one prompt size in the benchmark row first."
         knob = self._sweep_knob()
         if knob in command_builder.raw_arg_values(p.raw_args):
@@ -426,7 +434,7 @@ class BenchmarkController:
             if not reason:
                 self.window.benchmark_panel.set_sweep_available(True)
         self._show_stored_sweep(p)
-        self.sweep_prefill()
+        self.sweep_prefill(profile=p)
 
     def _show_stored_sweep(self, p) -> None:
         """Repaint the sweep table from this profile's stored sweep, or empty
@@ -437,8 +445,7 @@ class BenchmarkController:
         count: the first render after a profile is loaded often has no card
         figures yet, and the one that brings them must widen the table.
         """
-        fit_kwargs = self.window._configure_panel._fit_report_kwargs()
-        n_cards = len(fit_kwargs["free_bytes_per_gpu"])
+        n_cards = len(self.window._configure_panel._fit_gpus or [])
         if (p.name, n_cards) == self._sweep_shown:
             return
         self._sweep_shown = (p.name, n_cards)
@@ -460,14 +467,17 @@ class BenchmarkController:
         meta = self.window._configure_panel._fit_meta
         return core_sweep.sweep_knob(meta is not None and memory_fit.is_moe(meta))
 
-    def sweep_prefill(self) -> None:
+    def sweep_prefill(self, *, profile=None) -> None:
         """Set the panel's knob label and from/to/step from the current
         estimate: from the smallest offload count that fits when the model
         does not fit on that knob, else 0.
 
         Writes the panel only when the computed (profile, knob, from, to,
         step) differs from the last one written, so a range the user typed
-        stands until the profile or its estimate moves it.
+        stands until the profile or its estimate moves it. `profile`, when
+        given, is used for the offload search instead of reading
+        current_profile() again: refresh_sweep already holds the profile it
+        rendered against.
         """
         panel = self.window._configure_panel
         name = panel._profile_name()
@@ -475,8 +485,9 @@ class BenchmarkController:
         report = panel._current_fit_report()
         smallest = None
         if report is not None and not report.fits:
-            kwargs = panel._fit_report_kwargs()
+            kwargs = panel._fit_report_kwargs(profile=profile)
             kwargs.pop("ram_available", None)
+            kwargs.pop("uncounted", None)
             meta = kwargs.pop("meta")
             weights = kwargs.pop("weights_bytes")
             found = memory_fit.smallest_fitting_offload(meta, weights, **kwargs)
@@ -492,10 +503,7 @@ class BenchmarkController:
         """The Benchmark panel's own prompt sizes, n-predict, warmup and
         repeats: every sweep point is benchmarked with them."""
         panel = self.window.benchmark_panel
-        try:
-            sizes = [int(s) for s in panel.bench_sizes.text().split(",") if s.strip()]
-        except ValueError:
-            sizes = []
+        sizes = core_sweep.parse_prompt_sizes(panel.bench_sizes.text()) or []
         return {
             "sizes": sizes,
             "n_predict": panel.bench_npredict.value(),
@@ -526,7 +534,7 @@ class BenchmarkController:
             )
             if est is None:
                 return (), 0
-            cards = tuple(c.weights + c.kv + c.state + c.compute for c in est.cards)
+            cards = tuple(c.working for c in est.cards)
             return cards, est.ram.total - est.ram.checkpoints
 
         return estimate_for
@@ -550,9 +558,14 @@ class BenchmarkController:
         self._sweep_planned = (p, knob)
         self._sweep_n_cards = len(fit_kwargs["free_bytes_per_gpu"])
         self._sweep_shown = (p.name, self._sweep_n_cards)
+        # A sweep starting drops the previous run's terminal message: it no
+        # longer describes the run now in progress.
+        self._sweep_terminal_message = None
         # Empty the table for the planned card count so the per-point updates
         # land under the right headers instead of the previous sweep's.
-        self.window.benchmark_panel.show_sweep({"points": []}, self._sweep_n_cards)
+        self.window.benchmark_panel.show_sweep(
+            {"points": []}, self._sweep_n_cards, stored=False
+        )
         kwargs = dict(
             knob=knob,
             counts=core_sweep.sweep_counts(
@@ -623,7 +636,17 @@ class BenchmarkController:
         thread.start()
 
     def _on_sweep_thread_done(self) -> None:
-        """Release the finished thread/worker so a later sweep can start."""
+        """Release the finished thread/worker so a later sweep can start,
+        then refresh the sweep offer so its status line does not keep
+        showing "already running" after the sweep that owned it ends.
+
+        The refresh writes an empty status line whenever a sweep is once
+        again allowed, which would erase a cancelled/failed message the
+        finished sweep just left; that message, if any, is re-written last,
+        but only where the current profile can be swept at all: re-writing
+        it over a refusal would re-enable Run sweep for a profile the
+        refresh just refused.
+        """
         worker, thread = self._sweep_worker, self._sweep_thread
         self._sweep_worker = None
         self._sweep_thread = None
@@ -631,6 +654,15 @@ class BenchmarkController:
             worker.deleteLater()
         if thread is not None:
             thread.deleteLater()
+        self._sweep_reason_shown = None
+        self.refresh_sweep()
+        # The refresh just wrote the current profile's reason here, so the
+        # re-application reads it rather than deriving it a second time.
+        reason = (self._sweep_reason_shown or (None, ""))[1]
+        if self._sweep_terminal_message and not reason:
+            self.window.benchmark_panel.set_sweep_available(
+                True, self._sweep_terminal_message
+            )
 
     def _on_sweep_cancel(self) -> None:
         if self._sweep_worker is not None:
@@ -643,27 +675,32 @@ class BenchmarkController:
         """Store the sweep beside the benchmark history, which it never
         touches, and repaint the sweep table from it.
 
-        A cancelled sweep, and one cancelled before its first point ran, is
-        shown but never stored: its points stop wherever the cancel landed, so
+        A cancelled sweep, and one that produced no point at all, is shown
+        but never stored: its points stop wherever the cancel landed, so
         saving it would replace a complete stored sweep with a truncated or
-        empty one.
+        empty one. The same condition decides the stored stamp and the
+        status line, so a table never carries a stamp for a sweep no file
+        holds.
         """
         cancelled = any(pt.status == "cancelled" for pt in sweep.points)
-        if not cancelled and sweep.points:
+        saved = not cancelled and bool(sweep.points)
+        if saved:
             sweep_store.save(default_base_dir(), sweep.profile, sweep)
         self._sweep_knob_used = sweep.knob
         self._sweep_result_profile = sweep.profile
         self._sweep_shown = (sweep.profile, self._sweep_n_cards)
         self._sweep_planned = None
         self.window.benchmark_panel.show_sweep(
-            dataclasses.asdict(sweep), self._sweep_n_cards
+            dataclasses.asdict(sweep), self._sweep_n_cards, stored=saved
         )
         self.window.benchmark_panel.set_sweep_running(False)
-        if cancelled:
+        if not saved:
+            self._sweep_terminal_message = "Sweep cancelled."
             self.window.benchmark_panel.set_sweep_available(True, "Sweep cancelled.")
 
     def _on_sweep_failed(self, msg: str) -> None:
         self._sweep_planned = None
+        self._sweep_terminal_message = f"Sweep failed: {msg}"
         self.window.benchmark_panel.set_sweep_available(True, f"Sweep failed: {msg}")
         self.window.benchmark_panel.set_sweep_running(False)
 

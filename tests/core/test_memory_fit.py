@@ -501,6 +501,62 @@ def test_a_shortfall_computes_the_split_without_being_asked():
     assert r.balanced is not None
 
 
+def test_three_cards_get_every_boundary_and_a_three_way_split():
+    """A balanced split across three cards carries three layer counts and
+    two boundaries, in both the dataclass and the JSON it feeds, and its
+    layer counts sum to the entries actually placed on cards."""
+    from llama_launcher.core import balance
+
+    settings = {"ctx-size": 8192, "n-gpu-layers": "all", "tensor-split": "10,1,1"}
+    meta = _meta(n_layers=12)
+    r = mf.fit_report(
+        meta,
+        0,
+        settings=settings,
+        engine="llama.cpp",
+        free_bytes_per_gpu=[3 * GIB, 3 * GIB, 3 * GIB],
+        ram_available=64 * GIB,
+    )
+    assert any(not c.fits for c in r.cards)
+    assert r.balanced is not None
+    entries = balance.gpu_entries(meta, settings=settings, engine="llama.cpp")
+    assert sum(r.balanced.layers_per_card) == len(entries)
+    assert len(r.balanced.layers_per_card) == 3
+    assert len(r.balanced.boundary_layers) == 2
+    js = mf.to_json(r)["balanced_split"]
+    assert len(js["layers_per_card"]) == 3 and len(js["boundary_layers"]) == 2
+
+
+def test_draft_and_projector_bytes_reach_the_balanced_search(monkeypatch):
+    """fit_report forwards draft_meta, draft_weights and mmproj_bytes to the
+    balanced search."""
+    from llama_launcher.core import balance
+
+    seen = {}
+    real = balance.balanced_split
+
+    def spy(*a, **k):
+        seen.update(k)
+        return real(*a, **k)
+
+    monkeypatch.setattr(mf._balance, "balanced_split", spy)
+    draft = _meta(n_layers=4)
+    mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+        draft_meta=draft,
+        draft_weights=123,
+        mmproj_bytes=456,
+    )
+    assert seen["draft_meta"] is draft
+    assert seen["draft_weights"] == 123
+    assert seen["mmproj_bytes"] == 456
+
+
 def test_shortfall_names_the_balanced_split_that_fits_on_its_own():
     """A card shortfall message names the balanced split, and its own
     fitting is stated, when the split resolves the shortfall by itself."""
@@ -518,12 +574,13 @@ def test_shortfall_names_the_balanced_split_that_fits_on_its_own():
     assert "--tensor-split " + r.balanced.value in text
     assert "fits every card" in text
     assert "replaces" not in text
+    assert f"card boundary at layer {r.balanced.boundary_layers[0]}" in text
 
 
 def test_offload_count_stays_at_the_profile_split_when_balanced_fits_alone():
-    """When the balanced split fits on its own, the offload count search
-    still runs at the profile's own split: the message names the count
-    found there and never claims no offload count fits."""
+    """When the balanced split differs from the profile's own resolved
+    placement and fits every card on its own, the message names the split
+    and carries no offload count clause at all."""
     meta = _meta(n_layers=16)
     kw = dict(
         settings={"ctx-size": 8192, "n-gpu-layers": "all"},
@@ -533,18 +590,10 @@ def test_offload_count_stays_at_the_profile_split_when_balanced_fits_alone():
     )
     r = mf.fit_report(meta, 0, **kw)
     assert r.balanced is not None and r.balanced.fits is True
-    at_profile = mf.smallest_fitting_offload(
-        meta,
-        0,
-        settings=kw["settings"],
-        engine="llama.cpp",
-        free_bytes_per_gpu=kw["free_bytes_per_gpu"],
-    )
-    assert at_profile is not None
-    key, value = at_profile
     text = " ".join(m.text for m in r.messages)
-    assert f"--{key} {value}" in text
+    assert "Balanced --tensor-split" in text
     assert "no offload count fits" not in text
+    assert "Smallest offload" not in text
 
 
 def test_offload_count_is_searched_at_the_balanced_split():
@@ -798,3 +847,207 @@ def test_balanced_split_not_named_when_it_matches_the_resolved_placement():
     text = " ".join(m.text for m in r.messages)
     assert "Balanced --tensor-split" not in text
     assert "keeps --fit from acting" not in text
+
+
+def test_a_shortfall_report_walks_the_tensor_table_once(monkeypatch):
+    """One fit_report, balanced search and offload searches included, walks
+    the model's tensor table once."""
+    from llama_launcher.core import placement as pl
+
+    calls = []
+    real = pl._compute_layer_sums
+
+    def counting(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(pl, "_compute_layer_sums", counting)
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all", "tensor-split": "15,1"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[3 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    assert any(not c.fits for c in r.cards)
+    assert r.balanced is not None
+    assert len(calls) == 1
+
+
+def test_a_fitting_balanced_split_carries_no_offload_count_clause():
+    """Where the named split fits on its own, the message neither says no
+    count fits nor names one."""
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all", "tensor-split": "15,1"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    text = " ".join(m.text for m in r.messages)
+    assert r.balanced.fits
+    assert "Balanced --tensor-split" in text
+    assert "no offload count fits" not in text
+    assert "Smallest offload" not in text
+
+
+def test_the_balanced_sentence_names_every_boundary():
+    """A three-card balanced split names both card boundaries in one
+    sentence."""
+    r = mf.fit_report(
+        _meta(n_layers=12),
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all", "tensor-split": "10,1,1"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[4 * GIB, 4 * GIB, 4 * GIB],
+        ram_available=64 * GIB,
+    )
+    assert r.balanced.fits
+    text = " ".join(m.text for m in r.messages)
+    a, b = r.balanced.boundary_layers
+    assert f"boundaries at layers {a}, {b}" in text
+
+
+def test_the_ik_moe_fit_branch_names_the_balanced_split():
+    """When ik_llama.cpp still leaves a card short after keeping every
+    layer's experts in RAM, and the balanced split differs from the
+    profile's own and fits, its sentence joins the shortfall message."""
+    r = mf.fit_report(
+        _meta(n_layers=16, moe=True),
+        0,
+        settings={
+            "ctx-size": 8192,
+            "n-gpu-layers": "all",
+            "tensor-split": "15,1",
+            "fit": "on",
+        },
+        engine="ik_llama.cpp",
+        free_bytes_per_gpu=[1.6 * GIB, 7.8 * GIB],
+        ram_available=64 * GIB,
+    )
+    text = " ".join(m.text for m in r.messages)
+    assert "experts" in text
+    assert "Balanced --tensor-split" in text
+    assert r.balanced is not None and r.balanced.fits
+
+
+def test_the_ik_moe_fit_branch_omits_a_balanced_split_that_does_not_fit():
+    """When the balanced split leaves a card short as well, the ik MoE
+    shortfall message carries no balanced-split sentence."""
+    r = mf.fit_report(
+        _meta(n_layers=16, moe=True),
+        0,
+        settings={
+            "ctx-size": 8192,
+            "n-gpu-layers": "all",
+            "tensor-split": "15,1",
+            "fit": "on",
+        },
+        engine="ik_llama.cpp",
+        free_bytes_per_gpu=[0.3 * GIB, 0.3 * GIB],
+        ram_available=64 * GIB,
+    )
+    text = " ".join(m.text for m in r.messages)
+    assert r.balanced is not None and not r.balanced.fits
+    assert "Balanced --tensor-split" not in text
+
+
+def test_override_suggestion_is_quoted_and_whole():
+    """The --override-tensor suggestion renders shell-quoted, in single
+    quotes for a plain value, as the whole value the search evaluated."""
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={
+            "ctx-size": 8192,
+            "n-gpu-layers": "all",
+            "override-tensor": r"attn_q=CPU",
+        },
+        engine="ik_llama.cpp",
+        free_bytes_per_gpu=[6 * GIB],
+        ram_available=64 * GIB,
+    )
+    text = " ".join(m.text for m in r.messages)
+    assert "--override-tensor 'attn_q=CPU,blk\\.(" in text
+    assert text.count("'") == 2
+
+
+def test_override_suggestion_survives_a_quote_in_the_value():
+    """An override-tensor value carrying a single quote of its own is
+    shell-quoted so shlex.split reads the flag's argument back unchanged."""
+    import shlex
+
+    value = "attn_q='CPU',blk.(0)=CPU"
+    text = mf._suggestion_text(("override-tensor", value))
+    flag = "--override-tensor "
+    shown = text[text.index(flag) + len(flag) :].rstrip(".")
+    assert shlex.split(shown) == [value]
+
+
+def test_small_shortfalls_render_in_mib():
+    """A shortfall under one gibibyte renders in whole MiB, never rounding
+    down to a misleading ~0.0 GiB."""
+    assert mf._amount(50 * MIB) == "~50 MiB"
+    assert mf._amount(1023 * MIB) == "~1023 MiB"
+    assert mf._amount(1023.7 * MIB) == "~1.0 GiB"
+    assert mf._amount(GIB) == "~1.0 GiB"
+    r = _report(_meta(n_layers=8), free=(4400 * MIB,))
+    text = " ".join(m.text for m in r.messages)
+    assert "by ~0.0 GiB" not in text
+    assert "MiB" in text
+
+
+def test_uncounted_files_produce_dialog_messages():
+    """A draft model or projector under no configured folder counts as zero
+    bytes and produces a dialog message naming the setting and the path."""
+    r = mf.fit_report(
+        _meta(n_layers=8),
+        0,
+        settings={"ctx-size": 4096},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[16 * GIB],
+        ram_available=64 * GIB,
+        uncounted=(("Draft model", "/models/d.gguf"), ("Projector", "/models/p.gguf")),
+    )
+    texts = [m.text for m in r.messages if m.dialog]
+    assert (
+        "Draft model /models/d.gguf lies under no configured folder; "
+        "its bytes are not counted." in texts
+    )
+    assert (
+        "Projector /models/p.gguf lies under no configured folder; "
+        "its bytes are not counted." in texts
+    )
+    assert mf.render_dialog(r) is not None
+
+
+def test_an_ik_dense_shortfall_report_shares_one_walk_across_the_search(monkeypatch):
+    """A dense model on the engine without --n-cpu-ffn, whose offload search
+    suggests an --override-tensor alternation instead, costs two tensor-table
+    walks for the whole report: one for the profile's own placement and one
+    shared by every count the search tries. The generated pattern is one the
+    placement's trailing-count reader recognises, so no count pays for a walk
+    of its own."""
+    from llama_launcher.core import placement as pl
+
+    calls = []
+    real = pl._compute_layer_sums
+
+    def counting(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(pl, "_compute_layer_sums", counting)
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192, "n-gpu-layers": "all", "tensor-split": "15,1"},
+        engine="ik_llama.cpp",
+        free_bytes_per_gpu=[3 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    assert any(not c.fits for c in r.cards)
+    assert "--override-tensor" in " ".join(m.text for m in r.messages)
+    assert len(calls) == 2

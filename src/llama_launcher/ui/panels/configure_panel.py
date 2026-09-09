@@ -32,7 +32,11 @@ from llama_launcher.core.capabilities import (
 )
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.nodes import LOCAL_NODE, connection_for
-from llama_launcher.core.pathmap import container_to_host, host_to_container
+from llama_launcher.core.pathmap import (
+    container_to_host,
+    host_to_container,
+    uncounted_paths,
+)
 from llama_launcher.core.settings_catalog import (
     CATALOG,
     IK_EXTRA_KV_CACHE_TYPES,
@@ -62,6 +66,7 @@ from llama_launcher.ui.widgets.collapsible import CollapsibleSection
 from llama_launcher.ui.widgets.harness_info_box import HarnessInfoBox
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox, NoWheelSpinBox
 from llama_launcher.ui.widgets.rpc_workers_table import RpcWorkersTable
+from llama_launcher.ui.widgets.setting_search import SearchEntry, SettingSearchBar
 from llama_launcher.ui.widgets.setting_widgets import (
     SuggestionDot,
     make_row_label,
@@ -147,10 +152,15 @@ _FIT_GPU_TTL = 5.0  # seconds a free-VRAM probe stays fresh for the fit readout
 
 
 class _FitGpusGather(QRunnable):
-    """Off-thread GPU probe for the live fit readout -- nvidia-smi is a
+    """Off-thread GPU probe for the live fit readout: nvidia-smi is a
     subprocess (an ssh round-trip for a remote node), so it must not run on
-    the UI thread. Same attribute-write + singleShot-poll delivery as
-    _CheckFitGather above."""
+    the UI thread. Same attribute-write plus singleShot-poll delivery as
+    _CheckFitGather above.
+
+    The whole reading (ssh target, cards, RAM, time) is published as ONE
+    tuple, and the in-flight flag is cleared last: the cached fields it
+    feeds are read together on the UI thread, so writing them one at a time
+    from here could pair one node's cards with another node's key."""
 
     def __init__(self, owner, ssh_target: str):
         super().__init__()
@@ -166,10 +176,7 @@ class _FitGpusGather(QRunnable):
             ram = pool_preflight.free_ram_bytes(self._ssh) or None
         except Exception:  # worker must never raise
             ram = None
-        self._owner._fit_ram = ram
-        self._owner._fit_gpus = gpus
-        self._owner._fit_gpus_ssh = self._ssh
-        self._owner._fit_gpus_at = time.monotonic()
+        self._owner._fit_probe_result = (self._ssh, gpus, ram, time.monotonic())
         self._owner._fit_gather_inflight = False
 
 
@@ -201,6 +208,12 @@ class ConfigurePanel(QWidget):
         self._fit_gpus = None
         self._fit_gpus_ssh = None
         self._fit_gpus_at = 0.0
+        # The off-thread probe's whole reading, published as one tuple and
+        # copied into the four fields above on the UI thread.
+        self._fit_probe_result = None
+        # Last render's FitReport, dropped by any edit or refresh so a
+        # caller between two debounced renders never sees a stale one.
+        self._fit_report_memo = None
         self._member_meta_cache: dict = {}  # host path -> (stamp, meta, weights)
         self._member_pairs_cache: tuple | None = None  # (at, members-key, pairs)
         self._fit_gather_inflight = False
@@ -542,7 +555,18 @@ class ConfigurePanel(QWidget):
         if "load-mode" in self._widgets:
             self._widgets["load-mode"].changed.connect(self._sync_load_mode_legacy)
         right_scroll.setWidget(right_inner)
-        body.addWidget(right_scroll, 2)
+        self._right_scroll = right_scroll
+        right_column = QWidget()
+        column = QVBoxLayout(right_column)
+        column.setContentsMargins(0, 0, 0, 0)
+        self.search_bar = SettingSearchBar()
+        column.addWidget(self.search_bar)
+        column.addWidget(right_scroll, 1)
+        body.addWidget(right_column, 2)
+        self._tinted = None
+        self.search_bar.jumped.connect(self._jump_to)
+        self.search_bar.cleared.connect(self._clear_jump_tint)
+        self.search_bar.set_entries(self._search_entries())
 
         # BOTTOM: command preview is config-only; wrap it in one container so
         # it can be hidden on the Monitor/Router/Benchmark tabs (see
@@ -650,6 +674,61 @@ class ConfigurePanel(QWidget):
                 form.setRowVisible(index, visible)
             if visible:
                 self._group_boxes[CATALOG[key].group].setVisible(True)
+        self.search_bar.refresh()
+
+    def _search_entries(self) -> list:
+        """Jump targets in visual order: each group title, then its rows in
+        catalog order, with visibility read live from the form."""
+        out = []
+        by_group: dict = {}
+        for key, setting in CATALOG.items():
+            by_group.setdefault(setting.group, []).append(key)
+        for group, box in self._group_boxes.items():
+            out.append(
+                SearchEntry(
+                    (group,), "group", group, box, lambda b=box: not b.isHidden()
+                )
+            )
+            for key in by_group[group]:
+                form, w = self._setting_rows[key]
+                label = form.labelForField(w)
+
+                def visible(f=form, widget=w):
+                    index = f.getWidgetPosition(widget)[0]
+                    return index >= 0 and f.isRowVisible(index)
+
+                setting = CATALOG[key]
+                out.append(
+                    SearchEntry(
+                        (setting.flag, *setting.aliases), "setting", key, label, visible
+                    )
+                )
+        return out
+
+    def _jump_to(self, entry) -> None:
+        """Scroll the settings box to `entry` and tint its label or group
+        title. The search bar's `cleared` signal, fired before every
+        `jumped`, is what removes an earlier tint; this assumes that has
+        already run."""
+        w = entry.widget
+        if entry.kind == "group":
+            w.setStyleSheet(
+                "QGroupBox::title { background-color: palette(highlight); "
+                "color: palette(highlighted-text); }"
+            )
+        else:
+            w.setStyleSheet(
+                "QLabel { background-color: palette(highlight); "
+                "color: palette(highlighted-text); border-radius: 3px; }"
+            )
+        self._tinted = w
+        self._right_scroll.ensureWidgetVisible(w, 0, 40)
+
+    def _clear_jump_tint(self) -> None:
+        """Remove the tint left by the previous search jump, if any."""
+        if self._tinted is not None:
+            self._tinted.setStyleSheet("")
+            self._tinted = None
 
     def _on_mode_changed(self, _index=0) -> None:
         is_router = self.mode_combo.currentData() == "router"
@@ -1281,10 +1360,35 @@ class ConfigurePanel(QWidget):
     # -- live fit readout -----------------------------------------------------
     def _schedule_fit_refresh(self) -> None:
         """Debounced: restarting the single-shot timer coalesces a burst of
-        field edits into one refresh 400ms after the last one."""
+        field edits into one refresh 400ms after the last one. The memoised
+        report is dropped immediately: a caller reading it before the timer
+        fires must not see an estimate for a form that has since changed."""
+        self._fit_report_memo = None
         self._fit_timer.start()
 
+    def cached_probe(self, ssh_target: str, *, allow_empty: bool = False):
+        """(gpus, ram) from the panel's own probe while it is keyed to
+        ssh_target, younger than _FIT_GPU_TTL and non-empty, else None. A
+        caller that gets None must probe for itself rather than trust a
+        stale, differently-targeted or failed reading: an empty gpus list
+        served as fresh would silently skip the preflight dialog.
+
+        `allow_empty` serves an empty card list as a fresh reading too, for
+        the render path alone: a node with no visible cards otherwise costs
+        a fresh probe per debounced refresh, since no cached result of its
+        would ever count as fresh."""
+        fresh = (
+            self._fit_gpus is not None
+            and (self._fit_gpus or allow_empty)
+            and self._fit_gpus_ssh == ssh_target
+            and time.monotonic() - self._fit_gpus_at < _FIT_GPU_TTL
+        )
+        if not fresh:
+            return None
+        return self._fit_gpus, self._fit_ram
+
     def _refresh_fit_line(self) -> None:
+        self._fit_report_memo = None
         if self._is_router_mode():
             if not self.members():
                 self._set_fit_line("")
@@ -1295,12 +1399,7 @@ class ConfigurePanel(QWidget):
         ssh = gpu_ssh_target(
             self.window.base_dir(), self.node_combo.currentData() or "local"
         )
-        fresh = (
-            self._fit_gpus is not None
-            and self._fit_gpus_ssh == ssh
-            and time.monotonic() - self._fit_gpus_at < _FIT_GPU_TTL
-        )
-        if fresh:
+        if self.cached_probe(ssh, allow_empty=True) is not None:
             self._render_fit_line()
             return
         if self._fit_gather_inflight:
@@ -1313,23 +1412,41 @@ class ConfigurePanel(QWidget):
         if self._fit_gather_inflight:
             QTimer.singleShot(150, self._poll_fit_gather)
             return
+        self._adopt_fit_probe()
         self._render_fit_line()
+
+    def _adopt_fit_probe(self) -> None:
+        """Copy the finished probe's tuple into the four cached fields, on
+        the UI thread and in one step, so cached_probe never reads a card
+        list and an ssh target from two different probes."""
+        result = self._fit_probe_result
+        if result is None:
+            return
+        self._fit_probe_result = None
+        ssh, gpus, ram, at = result
+        self._fit_gpus = gpus
+        self._fit_gpus_ssh = ssh
+        self._fit_ram = ram
+        self._fit_gpus_at = at
 
     def _is_router_mode(self) -> bool:
         return self.mode_combo.currentData() == "router"
 
     def _member_estimates(self) -> list[int]:
-        """Per-member GPU totals for the router fit readout, each derived
-        from that member profile's OWN model, mounts and settings: the
-        router itself has no model, and whatever lingers in the (disabled)
-        model field must not leak into the estimate."""
+        """Per-member GPU figures for the router fit readout, each member's
+        own weights, KV, compute and state summed across its cards without
+        the per-card overhead, which the router summary charges once per
+        card instead. Each figure is derived from that member profile's OWN
+        model, mounts and settings: the router itself has no model, and
+        whatever lingers in the (disabled) model field must not leak into
+        the estimate."""
         mib = 1024 * 1024
         free = [g.mem_free_mib * mib for g in (self._fit_gpus or [])]
         out: list[int] = []
         for _member, prof in self._member_pairs_cached():
             if not prof.model:
                 continue
-            meta, weights = self._cached_meta_weights(prof.model, prof.mounts)
+            meta, weights = self.cached_meta_weights(prof.model, prof.mounts)
             if meta is None and not weights:
                 continue
             est = vram.estimate_memory(
@@ -1341,7 +1458,7 @@ class ConfigurePanel(QWidget):
                 raw_args=prof.raw_args,
             )
             if est is not None:
-                out.append(est.gpu_total)
+                out.append(est.gpu_working)
             elif weights:
                 # No usable header (meta None or missing hyperparameters):
                 # the file size still stands for the member rather than
@@ -1349,7 +1466,7 @@ class ConfigurePanel(QWidget):
                 out.append(int(weights))
         return out
 
-    def _cached_meta_weights(self, container_path: str, mounts) -> tuple:
+    def cached_meta_weights(self, container_path: str, mounts) -> tuple:
         """(meta, weights_bytes) cached by a stamp over every part of a
         split model: model_info.split_parts(host), named from the file's
         own part-of-total suffix, each stat'd for (mtime_ns, size), a
@@ -1394,22 +1511,27 @@ class ConfigurePanel(QWidget):
             return f"all {s.models_total} members"
         return f"{s.models_counted} largest of {s.models_total} members"
 
-    def _fit_report_kwargs(self) -> dict:
-        """Every argument fit_report() takes for the form's own model, node
-        GPUs, RAM, draft and projector, read from the widgets. A caller that
-        estimates off the UI thread captures this first and drops
-        `ram_available`, which only fit_report takes."""
-        p = self.current_profile()
+    def _fit_report_kwargs(self, profile=None) -> dict:
+        """Every argument fit_report() takes for the given profile, or the
+        form's own current_profile() when none is given. The profile supplies
+        settings, engine, raw args, the draft and projector paths and the
+        node; mounts, model metadata and weights, GPUs and RAM come from the
+        panel's own cached and probed state, not from the profile. A caller
+        that estimates off the UI thread captures this first and drops
+        `ram_available`, which only fit_report takes. `uncounted` names the
+        draft model and the projector whose path lies under no configured
+        mount, in that order."""
+        p = profile if profile is not None else self.current_profile()
         mib = 1024 * 1024
         free = [g.mem_free_mib * mib for g in (self._fit_gpus or [])]
         mounts = self.mounts_panel.mounts()
         draft_meta, draft_weights = (
-            self._cached_meta_weights(p.draft_model, mounts)
+            self.cached_meta_weights(p.draft_model, mounts)
             if p.draft_model
             else (None, 0)
         )
         _mm_meta, mm_weights = (
-            self._cached_meta_weights(p.mmproj, mounts) if p.mmproj else (None, 0)
+            self.cached_meta_weights(p.mmproj, mounts) if p.mmproj else (None, 0)
         )
         return dict(
             meta=self._fit_meta,
@@ -1422,24 +1544,27 @@ class ConfigurePanel(QWidget):
             draft_meta=draft_meta,
             draft_weights=draft_weights or 0,
             mmproj_bytes=mm_weights or 0,
+            uncounted=uncounted_paths(p.draft_model, p.mmproj, mounts),
         )
 
     def _current_fit_report(self):
-        """The FitReport for the form's own model, node GPUs, RAM, draft and
-        projector: the single source the readout and its tooltip render
-        from."""
-        return memory_fit.fit_report(**self._fit_report_kwargs())
+        """The FitReport of the last render while the form is unchanged
+        since, else one computed and memoised now: the single source the
+        readout, its tooltip and any other caller between two renders read
+        from without paying for a second balanced search."""
+        if self._fit_report_memo is None:
+            self._fit_report_memo = memory_fit.fit_report(**self._fit_report_kwargs())
+        return self._fit_report_memo
 
     def _render_fit_line(self) -> None:
+        p = self.current_profile()
         if self._is_router_mode():
             mib = 1024 * 1024
             free = [g.mem_free_mib * mib for g in (self._fit_gpus or [])]
             gib = 1024**3
             s = vram.router_fit_summary(
                 self._member_estimates(),
-                models_max=self.current_profile().settings.get(
-                    "models-max", CATALOG["models-max"].default
-                ),
+                models_max=p.settings.get("models-max", CATALOG["models-max"].default),
                 free_bytes_per_gpu=free,
             )
             note = f" ({self._router_fit_note(s)})" if s is not None else ""
@@ -1459,7 +1584,8 @@ class ConfigurePanel(QWidget):
                 )
             self._set_fit_line(line)
             return
-        report = self._current_fit_report()
+        report = memory_fit.fit_report(**self._fit_report_kwargs(profile=p))
+        self._fit_report_memo = report
         if report is None:
             self._set_fit_line("")
             return
@@ -1492,6 +1618,7 @@ class ConfigurePanel(QWidget):
             self.current_profile().settings,
             mmproj_set=bool(self.mmproj_edit.text()),
             draft_set=bool(self.draft_model_edit.text()),
+            engine=self.engine_combo.currentData() or "llama.cpp",
         ):
             for k in list(sg.settings) + list(sg.fields):
                 sugg_by_key[k] = sg

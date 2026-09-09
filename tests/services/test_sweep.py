@@ -1,3 +1,5 @@
+import subprocess
+
 from llama_launcher.core.spec import Mount, Profile, Runtime
 from llama_launcher.core.sweep import Sweep
 from llama_launcher.services import sweep as svc
@@ -199,7 +201,7 @@ def test_run_sweep_cancel_records_the_point_as_cancelled():
 def test_wait_ready_gives_up_as_soon_as_the_container_is_not_running(monkeypatch):
     """A server that dies while loading costs one poll, not the whole ready
     timeout."""
-    monkeypatch.setattr(svc, "probe_health", lambda port, host="": "starting")
+    monkeypatch.setattr(svc.headless, "probe_health", lambda port, host="": "starting")
     probed = []
     monkeypatch.setattr(
         svc.runtime,
@@ -207,7 +209,7 @@ def test_wait_ready_gives_up_as_soon_as_the_container_is_not_running(monkeypatch
         lambda name, binary: probed.append((name, binary)) or "stopped",
     )
     slept = []
-    monkeypatch.setattr(svc.time, "sleep", slept.append)
+    monkeypatch.setattr(svc.headless.time, "sleep", slept.append)
 
     ready = svc._wait_ready(
         "127.0.0.1", 8080, 600, None, name="llama-p-sweep", binary="podman"
@@ -219,7 +221,7 @@ def test_wait_ready_gives_up_as_soon_as_the_container_is_not_running(monkeypatch
 
 
 def test_wait_ready_returns_true_on_a_ready_server(monkeypatch):
-    monkeypatch.setattr(svc, "probe_health", lambda port, host="": "ready")
+    monkeypatch.setattr(svc.headless, "probe_health", lambda port, host="": "ready")
     monkeypatch.setattr(svc.runtime, "container_state", lambda name, binary: "running")
     assert (
         svc._wait_ready("127.0.0.1", 8080, 600, None, name="c", binary="podman") is True
@@ -269,3 +271,39 @@ def test_run_sweep_unexpected_error_still_stops_the_container():
     assert sweep.points[0].status == "failed"
     assert sweep.points[0].error == "RuntimeError: boom"
     assert calls["stop"] == ["llama-p-sweep"]
+
+
+def test_read_log_joins_stdout_and_stderr_and_swallows_failures(monkeypatch):
+    seen = {}
+
+    def run(argv, **k):
+        seen["argv"] = argv
+        seen["kw"] = k
+        return subprocess.CompletedProcess(argv, 0, "out\n", "err\n")
+
+    monkeypatch.setattr(svc.subprocess, "run", run)
+    assert svc._read_log("llama-x-sweep", "podman") == "out\nerr\n"
+    assert seen["argv"][-2:] == ["logs", "llama-x-sweep"]
+    assert seen["kw"]["timeout"] == 30
+
+    monkeypatch.setattr(
+        svc.subprocess,
+        "run",
+        lambda *a, **k: (_ for _ in ()).throw(FileNotFoundError()),
+    )
+    assert svc._read_log("llama-x-sweep", "podman") == ""
+
+
+def test_stop_and_remove_runs_stop_then_rm_and_survives_a_timeout(monkeypatch):
+    calls = []
+
+    def run(argv, **k):
+        calls.append((argv[1], k["timeout"]))
+        if argv[1] == "stop":
+            raise subprocess.TimeoutExpired(argv, k["timeout"])
+        return subprocess.CompletedProcess(argv, 0, "", "")
+
+    monkeypatch.setattr(svc.subprocess, "run", run)
+    svc._stop_and_remove("llama-x-sweep", "podman", 7)
+    assert [c[0] for c in calls] == ["stop", "rm"]
+    assert all(c[1] == 37 for c in calls)

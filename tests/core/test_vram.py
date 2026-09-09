@@ -7,6 +7,7 @@ from llama_launcher.core.vram import (
     ENGINE_COMPUTE_SCALE,
     CardEstimate,
     RamEstimate,
+    attention_layer_mask,
     bytes_per_elem,
     compute_bytes,
     effective_ctx_size,
@@ -26,6 +27,7 @@ from llama_launcher.core.vram import (
 )
 
 MIB = 1024 * 1024
+GIB = 1024**3
 
 
 def _dense_meta(n_layers=4, tensors=True):
@@ -165,17 +167,22 @@ def test_pooled_fit_does_not_fit_is_negative_margin():
 def test_router_fit_sums_k_largest():
     from llama_launcher.core.vram import router_fit_summary
 
-    s = router_fit_summary([10, 30, 20], models_max=2, free_bytes_per_gpu=[60])
-    assert s.est_bytes == 50  # 30 + 20, the two largest
+    s = router_fit_summary(
+        [10 * GIB, 30 * GIB, 20 * GIB], models_max=2, free_bytes_per_gpu=[64 * GIB]
+    )
+    assert s.est_bytes == 50 * GIB + CARD_OVERHEAD_BYTES  # 30 + 20 GiB, the two largest
     assert s.models_counted == 2 and s.models_total == 3
-    assert s.fits and s.margin == 10
+    assert s.fits and s.margin == 64 * GIB - 50 * GIB - CARD_OVERHEAD_BYTES
 
 
 def test_router_fit_models_max_zero_is_unlimited():
     from llama_launcher.core.vram import router_fit_summary
 
-    s = router_fit_summary([10, 30, 20], models_max=0, free_bytes_per_gpu=[50])
-    assert s.est_bytes == 60 and not s.fits and s.models_counted == 3
+    s = router_fit_summary(
+        [10 * GIB, 30 * GIB, 20 * GIB], models_max=0, free_bytes_per_gpu=[50 * GIB]
+    )
+    assert s.est_bytes == 60 * GIB + CARD_OVERHEAD_BYTES
+    assert not s.fits and s.models_counted == 3
 
 
 def test_router_fit_none_when_unknowable():
@@ -184,6 +191,17 @@ def test_router_fit_none_when_unknowable():
     assert router_fit_summary([], models_max=4, free_bytes_per_gpu=[10**9]) is None
     assert router_fit_summary([0, 0], models_max=4, free_bytes_per_gpu=[10**9]) is None
     assert router_fit_summary([100], models_max=4, free_bytes_per_gpu=[]) is None
+
+
+def test_router_fit_charges_the_card_overhead_once():
+    """The per-card overhead is added once per visible card, not once per
+    member counted in the worst case."""
+    from llama_launcher.core.vram import router_fit_summary
+
+    s = router_fit_summary(
+        [10, 30, 20], models_max=2, free_bytes_per_gpu=[10 * GIB, 10 * GIB]
+    )
+    assert s.est_bytes == 50 + 2 * CARD_OVERHEAD_BYTES
 
 
 # -- effective_ctx_size: the context the KV estimate should use -------------
@@ -332,6 +350,22 @@ def test_estimate_memory_two_cards_split_and_kv_follow_layers():
     assert e.cards[0].kv == 3 * per_layer_kv and e.cards[1].kv == per_layer_kv
     assert e.cards[0].overhead == CARD_OVERHEAD_BYTES
     assert e.cards[1].overhead == CARD_OVERHEAD_BYTES
+
+
+def test_gpu_working_excludes_the_overhead():
+    """gpu_working is every card's total (weights, KV, compute and
+    recurrent state) less its own overhead, the figure a pool sum should
+    carry so the overhead is charged separately, once per visible card."""
+    m = _hybrid_meta()
+    e = estimate_memory(
+        m,
+        20 * 1024**3,
+        settings={"ctx-size": 131072, "n-gpu-layers": "all", "flash-attn": "on"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[15 * 1024**3, 12 * 1024**3],
+    )
+    assert e.gpu_total - e.gpu_working == 2 * CARD_OVERHEAD_BYTES
+    assert e.gpu_working == sum(c.weights + c.kv + c.compute + c.state for c in e.cards)
 
 
 def test_estimate_memory_override_promoted_layer_weights_are_not_lost():
@@ -726,6 +760,23 @@ def test_hybrid_kv_charged_to_kv_layers_only_with_header_head_size():
     assert est.kv_upper_bound is False
 
 
+def test_shared_kv_tail_attention_layer_carries_no_recurrent_state():
+    """A layer the shared-KV tail clears to no cache of its own, but that the
+    header's interval rule still marks as a full-attention layer, holds
+    neither a KV cache nor recurrent state: the recurrent mask is read from
+    the mask before the shared tail is cleared, not after."""
+    est = estimate_memory(
+        _hybrid_meta(shared_kv_layers=4),
+        20 * 1024**3,
+        settings={"ctx-size": 131072, "n-gpu-layers": "all", "flash-attn": "on"},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[15 * 1024**3, 12 * 1024**3],
+    )
+    state_total = sum(c.state for c in est.cards) + est.ram.state
+    per_slot = 30 * recurrent_state_bytes(_hybrid_meta())
+    assert state_total == 4 * per_slot
+
+
 def test_recurrent_state_scales_with_the_slot_count():
     """The recurrent state is sized once per request slot: --parallel 1 and
     the ik default of one slot carry a quarter of what llama.cpp's default
@@ -792,6 +843,14 @@ def test_card_and_ram_totals_include_state_and_checkpoints():
     assert c.total == 15
     r = RamEstimate(1, 2, 3, state=4, checkpoints=5)
     assert r.total == 15
+
+
+def test_card_working_is_the_total_less_the_card_overhead():
+    """A card's working figure is its weights, KV, compute and recurrent
+    state together, the card total less its own overhead."""
+    c = CardEstimate(11, 22, 33, 44, state=55)
+    assert c.working == 11 + 22 + 33 + 55
+    assert c.working == c.total - c.overhead
 
 
 def test_ctx_checkpoints_zero_charges_no_checkpoints():
@@ -1302,6 +1361,34 @@ def test_shared_kv_layers_own_no_cache():
     )
     kv, _ = _kv_of(_swa_meta(shared_kv_layers=2), {"ctx-size": 32768, "swa-full": True})
     assert kv == 4 * WINDOW_FULL
+
+
+def test_recurrent_mask_reads_the_attention_mask_before_the_shared_tail_is_cleared():
+    """The recurrent mask is built from the attention mask before the
+    shared-KV tail is cleared to False, so a shared-tail layer that carries
+    no cache of its own is still recurrent rather than neither."""
+    meta = SimpleNamespace(
+        n_layers=4,
+        n_head=8,
+        n_head_kv=8,
+        kv_layer_heads=[8, 0, 8, 8],
+        shared_kv_layers=1,
+        ssm_conv_kernel=4,
+        ssm_inner_size=64,
+        ssm_state_size=16,
+        ssm_group_count=1,
+        ff_layers=None,
+        full_attention_interval=None,
+        sliding_window_pattern=None,
+    )
+    kv = kv_layer_mask(meta, 4)
+    assert kv == (True, False, True, False)
+    assert recurrent_layer_mask(meta, attention_layer_mask(meta, 4)) == (
+        False,
+        True,
+        False,
+        False,
+    )
 
 
 def test_draft_model_follows_the_window_rule():

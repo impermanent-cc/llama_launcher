@@ -3,6 +3,8 @@ same per-card and RAM fit report the Configure tab's live readout uses and
 renders it as the abortable launch dialog's text.
 """
 
+import time
+
 import pytest
 
 import llama_launcher.ui.main_window as mw
@@ -10,6 +12,7 @@ from llama_launcher.core.gguf import GgufMeta, TensorInfo
 from llama_launcher.core.spec import Mount, Profile, Runtime
 from llama_launcher.services import pool_preflight
 from llama_launcher.services.gpu import GpuStat
+from llama_launcher.store.nodes import gpu_ssh_target
 
 _MIB = 1024 * 1024
 
@@ -273,3 +276,128 @@ def test_fit_report_for_rereads_the_main_model_every_call(main_window, monkeypat
     monkeypatch.setattr(mw.model_info, "read_model", _read_big)
     after = ctl._fit_report_for(p)
     assert after.cards[0].est > before.cards[0].est
+
+
+def _warm_panel(main_window, gpus, at=None):
+    """Pre-warm the panel's own probe cache for the local node, as the live
+    fit readout would leave it after a render."""
+    panel = main_window._configure_panel
+    panel._fit_gpus = gpus
+    panel._fit_gpus_ssh = gpu_ssh_target(main_window.base_dir(), "local")
+    panel._fit_gpus_at = time.monotonic() if at is None else at
+    panel._fit_ram = 64 * 1024**3
+
+
+def test_launch_preflight_reuses_a_fresh_panel_probe(main_window, monkeypatch):
+    """The launch preflight reuses the Configure panel's own GPU/RAM probe
+    while it is still fresh, rather than querying the node again."""
+    _patch_model(monkeypatch, n_layers=4)
+    main_window._configure_panel.load_profile(_profile(4096))
+    _warm_panel(main_window, [_gpu(2048)])
+
+    def never(ssh_target=""):
+        raise AssertionError("probed although the panel's probe was fresh")
+
+    monkeypatch.setattr(mw.gpu, "query_gpus", never)
+    text = main_window._launch.vram_check()
+    assert text is not None and "GPU0" in text
+
+
+def test_launch_preflight_probes_when_the_panel_cache_is_stale(
+    main_window, monkeypatch
+):
+    """The launch preflight probes afresh once the panel's cached probe has
+    aged past its TTL rather than trusting a stale reading."""
+    _patch_model(monkeypatch, n_layers=4)
+    main_window._configure_panel.load_profile(_profile(4096))
+    _warm_panel(main_window, [_gpu(2048)], at=0.0)
+    probed = []
+    monkeypatch.setattr(
+        mw.gpu, "query_gpus", lambda ssh_target="": probed.append(1) or [_gpu(2048)]
+    )
+    main_window._launch.vram_check()
+    assert probed == [1]
+
+
+def test_launch_preflight_probes_when_the_panel_cache_is_for_another_node(
+    main_window, monkeypatch
+):
+    """A fresh panel probe keyed to one node's ssh target is not reused for a
+    profile pinned to another node: the target must match, not merely be
+    recent."""
+    from llama_launcher.core.nodes import Node
+    from llama_launcher.store.nodes import add_node
+
+    add_node(
+        Node(name="box-b", kind="remote", connection="box-b", ssh_target="me@10.0.0.2"),
+        main_window.base_dir(),
+    )
+    main_window._configure_panel.reload_nodes()
+    _patch_model(monkeypatch, n_layers=4)
+    p = _profile(4096)
+    p.runtime.node = "box-b"
+    main_window._configure_panel.load_profile(p)
+    _warm_panel(main_window, [_gpu(2048)])  # fresh, but keyed to "local"
+    probed = []
+    monkeypatch.setattr(
+        mw.gpu,
+        "query_gpus",
+        lambda ssh_target="": probed.append(ssh_target) or [_gpu(2048)],
+    )
+    main_window._launch.vram_check()
+    assert probed == ["me@10.0.0.2"]
+
+
+def test_vram_check_names_an_unmounted_draft(main_window, monkeypatch):
+    """A draft model whose path lies under no configured mount produces the
+    dialog-level message in the launch preflight's own text."""
+    _patch_model(monkeypatch, n_layers=4)
+    p = _profile(4096)
+    p.draft_model = "/nowhere/d.gguf"
+    main_window._configure_panel.load_profile(p)
+    _warm_panel(main_window, [_gpu(30000)])
+    text = main_window._launch.vram_check()
+    assert (
+        text is not None
+        and "Draft model /nowhere/d.gguf lies under no configured folder" in text
+    )
+
+
+def test_launch_preflight_reprobes_after_an_empty_probe(main_window, monkeypatch):
+    """A panel probe that came back with no cards is never served as fresh:
+    an empty reading would otherwise silently skip the preflight dialog."""
+    _patch_model(monkeypatch, n_layers=4)
+    main_window._configure_panel.load_profile(_profile(4096))
+    _warm_panel(main_window, [])
+    probed = []
+    monkeypatch.setattr(
+        mw.gpu, "query_gpus", lambda ssh_target="": probed.append(1) or [_gpu(2048)]
+    )
+    main_window._launch.vram_check()
+    assert probed == [1]
+
+
+def test_launch_preflight_reads_ram_when_the_reused_probe_has_none(
+    main_window, monkeypatch
+):
+    """A reused panel probe whose RAM reading failed does not carry that
+    gap into the report: the preflight reads free RAM afresh, so the
+    dialog still judges the RAM side."""
+    _patch_model(monkeypatch, n_layers=4)
+    main_window._configure_panel.load_profile(_profile(4096))
+    _warm_panel(main_window, [_gpu(2048)])
+    main_window._configure_panel._fit_ram = None
+    asked = []
+    monkeypatch.setattr(
+        pool_preflight,
+        "free_ram_bytes",
+        lambda ssh_target="": asked.append(ssh_target) or 64 * 1024**3,
+    )
+
+    def never(ssh_target=""):
+        raise AssertionError("probed although the panel's probe was fresh")
+
+    monkeypatch.setattr(mw.gpu, "query_gpus", never)
+    text = main_window._launch.vram_check()
+    assert asked == [""]
+    assert text is not None and "RAM" in text

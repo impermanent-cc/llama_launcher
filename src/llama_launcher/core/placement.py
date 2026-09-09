@@ -176,7 +176,7 @@ def _layer_of(name: str, n_layers: int):
     return None
 
 
-def place(
+def _place_walk(
     tensors, n_layers, *, devices, rules, overrides, weights_fallback=0
 ) -> Placement:
     """Bytes per layer on a card and in RAM. A tensor starts on whichever
@@ -261,6 +261,313 @@ def place(
         input_cpu,
         tuple(devices),
     )
+
+
+@dataclass(frozen=True)
+class LayerSums:
+    """Per-layer byte sums of one tensor table under fixed devices, whole
+    CPU rules and overrides, split by whether one counted rule's regex
+    matches the tensor, so the placement at any count is a sum over
+    layers. `counted_gpu` and `counted_cpu` are where the counted bytes
+    sit when the rule leaves them alone; the rule moves their total to
+    RAM on every layer below its count."""
+
+    n_layers: int
+    devices: tuple
+    other_gpu: tuple
+    other_cpu: tuple
+    counted_gpu: tuple
+    counted_cpu: tuple
+    output_gpu: int
+    output_cpu: int
+    input_cpu: int
+
+
+_SUMS_MEMO: dict = {}
+_SUMS_MEMO_LIMIT = 64
+_FAMILY_MEMO: dict = {}
+
+
+def _compute_layer_sums(
+    tensors,
+    n_layers,
+    *,
+    devices,
+    whole_rules,
+    overrides,
+    counted_regex,
+    after_overrides,
+    weights_fallback=0,
+) -> LayerSums:
+    """The per-layer sums a single walk of the tensor table produces for
+    fixed devices, whole CPU rules and overrides, with bytes the counted
+    rule's regex would move split out from every other tensor's bytes."""
+    n_layers = int(n_layers)
+    other_gpu = [0] * n_layers
+    other_cpu = [0] * n_layers
+    counted_gpu = [0] * n_layers
+    counted_cpu = [0] * n_layers
+    output_gpu = output_cpu = input_cpu = 0
+    if not tensors:
+        if any(devices):
+            output_gpu = int(weights_fallback)
+        else:
+            output_cpu = int(weights_fallback)
+        return LayerSums(
+            n_layers,
+            tuple(devices),
+            tuple(other_gpu),
+            tuple(other_cpu),
+            tuple(counted_gpu),
+            tuple(counted_cpu),
+            output_gpu,
+            output_cpu,
+            input_cpu,
+        )
+    compiled_whole = [re.compile(r.regex) for r in whole_rules]
+    counted_rx = re.compile(counted_regex) if counted_regex else None
+    compiled_overrides = []
+    for p, to_cpu in overrides:
+        try:
+            compiled_overrides.append((re.compile(p), to_cpu))
+        except re.error:
+            continue
+    tensor_names = {t.name for t in tensors}
+    tied_embeddings = "output.weight" not in tensor_names
+    for t in tensors:
+        il = _layer_of(t.name, n_layers)
+        if il is None:
+            input_cpu += t.nbytes
+            if tied_embeddings and t.name == "token_embd.weight":
+                if devices[n_layers]:
+                    output_gpu += t.nbytes
+                else:
+                    output_cpu += t.nbytes
+            continue
+        on_gpu = bool(devices[il])
+        cpu_claimed = on_gpu and any(rx.search(t.name) for rx in compiled_whole)
+        if cpu_claimed:
+            on_gpu = False
+        override_hit = False
+        if not cpu_claimed:
+            for rx, to_cpu in compiled_overrides:
+                if rx.search(t.name):
+                    on_gpu = not to_cpu
+                    override_hit = True
+                    break
+        counted = (
+            counted_rx is not None
+            and il < n_layers
+            and bool(devices[il])
+            and not cpu_claimed
+            and counted_rx.search(t.name) is not None
+            and not (after_overrides and override_hit)
+        )
+        if il == n_layers:
+            if on_gpu:
+                output_gpu += t.nbytes
+            else:
+                output_cpu += t.nbytes
+        elif counted:
+            if on_gpu:
+                counted_gpu[il] += t.nbytes
+            else:
+                counted_cpu[il] += t.nbytes
+        elif on_gpu:
+            other_gpu[il] += t.nbytes
+        else:
+            other_cpu[il] += t.nbytes
+    return LayerSums(
+        n_layers,
+        tuple(devices),
+        tuple(other_gpu),
+        tuple(other_cpu),
+        tuple(counted_gpu),
+        tuple(counted_cpu),
+        output_gpu,
+        output_cpu,
+        input_cpu,
+    )
+
+
+def layer_sums(
+    tensors,
+    n_layers,
+    *,
+    devices,
+    whole_rules,
+    overrides,
+    counted_regex,
+    after_overrides,
+    weights_fallback=0,
+) -> LayerSums:
+    """The sums of `_compute_layer_sums`, memoised on the table's identity
+    and every other input, so one walk serves every count and every
+    tensor split; the memo keeps a reference to the table so its identity
+    cannot be reused while the entry lives, and empties itself past
+    _SUMS_MEMO_LIMIT entries. A table passed here must not be mutated in
+    place afterwards, since a later call keys on the same identity and
+    would return sums computed before the mutation."""
+    key = (
+        id(tensors),
+        int(n_layers),
+        tuple(devices),
+        tuple(whole_rules),
+        tuple(overrides),
+        counted_regex,
+        bool(after_overrides),
+        int(weights_fallback),
+    )
+    hit = _SUMS_MEMO.get(key)
+    if hit is not None:
+        return hit[1]
+    if len(_SUMS_MEMO) >= _SUMS_MEMO_LIMIT:
+        _SUMS_MEMO.clear()
+        _FAMILY_MEMO.clear()
+    sums = _compute_layer_sums(
+        tensors,
+        n_layers,
+        devices=devices,
+        whole_rules=whole_rules,
+        overrides=overrides,
+        counted_regex=counted_regex,
+        after_overrides=after_overrides,
+        weights_fallback=weights_fallback,
+    )
+    _SUMS_MEMO[key] = (tensors, sums)
+    return sums
+
+
+def _compute_family(tensors) -> str:
+    """The family regex a table's own tensor names carry: an expert
+    suffix on any tensor name selects EXPS_REGEX, else DENSE_FFN_REGEX."""
+    return EXPS_REGEX if any("_exps" in t.name for t in tensors) else DENSE_FFN_REGEX
+
+
+def _counted_family(tensors) -> str:
+    """The family of `_compute_family`, memoised on the table's identity,
+    so every placement with no active count on the same table shares one
+    name scan instead of repeating it."""
+    hit = _FAMILY_MEMO.get(id(tensors))
+    if hit is not None:
+        return hit[1]
+    family = _compute_family(tensors)
+    if len(_FAMILY_MEMO) >= _SUMS_MEMO_LIMIT:
+        _FAMILY_MEMO.clear()
+    _FAMILY_MEMO[id(tensors)] = (tensors, family)
+    return family
+
+
+def place_from_sums(sums: LayerSums, count: int) -> Placement:
+    """The placement at one count of the counted rule: every layer below
+    the count sends its counted bytes to RAM, every other layer keeps them
+    where the overrides put them."""
+    n = max(0, int(count))
+    layer_gpu = tuple(
+        sums.other_gpu[il] + (0 if il < n else sums.counted_gpu[il])
+        for il in range(sums.n_layers)
+    )
+    layer_cpu = tuple(
+        sums.other_cpu[il]
+        + (
+            sums.counted_gpu[il] + sums.counted_cpu[il]
+            if il < n
+            else sums.counted_cpu[il]
+        )
+        for il in range(sums.n_layers)
+    )
+    return Placement(
+        sums.n_layers,
+        layer_gpu,
+        layer_cpu,
+        sums.output_gpu,
+        sums.output_cpu,
+        sums.input_cpu,
+        sums.devices,
+    )
+
+
+_COUNT_OVERRIDE_RE = re.compile(
+    r"blk\\\.\((?P<layers>(?:\d+(?:\|\d+)*)?)\)(?P<rest>.*)"
+)
+
+
+def _trailing_count_override(overrides):
+    """(count, regex) when the last override entry is the offload search's
+    own contiguous alternation of layers 0 to count minus one over a known
+    family regex with a CPU target, else None."""
+    if not overrides:
+        return None
+    pattern, to_cpu = overrides[-1]
+    if not to_cpu:
+        return None
+    m = _COUNT_OVERRIDE_RE.fullmatch(pattern)
+    if m is None or m.group("rest") not in (DENSE_FFN_REGEX, EXPS_REGEX):
+        return None
+    layers = [int(x) for x in m.group("layers").split("|")] if m.group("layers") else []
+    if layers != list(range(len(layers))):
+        return None
+    return len(layers), m.group("rest")
+
+
+def place(
+    tensors, n_layers, *, devices, rules, overrides, weights_fallback=0
+) -> Placement:
+    """Bytes per layer on a card and in RAM. A tensor starts on whichever
+    side --n-gpu-layers put its layer on; on a card, a CPU rule can still
+    move it to RAM, and that claim is final. Every tensor a CPU rule did
+    not claim, whether it started on a card or in RAM, is then checked
+    against --override-tensor in order, and the first match decides: a
+    CPU target means RAM, any other target means a card. Input tensors
+    (token embeddings and any other tensor outside a block) stay in RAM.
+    When the table has no output.weight, the model ties its output matrix
+    to token_embd.weight, so those bytes also count at the output layer's
+    device, on top of their input-layer count in RAM. An override pattern
+    the regex engine rejects is dropped rather than raised. With no tensor
+    table, `weights_fallback` bytes stand for the whole model and go to a
+    card whenever any layer index, block or output, is on one, since that
+    means some offload happened; otherwise they go to RAM.
+
+    With at most one counted CPU rule, or the offload search's own
+    trailing --override-tensor entry standing for one, the result is
+    priced from the memoised per-layer sums shared by every count and
+    every tensor split of the same model and settings; two counted rules
+    walk the table directly, since a walk is the only way two independent
+    counts interact tensor by tensor. With no active count, the sums
+    still split on the table's own expert or dense FFN family at count
+    zero, which moves nothing, so the same memo entry serves a later
+    counted rule against that family without a second walk."""
+    counted = [r for r in rules if r.max_layer is not None]
+    whole = [r for r in rules if r.max_layer is None]
+    tail = _trailing_count_override(overrides) if not counted else None
+    if len(counted) > 1:
+        return _place_walk(
+            tensors,
+            n_layers,
+            devices=devices,
+            rules=rules,
+            overrides=overrides,
+            weights_fallback=weights_fallback,
+        )
+    if counted:
+        count, regex, after = counted[0].max_layer, counted[0].regex, False
+    elif tail is not None:
+        count, regex, after = tail[0], tail[1], True
+        overrides = list(overrides)[:-1]
+    else:
+        count, after = 0, False
+        regex = _counted_family(tensors)
+    sums = layer_sums(
+        tensors,
+        n_layers,
+        devices=devices,
+        whole_rules=whole,
+        overrides=overrides,
+        counted_regex=regex,
+        after_overrides=after,
+        weights_fallback=weights_fallback,
+    )
+    return place_from_sums(sums, count)
 
 
 def split_fractions(tensor_split, free_per_card, n_cards: int) -> list:

@@ -2,124 +2,28 @@
 
 ## Current phase
 
-Idle: no cycle open. The last cycle, feat/tensor-split-rebalance, landed on
-2026-09-07: the memory estimate computes a capacity-balanced
-`--tensor-split` and offers it, in `--estimate --json` always and in a card
-shortfall message, without changing anything about what the estimate
-assumes. SPEC.md 2.33 and 2.34 carry the rules and section 4 carries the
-new out-of-scope bullet. Next: the owner smoke below decides whether the
-run becomes a seventh calibration record.
+Idle: no cycle open. The last cycle, feat/config-jump-bar-and-cleanup,
+landed on 2026-09-08: a search and jump-to bar on the Configure tab, the
+memory estimate priced from one tensor-table walk per render, the balanced
+split scored exhaustively on two cards, and thirty-one open items closed.
+Next: the owner smokes below, then grill the mounted-but-missing file gap of
+SPEC 2.35 or pick the next ROADMAP item.
 
 ## Open items
 
-- [ ] Where no offload count fits at the profile's own split but the named
-      balanced split fits on its own, the shortfall message pairs "no
-      offload count fits; lower the context or the KV cache type" with a
-      split that already solves it. Both sentences are true, the advice is
-      stale: seven such states in a 360 case sweep.
-- [ ] The ik_llama.cpp fit-on MoE branch emits a card shortfall message
-      that names no balanced split, although FitReport.balanced and the
-      JSON carry one for the same profile.
-- [ ] The balanced-split sentence names only the first boundary layer, so
-      on three or more cards it describes one boundary of several; no test
-      exercises fit_report with three cards.
-- [ ] balance.marginal_bytes_per_token's step parameter is passed by no
-      caller or test, and _at_least_one's len(out) > total guard is
-      unreachable from its only caller.
-- [ ] No test pins that draft_meta, draft_weights and mmproj_bytes reach
-      the balanced search: dropping them from the fit_report call would
-      break nothing.
-- [ ] One debounced render runs the balanced search twice on a shortfall.
-      configure_panel's _set_fit_line emits fit_rendered, main_window wires
-      it to benchmark_controller.refresh_sweep, and its sweep_prefill calls
-      panel._current_fit_report() again: two fit_report calls, two
-      searches, twelve estimate_memory calls.
-- [ ] balance.balanced_split reaches the highest-scoring candidate on two
-      cards with a single-peaked capacity curve, and can stop at a lower
-      peak on three or more cards, on a curve with more than one peak, or
-      where the best candidate lies more than 32 moves from the start
-      (SPEC 2.33 as written).
-- [ ] validation._is_active re-derives command_builder's emit rule rather
-      than calling it, and does not model the load-mode suppression of
-      no-mmap and mlock or the engine_value SKIP that drops an enum left at
-      its default. Its docstring says so. The webui pair is the SKIP case and
-      is masked today only by the engine mismatch.
-- [ ] _is_active reads an int-typed setting carrying the string "0" as
-      active, which contradicts its own "a zero count does nothing".
-      Hand-edited profile JSON only.
-- [ ] capabilities._sug_ctx is the last context reader still on raw
-      ctx-size, so a profile using --kv-unified-per-slot past the model's
-      trained context gets no context suggestion.
-- [ ] _rel_moe now decides a dense-only tier too, so its name no longer
-      covers what it returns; and an embedding model, being dense, shows a
-      RECOMMENDED dot on n-cpu-ffn. Spec-conformant, not useful.
-- [ ] configure_panel calls self.current_profile() more than once per
-      debounced render (once in _render_fit_line and again inside
-      _current_fit_report).
-- [ ] fit_report runs on the UI thread per debounced edit and costs about
-      0.7 s on a model with tens of thousands of tensors (the suggestion
-      bisection re-places every tensor up to eight times); cache the
-      placement per tensor table and settings, or move the render off
-      thread. A shortfall now also runs the balanced search and two offload
-      bisections: measured 0.077 s stubbed against 0.443 s on a 32k-tensor
-      table.
-- [ ] The launch click probes the GPUs and RAM synchronously on the UI
-      thread (two ssh round trips on a remote node, up to ten seconds
-      frozen); the Configure panel's off-thread gather with its TTL cache
-      could serve the preflight instead.
 - [ ] --device is not modelled: every visible card is counted and gets the
       per-card overhead even when the launch excludes it (VRAM.md, known
       limits).
-- [ ] The suggested --override-tensor value in a shortfall message is
-      unquoted and, if pasted, replaces rather than extends an existing
-      override; a shortfall under 100 MiB renders as "~0.0 GiB".
-- [ ] A draft model or projector under no mount counts as zero bytes in the
-      estimate with no note; --estimate exits 0 when only RAM is over
-      budget.
 - [ ] ik_llama.cpp layer mode fills cards by cumulative bytes rather than
       layer index, so per-card weights drift on uneven (cpu-moe) layers;
       placement.distribute's engine parameter is unused.
-- [ ] Router readout sums each member's gpu_total, so every member adds the
-      per-card overhead and its compute buffer; visibly inflated for four or
-      more members.
 - [ ] Split-model parts hardlinked under two names with a disagreeing
       split.count key count twice (malformed layout only); the Configure
       cache stamps only the first part.
-- [ ] tests/core/test_purity.py's enhancement-module test is a strict
-      subset of the whole-core scan.
-- [ ] Three LaunchController calls into the panel's private
-      _cached_meta_weights; promote it to a public method.
-- [ ] No test asserts that an engine-gated build_catalog option carries a
-      tooltip.
-- [ ] video-timestamp-interval takes a minimum of 0 and nothing here
-      establishes what upstream does with 0.
 - [ ] src/llama_launcher/ui/widgets/setting_widgets.py:147 carries a
       doubled-hyphen prose separator and narrates history in a comment; one
       for the documentation cycle's prose sweep, along with RPC.md's
       non-ASCII at lines 143 and 163.
-- [ ] core.sweep.parse_load_log drops an "output buffer" line whose device
-      is a card, and knows no "RS buffer size" kind, so a hybrid or SSM
-      model's measured column reads short (RS is on the ROADMAP with the
-      placement sweep).
-- [ ] The Benchmark panel's reset() leaves the previous profile's sweep
-      table on screen, and sweep_store.load has no production caller: a
-      profile's stored sweep is never shown again after a restart.
-- [ ] services.sweep._wait_ready duplicates headless.wait_ready minus the
-      cancel flag and never probes at timeout 0; _read_log and
-      _stop_and_remove have no test through a fake subprocess.run, and the
-      QThread and cancel paths are covered by the owner smoke only.
-- [ ] No refresh_sweep after a sweep ends, so a fit render during a run can
-      leave "A benchmark or sweep is already running." on the status line;
-      the prompt-sizes parse is duplicated between panel and controller.
-- [ ] tests: sweep_store tests lock neither the 0600 mode, the sweeps/
-      parent nor that a second save replaces the first;
-      test_sweep_counts_inclusive_clamped_and_deduped names a dedupe that
-      does not exist; the sweep controller tests patch away
-      smallest_fitting_offload so the kwargs plumbing is unexercised.
-- [ ] The sweep prefill is memoized on its computed values, so a typed
-      range survives a switch to a profile with the identical computed
-      range, and a start-path refusal ("same port") stays on the status
-      line until the availability reason itself changes.
 - [ ] The RAM estimate does not model llama.cpp's CPU_REPACK buffer: on a
       CPU-only launch the server keeps a repacked second copy of the
       weights it runs on the CPU (1.2 GiB beside the 2.5 GiB mmap of the
@@ -128,9 +32,6 @@ run becomes a seventh calibration record.
 - [ ] The host multiplier in COMPUTE_TERMS also scales the attention-scores
       term, which no calibration record covers since every record ran with
       flash attention on.
-- [ ] scripts/fit_compute_terms.py's search() computes the best_effort point
-      on every grid combination even after a feasible one is found, so the
-      full grid runs regardless of how early the search succeeds.
 - [ ] The checkpoints term charges the --ctx-checkpoints maximum (32 by
       default) times the recurrent state per slot to RAM, although the
       server creates checkpoints on demand; no log line measures the term.
@@ -161,21 +62,10 @@ run becomes a seventh calibration record.
       (262144 x 512 x 2 bytes = 256 MiB), while the compute formula prices
       every activation in f32; the fitted logits coefficient absorbs the
       factor rather than the formula naming the width.
-- [ ] calibration_records.py declares output_card in its docstring but
-      nothing in the repository reads it; either the compute assertion uses
-      it or the key goes.
-- [ ] test_calibration.layer_kv_bytes prices a card's KV slack at the
-      full-attention head size, so on a sliding-window record the per-card
-      band is about twice the largest real layer and only the summed 1.25
-      check binds.
 - [ ] The draft model's memory estimate uses the main model's micro-batch
       size and slot count, although llama.cpp builds the draft context with
       one sequence and its own batch; the pre-existing context fallback
       makes the same approximation.
-- [ ] kv_layer_mask clears the shared_kv_layers tail before
-      recurrent_layer_mask reads it, so a header carrying both recurrent
-      state sizes and shared_kv_layers would charge recurrent state to its
-      trailing shared layers. No such header exists today.
 - [ ] The ik calibration record's card 0 KV lower bound clears by a few KiB
       only through the log-precision allowance; a second ik measurement
       would settle whether the one-layer slack is enough.
@@ -186,6 +76,59 @@ run becomes a seventh calibration record.
       as filed.
 - [ ] Owner, GitHub: the repository has no topics, and README carries no CI
       badge although Actions has been green since 2026-09-01.
+- [ ] A mounted draft model or projector whose file is absent yields
+      (None, None) from inspect_file exactly like an unmounted one, so it
+      counts zero bytes with no message; SPEC 2.35 covers only the unmounted
+      case. Spec gap to grill.
+- [ ] placement's per-layer sums memo is shared across threads: the sweep
+      controller's estimate closure runs estimate_memory on its QThread while
+      the UI thread renders. Each dict operation is atomic, so the worst case
+      is a duplicate walk. The memo pins up to 64 tensor tables alive by
+      strong reference, and placement._compute_family repeats the "_exps"
+      name scan memory_fit.is_moe does, since the layering keeps them apart.
+- [ ] tests/core/test_calibration.py's layer_kv_bytes re-derives vram's
+      per-layer KV rule (window tokens, per-layer heads, batch clamps); a
+      public vram.kv_layer_sizes(meta, settings, engine, ctx, ubatch) used by
+      _model_part and the test would be one source. Its window branch is
+      unreachable until a carded sliding-window record exists (the only
+      sliding-window record is CPU-only), and the slack prices KV alone while
+      the band compares kv plus state, safe at today's state sizes.
+- [ ] core.sweep.parse_prompt_sizes accepts 0 and negative sizes, as the
+      parse it replaced did; a token > 0 guard is a one-liner if the
+      benchmark client cannot use them.
+- [ ] benchmark_controller.sweep_prefill(profile=None)'s default has no
+      production caller (three tests call it bare); the memo reset at the
+      top of configure_panel._refresh_fit_line is defensive and no test
+      observes it.
+- [ ] A deprecated setting's row label keeps its inline palette(mid) span
+      colour on top of the search bar's jump tint, so "*deprecated" stays
+      grey on the highlight fill.
+- [ ] On every render of an over-budget profile the sweep prefill re-runs
+      smallest_fitting_offload, the same bisection the memoised FitReport
+      just ran inside its messages. Carrying the profile search's (key,
+      value) on FitReport, None where the balanced split made the search
+      unnecessary, would let sweep_prefill read it from the memo.
+- [ ] The offload search's --override-tensor candidate string is the only
+      channel carrying the layer count into placement.place, which recovers
+      it by reverse-parsing the string with _COUNT_OVERRIDE_RE; a
+      semantics-preserving change to the builder would silently fall back to
+      one tensor walk per bisection step (a test now pins the ik path).
+      Passing a structured (count, regex) through estimate_memory and place
+      would drop the parse.
+- [ ] Cleanup: placement._compute_layer_sums repeats _place_walk's tensor
+      walk with the parity tests covering the untied fixture only;
+      memory_fit._messages carries the balanced-differs predicate twice;
+      the search-entry visibility closure is a third copy of the
+      getWidgetPosition/isRowVisible idiom; SearchEntry.key is written and
+      never read.
+- [ ] configure_panel.cached_probe does not adopt a pending
+      _fit_probe_result, so a launch clicked inside the 150 ms poll gap
+      re-probes with a fresh reading already in hand; the tests pin this
+      shape, so changing it is a design call.
+- [ ] The shortfall message shell-quotes the --override-tensor suggestion
+      with shlex.quote, so a value carrying no shell metacharacters would
+      render bare; every generated value carries regex metacharacters
+      today, so SPEC 2.21's single quotes hold in practice.
 
 ## Pending owner smokes
 
@@ -280,23 +223,44 @@ run becomes a seventh calibration record.
 
 ## Done this cycle
 
-- The memory estimate computes a capacity-balanced `--tensor-split`: the
-  candidates are whole-layer boundaries leaving no card empty, scored on
-  feasibility, then the minimum per-card capacity (a card's margin over its
-  marginal bytes per token, minimized over the cards whose cache grows with
-  the context), then the minimum margin. The search starts at the split the
-  profile itself would use and takes the best single-layer move while one
-  scores strictly better, to a bound of 32 moves.
-- A card's marginal cost per token is measured, not derived a second time:
-  its KV and state priced one 4096-token step away, divided by the step, so
-  window caps, `--swa-full`, unified against per-slot caches and quantized
-  cache types follow the rules already calibrated.
-- The split is a suggestion and never an assumption: with `--tensor-split`
-  unset the estimate still models the engines' free-VRAM proportion.
-  `--estimate --json` carries it as `balanced_split`; a card shortfall
-  message names it, says whether it fits alone, names the value it
-  replaces, and adds the `--fit` note only where `--fit` would otherwise
-  act. Where the split does not fit alone, the offload count of SPEC 2.21
-  is searched at that split and the message names both.
-- New pure module core/balance.py, 29 tests of its own; the suite went from
-  2039 to 2103 tests.
+- A search field with a match counter above the settings on the Configure
+  tab: a case-insensitive substring of a flag, alias or group title scrolls
+  to and tints the match, Enter and Shift+Enter cycle, Escape clears, hidden
+  rows never match, and focus never leaves the field. Driven live on the
+  dev box's display: "ngl" found --n-gpu-layers and --gpu-layers-draft, the
+  cycle wrapped, Escape cleared.
+- The memory estimate walks a model's tensor table once per render: per-layer
+  sums split by the counted rule's family, memoised per table, price every
+  balanced-split candidate and offload count. fit_report on a 32k-tensor
+  two-card shortfall went from 0.63 s to 0.04 s.
+- The balanced split scores every two-card candidate; on three or more cards
+  the climb runs as many moves as there are entries placed on cards.
+- Shortfall messages: the balanced split is named on ik_llama.cpp with --fit
+  too, no offload count is suggested where the named split already fits,
+  every card boundary is named, the --override-tensor suggestion is
+  shell-quoted whole, amounts under 1 GiB render in MiB, and an unmounted
+  draft model or projector produces a dialog-level message in the readout,
+  the launch dialog and the CLI.
+- --estimate exits 6 when every card fits and RAM is over budget; README's
+  exit table carries the row.
+- The router readout charges the per-card overhead once per card; recurrent
+  state is no longer charged to a shared-KV tail layer.
+- The launch preflight reuses the Configure tab's GPU and RAM probe while
+  it is fresh for the profile's node, and one debounced render costs one
+  fit report and one profile read in the panel.
+- validation's active-setting rule is command_builder's emit rule (load-mode
+  suppression, enum defaults, engine gate) and treats a zero count, typed or
+  string, as idle; the argv rendering shares the same helper.
+- An embedding model shows no offload recommendation dot; the context
+  suggestion reads the effective context from --kv-unified-per-slot.
+- Sweep: one wait_ready shared with the headless path, the stored sweep's
+  timestamp labelled in the Benchmark tab, the terminal message survives the
+  end-of-run refresh, a card's output buffer counts into measured compute,
+  one prompt-sizes parser with its own refusal for a bad token, and tests
+  for _read_log, _stop_and_remove, the store's mode and overwrite.
+- Hygiene: the purity subset test, the build_catalog tooltip test, the
+  video-timestamp-interval tooltip (0 disables), calibration_records without
+  output_card, the calibration slack priced at the largest cached layer,
+  fit_compute_terms' best-effort point computed only until a feasible one
+  exists.
+- The suite went from 2103 to 2212 tests.

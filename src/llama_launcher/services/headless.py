@@ -131,12 +131,26 @@ def router_status(profile, binary) -> str:
     return derive_status(cstate, health)
 
 
-def wait_ready(host, port, timeout: float = 60.0, interval: float = 1.0) -> bool:
-    """Poll /health until ready or timeout. True iff it became ready in time."""
+def wait_ready(
+    host,
+    port,
+    timeout: float = 60.0,
+    interval: float = 1.0,
+    *,
+    should_cancel=None,
+    still_running=None,
+) -> bool:
+    """Poll /health until ready, cancelled, the container dies or the
+    timeout elapses. The first probe happens before any deadline check, so a
+    timeout of 0 still gets one look."""
     deadline = time.monotonic() + timeout
     while True:
+        if should_cancel is not None and should_cancel():
+            return False
         if probe_health(port, host=host) == "ready":
             return True
+        if still_running is not None and not still_running():
+            return False
         if time.monotonic() >= deadline:
             return False
         time.sleep(interval)

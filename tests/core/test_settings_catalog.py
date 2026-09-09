@@ -573,6 +573,7 @@ def test_zero_four_zero_flags_are_catalogued_with_upstream_defaults():
     assert CATALOG["video-fps"].minimum == 0.01
     assert CATALOG["video-timestamp-interval"].default == 5000
     assert CATALOG["video-timestamp-interval"].maximum == 600000
+    assert "0 disables" in CATALOG["video-timestamp-interval"].tooltip
     assert CATALOG["video-ffmpeg-dir"].default == ""
     for key in ("video-fps", "video-timestamp-interval", "video-ffmpeg-dir"):
         assert CATALOG[key].group == "Multimodal"

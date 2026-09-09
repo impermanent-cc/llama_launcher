@@ -3,6 +3,7 @@ from enum import StrEnum
 
 from .gguf import GgufMeta
 from .settings_catalog import CATALOG
+from .vram import effective_ctx_size, positive_int
 
 EMBEDDING_ARCHS = frozenset(
     {
@@ -84,7 +85,9 @@ def derive_caps(meta: GgufMeta | None, sibling_filenames) -> ModelCaps:
 class Tier(StrEnum):
     RECOMMENDED = "recommended"  # set this for this model
     TUNE = "tune"  # worth tuning
-    NEUTRAL = "neutral"  # default styling (UI default; not returned)
+    NEUTRAL = "neutral"  # default styling (UI default; not returned); a
+    # missing key falls back to this, e.g. an offload knob left untouched
+    # on an embedding model, which stays usable rather than muted
     NA = "na"  # not applicable for this model
 
 
@@ -102,7 +105,12 @@ def _rel_core(caps):
     return t
 
 
-def _rel_moe(caps):
+def _rel_offload(caps):
+    """The offload knobs' (n-cpu-moe, cpu-moe, override-tensor, n-cpu-ffn)
+    tiers by expert presence, nothing on an embedding model: an embedding
+    model exposes all four knobs but recommends none of them."""
+    if caps.is_embedding:
+        return {}
     if caps.is_moe:
         return {
             "n-cpu-moe": Tier.RECOMMENDED,
@@ -179,7 +187,7 @@ def _rel_embedding(caps):
 # override earlier contributors (e.g. vision's mmproj=RECOMMENDED).
 RELEVANCE_CONTRIBUTORS = [
     _rel_core,
-    _rel_moe,
+    _rel_offload,
     _rel_mtp,
     _rel_vision,
     _rel_swa,
@@ -237,7 +245,7 @@ def describe_relevance(caps: ModelCaps) -> dict:
     return {k: (t, _reason_for(k, t, caps)) for k, t in relevance(caps).items()}
 
 
-def _sug_mtp(caps, settings, mmproj_set, draft_set):
+def _sug_mtp(caps, settings, mmproj_set, draft_set, engine="llama.cpp"):
     out = []
     if caps.has_mtp_infile and settings.get("spec-type") != "draft-mtp":
         out.append(
@@ -258,7 +266,7 @@ def _sug_mtp(caps, settings, mmproj_set, draft_set):
     return out
 
 
-def _sug_vision(caps, settings, mmproj_set, draft_set):
+def _sug_vision(caps, settings, mmproj_set, draft_set, engine="llama.cpp"):
     if caps.mmproj_sibling and not mmproj_set:
         return [
             Suggestion(
@@ -270,12 +278,14 @@ def _sug_vision(caps, settings, mmproj_set, draft_set):
     return []
 
 
-def _sug_ctx(caps, settings, mmproj_set, draft_set):
-    ctx = settings.get("ctx-size") or 0
+def _sug_ctx(caps, settings, mmproj_set, draft_set, engine="llama.cpp"):
+    ctx = effective_ctx_size(settings, engine) or 0
     if caps.ctx_train and ctx > caps.ctx_train:
+        explicit_ctx_size = positive_int(settings.get("ctx-size"))
+        label = "ctx-size" if explicit_ctx_size else "effective context"
         return [
             Suggestion(
-                f"ctx-size exceeds trained max {caps.ctx_train}: cap it",
+                f"{label} exceeds trained max {caps.ctx_train}: cap it",
                 {"ctx-size": caps.ctx_train},
                 {},
             )
@@ -283,7 +293,7 @@ def _sug_ctx(caps, settings, mmproj_set, draft_set):
     return []
 
 
-def _sug_embedding(caps, settings, mmproj_set, draft_set):
+def _sug_embedding(caps, settings, mmproj_set, draft_set, engine="llama.cpp"):
     if caps.is_reranker:
         have = (
             settings.get("reranking")
@@ -315,9 +325,14 @@ SUGGESTION_DETECTORS = [_sug_mtp, _sug_vision, _sug_ctx, _sug_embedding]
 
 
 def suggestions(
-    caps: ModelCaps, settings: dict, mmproj_set: bool = False, draft_set: bool = False
+    caps: ModelCaps,
+    settings: dict,
+    mmproj_set: bool = False,
+    draft_set: bool = False,
+    *,
+    engine: str = "llama.cpp",
 ) -> list:
     out = []
     for det in SUGGESTION_DETECTORS:
-        out.extend(det(caps, settings, mmproj_set, draft_set))
+        out.extend(det(caps, settings, mmproj_set, draft_set, engine=engine))
     return out

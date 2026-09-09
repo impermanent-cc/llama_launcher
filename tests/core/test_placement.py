@@ -406,3 +406,173 @@ def test_effective_settings_override_tensor_raw_alone_when_profile_blank():
 def test_effective_settings_non_accumulating_key_still_replaces():
     eff = pl.effective_settings({"n-cpu-ffn": 2}, "--n-cpu-ffn 8")
     assert eff["n-cpu-ffn"] == "8"
+
+
+def _devices(n_layers, n_gpu):
+    return pl.layer_devices(n_layers, n_gpu, "llama.cpp")
+
+
+def _walk(tensors, n_layers, *, devices, rules, overrides):
+    return pl._place_walk(
+        tensors, n_layers, devices=devices, rules=rules, overrides=overrides
+    )
+
+
+@pytest.mark.parametrize("moe", [False, True])
+@pytest.mark.parametrize("n_gpu", [0, 2, 4])
+def test_place_from_sums_matches_the_walk_for_every_count(moe, n_gpu):
+    """A counted CPU rule priced from per-layer sums places every tensor
+    where the direct walk does, at every count, with a whole rule and
+    overrides that both demote and promote in play."""
+    tensors = _tensors(n_layers=4, moe=moe)
+    regex = pl.EXPS_REGEX if moe else pl.DENSE_FFN_REGEX
+    whole = [pl.CpuRule(None, r"attn_norm")]
+    overrides = [
+        (r"blk\.1\.ffn_", True),
+        (r"blk\.3\.attn_q", False),
+        (r"blk\.0\.ffn_", False),
+    ]
+    devices = _devices(4, n_gpu)
+    sums = pl.layer_sums(
+        tensors,
+        4,
+        devices=devices,
+        whole_rules=whole,
+        overrides=overrides,
+        counted_regex=regex,
+        after_overrides=False,
+    )
+    for n in range(0, 5):
+        expected = _walk(
+            tensors,
+            4,
+            devices=devices,
+            rules=[*whole, pl.CpuRule(n, regex)],
+            overrides=overrides,
+        )
+        assert pl.place_from_sums(sums, n) == expected, n
+
+
+def test_place_from_sums_matches_an_appended_override_entry():
+    """The search's own trailing --override-tensor entry, applied after the
+    user's rules, places every tensor where the walk does at every count."""
+    tensors = _tensors(n_layers=4)
+    overrides = [(r"blk\.1\.ffn_up", False)]
+    devices = _devices(4, 4)
+    sums = pl.layer_sums(
+        tensors,
+        4,
+        devices=devices,
+        whole_rules=[],
+        overrides=overrides,
+        counted_regex=pl.DENSE_FFN_REGEX,
+        after_overrides=True,
+    )
+    for n in range(0, 5):
+        layers = "|".join(str(i) for i in range(n))
+        tail = (rf"blk\.({layers}){pl.DENSE_FFN_REGEX}", True)
+        expected = _walk(
+            tensors, 4, devices=devices, rules=[], overrides=[*overrides, tail]
+        )
+        assert pl.place_from_sums(sums, n) == expected, n
+        # place() itself recognises the trailing entry and takes the sums path
+        assert (
+            pl.place(
+                tensors, 4, devices=devices, rules=[], overrides=[*overrides, tail]
+            )
+            == expected
+        )
+
+
+def test_place_recognises_only_a_contiguous_trailing_entry():
+    assert pl._trailing_count_override(
+        [(r"blk\.(0|1|2)" + pl.DENSE_FFN_REGEX, True)]
+    ) == (3, pl.DENSE_FFN_REGEX)
+    assert (
+        pl._trailing_count_override([(r"blk\.(0|2)" + pl.DENSE_FFN_REGEX, True)])
+        is None
+    )
+    assert (
+        pl._trailing_count_override([(r"blk\.(0|1)" + pl.DENSE_FFN_REGEX, False)])
+        is None
+    )
+    assert pl._trailing_count_override([]) is None
+    assert pl._trailing_count_override([(r"blk\.()" + pl.DENSE_FFN_REGEX, True)]) == (
+        0,
+        pl.DENSE_FFN_REGEX,
+    )
+    layers = "|".join(str(i) for i in range(3))
+    built = rf"blk\.({layers}){pl.DENSE_FFN_REGEX}=CPU"
+    assert pl._trailing_count_override(pl.parse_overrides(built)) == (
+        3,
+        pl.DENSE_FFN_REGEX,
+    )
+
+
+def test_place_walks_the_table_once_per_fixed_inputs(monkeypatch):
+    """Two calls that differ only in the counted rule's count share one
+    walk; a different whole rule or override list walks again."""
+    calls = []
+    real = pl._compute_layer_sums
+
+    def counting(*a, **k):
+        calls.append(k.get("counted_regex"))
+        return real(*a, **k)
+
+    monkeypatch.setattr(pl, "_compute_layer_sums", counting)
+    tensors = _tensors(n_layers=4)
+    devices = _devices(4, 4)
+    for n in (0, 2, 4):
+        pl.place(
+            tensors,
+            4,
+            devices=devices,
+            rules=[pl.CpuRule(n, pl.DENSE_FFN_REGEX)],
+            overrides=[],
+        )
+    assert len(calls) == 1
+    pl.place(
+        tensors,
+        4,
+        devices=devices,
+        rules=[pl.CpuRule(1, pl.DENSE_FFN_REGEX)],
+        overrides=[(r"attn_q", True)],
+    )
+    assert len(calls) == 2
+
+
+def test_place_scans_tensor_names_for_the_natural_family_once_per_table(
+    monkeypatch,
+):
+    """Repeated calls with no counted rule and no trailing override, the
+    shape of every balanced-split candidate estimate, scan the table's own
+    tensor names for its expert or dense family once, not once per call."""
+    calls = []
+    real = pl._compute_family
+
+    def counting(tensors):
+        calls.append(1)
+        return real(tensors)
+
+    monkeypatch.setattr(pl, "_compute_family", counting)
+    tensors = _tensors(n_layers=4)
+    devices = _devices(4, 4)
+    for _ in range(3):
+        pl.place(tensors, 4, devices=devices, rules=[], overrides=[])
+    assert len(calls) == 1
+
+
+def test_place_with_two_counted_rules_falls_back_to_the_walk():
+    """A CpuRule(2, EXPS_REGEX) and a CpuRule(3, DENSE_FFN_REGEX) on a
+    table carrying both families each move tensors the other rule does
+    not, so the placement matches the walk rather than either rule's own
+    per-layer sums."""
+    tensors = [
+        *_tensors(n_layers=4, moe=True),
+        *(TensorInfo(f"blk.{i}.ffn_up.weight", 1, 0, 20) for i in range(4)),
+    ]
+    devices = _devices(4, 4)
+    rules = [pl.CpuRule(2, pl.EXPS_REGEX), pl.CpuRule(3, pl.DENSE_FFN_REGEX)]
+    assert pl.place(tensors, 4, devices=devices, rules=rules, overrides=[]) == _walk(
+        tensors, 4, devices=devices, rules=rules, overrides=[]
+    )

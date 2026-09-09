@@ -155,7 +155,9 @@ def search(grid, ik_scales):
     """(feasible, best_effort) over the terms and the ik scale together. Each
     is (score, limiting figure, terms, scale, figures) or None: the feasible
     one scores its worst ratio, the best-effort one its largest deviation
-    from the measurement in either direction."""
+    from the measurement in either direction. main reads best_effort only
+    when feasible is None, so the deviation and its update are computed only
+    while no feasible point has been found yet."""
     feasible = None
     best_effort = None
     for combo in itertools.product(*grid.values()):
@@ -168,10 +170,11 @@ def search(grid, ik_scales):
             ratio, name = worst_of(figures)
             if reads_high(figures) and (feasible is None or ratio < feasible[0]):
                 feasible = (ratio, name, terms, scale, figures)
-            low = min(est / meas for _, est, meas in figures)
-            span = max(ratio, 1.0 / low)
-            if best_effort is None or span < best_effort[0]:
-                best_effort = (span, name, terms, scale, figures)
+            if feasible is None:
+                low = min(est / meas for _, est, meas in figures)
+                span = max(ratio, 1.0 / low)
+                if best_effort is None or span < best_effort[0]:
+                    best_effort = (span, name, terms, scale, figures)
     return feasible, best_effort
 
 

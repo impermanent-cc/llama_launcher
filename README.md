@@ -32,7 +32,7 @@ builds produce.
 
 ![Configure tab: building a llama-server launch command](assets/screenshots/config.png)
 
-*The Configure tab: choose engine, image, model, and GPU mode; the exact command and a live memory estimate per card and for RAM update as you edit.*
+*The Configure tab: choose engine, image, model, and GPU mode; the exact command and a live memory estimate per card and for RAM update as you edit, and the search field above the settings jumps to any flag or group.*
 
 After installing (below), the GUI opens on the **Configure** tab:
 
@@ -385,12 +385,13 @@ Exit codes:
 
 | code | `--launch` | `--stop` | `--health` | `--estimate` |
 |------|-----------|----------|-----------|-----------|
-| 0 | started (ready, with `--wait`) | stopped / already stopped | ready | every card fits |
+| 0 | started (ready, with `--wait`) | stopped / already stopped | ready | every card fits and RAM fits or is unknown |
 | 1 | container run failed | stop failed | n/a | n/a |
 | 2 | usage/config error | usage/config error | usage/config error | usage/config error, no model of its own, no GPU visible, or metadata too thin |
 | 3 | n/a | n/a | loading | a card is over budget |
 | 4 | n/a | n/a | down / stopped | n/a |
 | 5 | `--wait` timed out (started, not ready) | n/a | n/a | n/a |
+| 6 | n/a | n/a | n/a | every card fits, RAM over budget |
 
 ### JSON output
 
@@ -404,7 +405,9 @@ three plus an `estimate` object whose keys are listed in
 
 Every outcome (success, warnings, action failure, and the pre-flight gate
 refusal) is a single object. Warnings live inside the object, not on stderr.
-The process exit code is unchanged (there is no `exit` field; `ok` mirrors it):
+The process exit code is unchanged (there is no `exit` field). `ok` is true
+iff the exit code is 0, except for `--estimate`, where it is true whenever
+every card fits (exit 0 or 6):
 
     {"action": "launch", "ok": true, "status": "started", "name": "llama-router",
      "host": "0.0.0.0", "port": 8080, "warnings": [], "error": null}
@@ -412,7 +415,7 @@ The process exit code is unchanged (there is no `exit` field; `ok` mirrors it):
 | field | meaning |
 |-------|---------|
 | `action` | `"launch"`, `"stop"`, `"health"`, or `"estimate"` |
-| `ok` | `true` iff the process exit code is 0 |
+| `ok` | `true` iff the exit code is 0, except for `--estimate`, where it is true whenever every card fits (exit 0 or 6) |
 | `status` | launch: `"started"` / `"ready"`; stop: `"stopped"`; health: `"ready"` / `"loading"` / raw state; `null` for estimate and on failure |
 | `name` / `host` / `port` | container name and address when known, else `null` (`host` and `port` are always `null` for estimate) |
 | `warnings` | preset/router warnings (empty list when none) |

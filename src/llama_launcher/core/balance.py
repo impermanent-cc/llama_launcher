@@ -8,7 +8,6 @@ from . import placement as _pl
 from .vram import estimate_memory
 
 STEP_TOKENS = 4096
-MAX_MOVES = 32
 _UNSPLIT_MODES = ("row", "none")
 
 
@@ -33,18 +32,17 @@ def marginal_bytes_per_token(
     draft_meta=None,
     draft_weights=0,
     mmproj_bytes=0,
-    step=STEP_TOKENS,
     base=None,
 ):
     """Each card's KV and state total at the profile's own context,
-    subtracted from the same total one step further out and divided by the
-    step: the recurrent-state term is per request slot and does not move
-    with context, so it cancels out and what is left is the rate the KV
-    cache grows by, with window caps, cache types and slot rules needing no
-    second formula. Never negative. None when the estimate is unknowable.
-    base, when given, is the MemoryEstimate for these same settings, already
-    computed by the caller, so the profile's own context is not priced a
-    second time."""
+    subtracted from the same total one STEP_TOKENS further out and divided
+    by STEP_TOKENS: the recurrent-state term is per request slot and does
+    not move with context, so it cancels out and what is left is the rate
+    the KV cache grows by, with window caps, cache types and slot rules
+    needing no second formula. Never negative. None when the estimate is
+    unknowable. base, when given, is the MemoryEstimate for these same
+    settings, already computed by the caller, so the profile's own context
+    is not priced a second time."""
     eff = _pl.effective_settings(settings, raw_args)
     kwargs = dict(
         engine=engine,
@@ -58,12 +56,14 @@ def marginal_bytes_per_token(
     if base is None:
         return None
     ctx = base.ctx
-    far = _estimate_at(meta, weights_bytes, ctx=ctx + step, kwargs=kwargs, settings=eff)
+    far = _estimate_at(
+        meta, weights_bytes, ctx=ctx + STEP_TOKENS, kwargs=kwargs, settings=eff
+    )
     if far is None:
         return None
     lo, hi = _cache_bytes(base), _cache_bytes(far)
     return tuple(
-        max(0.0, (hi_i - lo_i) / step) for lo_i, hi_i in zip(lo, hi, strict=True)
+        max(0.0, (hi_i - lo_i) / STEP_TOKENS) for lo_i, hi_i in zip(lo, hi, strict=True)
     )
 
 
@@ -160,12 +160,10 @@ def _priced(counts, meta, weights_bytes, *, kwargs, settings, free, cache):
     return score
 
 
-def _at_least_one(counts, total) -> tuple:
+def _at_least_one(counts) -> tuple:
     """The same counts with every card holding at least one entry, each
     missing entry taken from the card holding the most."""
     out = list(counts)
-    if len(out) > total:
-        return tuple(out)
     for i, n in enumerate(out):
         if n == 0:
             donor = max(range(len(out)), key=lambda k: out[k])
@@ -207,13 +205,16 @@ def balanced_split(
     draft_weights=0,
     mmproj_bytes=0,
 ):
-    """The --tensor-split whose per-card capacity is most even, starting from
-    the profile's own split and, each round, taking whichever single
-    whole-layer move across whichever boundary scores best among every move
-    that does not empty a card, keeping it only while it strictly improves
-    on the round before. None when fewer than two cards are visible, when
-    the split mode places no contiguous runs (row and none), when no layer
-    is on a card, or when the estimate is unknowable."""
+    """The --tensor-split whose per-card capacity is most even. On two
+    cards every whole-layer split is scored and the best-scoring one is
+    returned. On three or more cards the search climbs from the profile's
+    own split, each round taking whichever single whole-layer move across
+    whichever boundary scores best among every move that does not empty a
+    card, keeping it only while it strictly improves on the round before,
+    for at most as many rounds as there are entries to place. None when
+    fewer than two cards are visible, when the split mode places no
+    contiguous runs (row and none), when no layer is on a card, or when the
+    estimate is unknowable."""
     eff = _pl.effective_settings(settings, raw_args)
     if str(eff.get("split-mode", "layer") or "layer") in _UNSPLIT_MODES:
         return None
@@ -250,24 +251,29 @@ def balanced_split(
             tensor_split=eff.get("tensor-split", ""),
             free_per_card=free,
             n_cards=n_cards,
-        ),
-        len(entries),
+        )
     )
-    counts = start
-    current = priced(counts)
+    counts, current = start, priced(start)
     if current is None:
         return None
-    for _ in range(MAX_MOVES):
-        best, best_score = None, None
-        for cand in _neighbours(counts):
+    if n_cards == 2:
+        total = len(entries)
+        for cand in ((k, total - k) for k in range(1, total)):
             got = priced(cand)
-            if got is None:
-                continue
-            if best_score is None or got > best_score:
-                best, best_score = cand, got
-        if best is None or best_score <= current:
-            break
-        counts, current = best, best_score
+            if got is not None and got > current:
+                counts, current = cand, got
+    else:
+        for _ in range(len(entries)):
+            best, best_score = None, None
+            for cand in _neighbours(counts):
+                got = priced(cand)
+                if got is None:
+                    continue
+                if best_score is None or got > best_score:
+                    best, best_score = cand, got
+            if best is None or best_score <= current:
+                break
+            counts, current = best, best_score
     return BalancedSplit(
         split_value(counts),
         tuple(counts),
