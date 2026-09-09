@@ -74,6 +74,9 @@ from llama_launcher.ui.widgets.setting_widgets import (
 )
 from llama_launcher.ui.widgets.status_banner import StatusBanner
 
+ENV_COLUMN_MIN = 420
+ENV_COLUMN_MAX = 640
+
 _ENGINE_DEFAULT_IMAGE = {
     "llama.cpp": "ghcr.io/ggml-org/llama.cpp:server-cuda",
     "ik_llama.cpp": "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
@@ -525,7 +528,12 @@ class ConfigurePanel(QWidget):
         left_scroll = QScrollArea()
         left_scroll.setWidgetResizable(True)
         left_scroll.setWidget(left)
-        body.addWidget(left_scroll, 3)
+        # The column grows to ENV_COLUMN_MAX so paths stay readable, and every
+        # pixel past that goes to the settings column, which is the one that scrolls.
+        left_scroll.setMinimumWidth(ENV_COLUMN_MIN)
+        left_scroll.setMaximumWidth(ENV_COLUMN_MAX)
+        self._left_scroll = left_scroll
+        body.addWidget(left_scroll, 1)
 
         # RIGHT: settings grouped, scrollable
         self._widgets: dict[str, object] = {}
@@ -562,7 +570,7 @@ class ConfigurePanel(QWidget):
         self.search_bar = SettingSearchBar()
         column.addWidget(self.search_bar)
         column.addWidget(right_scroll, 1)
-        body.addWidget(right_column, 2)
+        body.addWidget(right_column, 1)
         self._tinted = None
         self.search_bar.jumped.connect(self._jump_to)
         self.search_bar.cleared.connect(self._clear_jump_tint)
@@ -578,6 +586,13 @@ class ConfigurePanel(QWidget):
         self.model_meta_label = QLabel("")
         self.model_meta_label.setWordWrap(True)
         config_bottom_box.addWidget(self.model_meta_label)
+        self.fit_details_label = QLabel("")
+        self.fit_details_label.setWordWrap(True)
+        self.fit_details_label.setTextFormat(Qt.PlainText)
+        self.fit_details_section = CollapsibleSection(
+            "Details", self.fit_details_label, collapsed=True
+        )
+        config_bottom_box.addWidget(self.fit_details_section)
         self.model_edit.textChanged.connect(lambda _: self.apply_model_caps())
         self.mounts_panel.changed.connect(self.apply_model_caps)
         self.api_key_box = ApiKeyBox()
@@ -1341,6 +1356,7 @@ class ConfigurePanel(QWidget):
         self._fit_meta, self._fit_weights = meta, size
         self._meta_text = self._meta_caps_text(meta, size, caps)
         self._set_fit_line("")  # model changed: never show the OLD model's fit
+        self._set_fit_details("")
         self._schedule_fit_refresh()
 
         described = describe_relevance(caps) if caps else {}
@@ -1391,9 +1407,11 @@ class ConfigurePanel(QWidget):
         self._fit_report_memo = None
         if self._is_router_mode():
             if not self.members():
+                self._set_fit_details("")
                 self._set_fit_line("")
                 return
         elif self._fit_meta is None:
+            self._set_fit_details("")
             self._set_fit_line("")
             return
         ssh = gpu_ssh_target(
@@ -1549,9 +1567,10 @@ class ConfigurePanel(QWidget):
 
     def _current_fit_report(self):
         """The FitReport of the last render while the form is unchanged
-        since, else one computed and memoised now: the single source the
-        readout, its tooltip and any other caller between two renders read
-        from without paying for a second balanced search."""
+        since, else one built and memoised now, with no details, since
+        nothing here renders them. For a caller that only needs the
+        verdicts (the benchmark controller reads `fits`), not for reading
+        the readout, which always renders from its own fresh report."""
         if self._fit_report_memo is None:
             self._fit_report_memo = memory_fit.fit_report(**self._fit_report_kwargs())
         return self._fit_report_memo
@@ -1582,15 +1601,25 @@ class ConfigurePanel(QWidget):
                     f"~{s.est_bytes / gib:.1f} GiB &gt; ~{s.free_bytes / gib:.1f} "
                     f"GiB free (short {-s.margin / gib:.1f} GiB)</span>"
                 )
+            self._set_fit_details("")
             self._set_fit_line(line)
             return
-        report = memory_fit.fit_report(**self._fit_report_kwargs(profile=p))
+        report = memory_fit.fit_report(
+            **self._fit_report_kwargs(profile=p), with_details=True
+        )
         self._fit_report_memo = report
         if report is None:
+            self._set_fit_details("")
             self._set_fit_line("")
             return
         self._set_fit_line("<br>".join(memory_fit.render_lines(report)))
         self.model_meta_label.setToolTip(memory_fit.render_tooltip(report))
+        self._set_fit_details("\n".join(memory_fit.render_details(report)))
+
+    def _set_fit_details(self, text: str) -> None:
+        """The Details section's text; empty hides nothing, the section
+        stays in place with an empty label."""
+        self.fit_details_label.setText(text)
 
     def _set_fit_line(self, line: str) -> None:
         """Compose meta/caps text + fit line into the one label. The fit line
@@ -1690,6 +1719,8 @@ class ConfigurePanel(QWidget):
             bits.append(meta.quant)
         if meta and meta.size_label:
             bits.append(meta.size_label)
+        if meta and meta.n_layers:
+            bits.append(f"{int(meta.n_layers)} layers")
         if caps:
             if caps.is_moe:
                 bits.append(f"MoE {caps.expert_count}")

@@ -363,9 +363,10 @@ podman + the GPU; the harness connects in over the network.
 
 `--profile` falls back to the last-used profile. `--launch --wait` blocks until
 the server answers `/health` (default 60s; models still load on demand).
-`--estimate` prints the memory estimate per card and for RAM plus any
-messages, without launching anything; see [`VRAM.md`](VRAM.md) for what it
-counts.
+`--estimate` prints the memory estimate per card and for RAM, then the
+details block (the KV cost of the next 1024 tokens, per-layer weights,
+header counts and the output tensor), then any messages, without launching
+anything; see [`VRAM.md`](VRAM.md) for what it counts.
 
 Works for **router** and single-model **server** profiles. A validation error
 (including a bind past loopback with no API key) is refused (exit 2) before

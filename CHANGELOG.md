@@ -12,6 +12,19 @@ not on the release page, so the two never drift.
 
 ### Added
 
+- The readout's meta line carries the model's layer count, and each card
+  line opens with the layer range that card holds ("layers 0 to 27 plus
+  output"), or "all GPU layers, row split" under `--split-mode row`; the
+  RAM line names the layers left on the host.
+- A collapsible Details section under the readout with the KV cost of the
+  next 1024 tokens per device, each card's average weight per layer (and the
+  expert share on a mixture-of-experts model), the model's head, embedding
+  and vocabulary counts, and the output tensor's size and device.
+  `--estimate` prints the same block after the readout lines, and `--json`
+  carries `n_layers`, per-card `layers` and `bytes_per_layer`, `kv_per_1k`
+  and `output_device`.
+- Finer `--ctx-size` presets: 1024 and the midpoints 12288, 24576, 49152,
+  98304 and 196608 join the ladder.
 - A search field above the settings on the Configure tab: type part of a
   flag, an alias such as `-ngl`, or a group name, and the matching row
   scrolls into view and is highlighted; Enter and Shift+Enter step through
@@ -69,6 +82,15 @@ not on the release page, so the two never drift.
 
 ### Changed
 
+- The suggestion dot sits directly after its setting's editor instead of
+  at the row's far edge, and the `--tools` boxes lay out in two columns,
+  so the settings column no longer needs a horizontal scrollbar.
+- The Environment column keeps a width of 420 to 640 px and the settings
+  column takes the spare width; the Name field and the profile picker in
+  the top bar grow no wider than 260 and 340 px, and the spare width goes
+  to the right of the bar.
+- The main window's minimum width is now about 1030 px, from the Name
+  field and profile picker minimums in the top bar (was about 840 px).
 - The memory estimate walks a model's tensor table once per render and
   prices every balanced-split candidate and offload count from per-layer
   sums: the fit readout on a model with tens of thousands of tensors

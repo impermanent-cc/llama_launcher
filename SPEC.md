@@ -213,18 +213,31 @@ sends bare `--fit` for `on` under ik and nothing for `off`, ik's default,
 and the setting's tooltip states each engine's default.
 
 2.24 The Configure readout shows the model meta line, one line per card
-("GPUn est / free GiB" with the weights, KV and compute parts in
-brackets), and one RAM line, with word wrap on so no line widens the
-window; the label's tooltip carries the full part list with the
-approximate and upper-bound notes. The launch preflight dialog shows the
-same breakdown. The router readout charges each card's per-card overhead
-once and sums weights, KV and compute across members; the pool fit consumes
-the same breakdown with unchanged semantics. One pure
-core function renders these lines for the readout, the tooltip, the
-dialog and the CLI.
+("GPUn est / free GiB" with the layer range, weights, KV and compute parts
+in brackets), and one RAM line, with word wrap on so no line widens the
+window; the label's tooltip carries the full part list with the approximate
+and upper-bound notes. The meta line carries the model's total layer count
+("48 layers") after the size label. Each card line opens its bracket with
+the layer range the card holds under the profile's `--n-gpu-layers` and
+split ("layers 0 to 27"), followed by "plus output" on the card that holds
+the output layer; the RAM line names the layers left on the host and "plus
+output" when the output layer stays there. A layer's home is the card the
+engine assigns it to under `--n-gpu-layers` and the split, so an
+`--override-tensor` rule that promotes part of a host layer's weights onto a
+card leaves it in the host range, and `--no-kv-offload` moves the cache
+without moving the layer. Split mode `row` lists the offloaded layers
+followed by "row split" on every card line, since every card holds a share
+of each. The ranges cover the main model; a draft model's or projector's
+bytes sit in the weights figure without a range. The launch preflight
+dialog shows the same breakdown.
+The router readout charges each card's per-card overhead once and sums
+weights, KV and compute across members; the pool fit consumes the same
+breakdown with unchanged semantics. One pure core function renders these
+lines for the readout, the tooltip, the dialog and the CLI.
 
 2.25 `--estimate --profile NAME` prints the breakdown of 2.24 for the
-profile's launch node, and with `--json` prints it as JSON. It exits 0 when
+profile's launch node followed by the details block of 2.41, and with
+`--json` prints both as JSON. It exits 0 when
 every card fits and RAM fits or is unknown, 6 when every card fits and RAM
 is over budget, and 3 when any card is over budget whatever RAM does; the
 JSON `ok` is true whenever every card fits, since a RAM shortfall is a
@@ -372,6 +385,39 @@ the next match and Shift+Enter to the previous, Escape clears the field,
 and keyboard focus never moves into a setting widget. Clearing the field or
 changing the text removes the tint.
 
+2.38 Every setting row places its suggestion dot directly after the
+editor, 16 px wide, with the row's stretch after the dot; the dot stays
+hidden while it has nothing to say. The settings column's minimum width,
+measured offscreen with every group visible, stays under 600 px.
+
+2.39 A multiselect setting lays its boxes out in two columns, filled row by
+row with "all" first, so `--tools` shows four rows of two.
+
+2.40 The `--ctx-size` preset list is 0, 1024, 2048, 4096, 8192, 12288,
+16384, 24576, 32768, 49152, 65536, 98304, 131072, 196608 and 262144, in
+that order, and the combo stays editable.
+
+2.41 A collapsible "Details" section sits under the readout lines of 2.24,
+collapsed on every start, and holds, as plain lines: the KV cost per 1024
+tokens as the marginal cost at the profile's context (the estimate at
+context plus 1024 less the estimate at context), in total and per device;
+per card, the average weight bytes per layer it holds, with the expert
+share of one layer on a mixture-of-experts model; the header facts
+(attention heads, KV heads, embedding width, vocabulary and sliding window
+size when present); and the output tensor's size and device. The meta
+label tooltip and the launch preflight dialog carry none of it. The
+`--estimate --json` output carries the layer count, each card's layer
+range, the KV cost per 1024 tokens, the per-layer weights and the output
+device under the same names as the readout uses.
+
+2.42 The Environment column is bounded to a width of 420 to 640 px and the
+settings column absorbs the spare width; the fields inside the column keep
+filling it. In the top bar the Name edit is bounded to 160 to 260 px and
+the profile combo to 200 to 340 px, the buttons follow the combo, a stretch
+follows the buttons and the status label sits at the right edge. At a
+window width of 1600 px neither field passes its maximum and the
+Environment column stays inside its bounds.
+
 ## 3. Constraints
 
 3.1 Python 3.12 and 3.13 are the tested floor and ceiling; the code needs
@@ -404,7 +450,10 @@ tensor table once: per-layer, per-device byte sums are computed once per
 tensor table and settings, and every balanced-split candidate and offload
 search count is priced from those sums. On an engine without `--n-cpu-ffn`
 the offload search's appended `--override-tensor` entry is priced from a
-second set of sums, so such a report costs two walks and never more.
+second set of sums, so such a report costs two walks and never more. The
+expert-share scan behind `expert_layer_bytes` is a second pass over the
+table, memoised per table, so a render after the first one pays no extra
+walk for it.
 
 ## 4. Out of scope
 
@@ -430,6 +479,8 @@ second set of sums, so such a report costs two walks and never more.
   context of 2.22 is solved against the summed budget.
 - A ubatch sweep, a headless `--sweep` command and sweeps on a remote
   node: ROADMAP Later.
+- Remembering the Details section of 2.41 open or closed across runs;
+  it starts collapsed.
 - Synthetic speculative acceptance flags (--spec-synth-len,
   --spec-synth-rates): upstream marks them benchmarking only and they
   falsify acceptance, so a profile carrying them serves nonsense.

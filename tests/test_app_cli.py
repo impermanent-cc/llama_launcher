@@ -539,6 +539,17 @@ def test_estimate_prints_lines_and_exits_0(monkeypatch, capsys):
     assert out.isascii()
 
 
+def test_estimate_prints_the_details_block_after_the_lines(monkeypatch, capsys):
+    _profiles(monkeypatch, [_server("s")])
+    _estimate_env(monkeypatch)
+    assert app.main(["--estimate", "--profile", "s"]) == 0
+    out = capsys.readouterr().out.splitlines()
+    ram_line = next(i for i, ln in enumerate(out) if ln.startswith("RAM:"))
+    assert out[ram_line + 1].startswith("KV per 1024 tokens:")
+    assert any(ln.startswith("output tensor ") for ln in out[ram_line + 1 :])
+    assert "\n".join(out).isascii()
+
+
 def test_estimate_json(monkeypatch, capsys):
     _profiles(monkeypatch, [_server("s")])
     _estimate_env(monkeypatch)

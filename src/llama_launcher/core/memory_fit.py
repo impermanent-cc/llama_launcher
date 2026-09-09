@@ -51,21 +51,29 @@ class FitReport:
     messages: tuple
     fits: bool
     balanced: object = None
+    kv_per_1k: tuple = ()
+    meta: object = None
 
 
 def _gib(n) -> str:
     return f"{n / _GIB:.1f}"
 
 
-def _amount(n) -> str:
-    """A byte count for a message: whole MiB below one GiB, one decimal of
-    GiB from there, so a shortfall under a gibibyte never renders as a
-    misleadingly rounded ~0.0 GiB. The switch to GiB happens where the
+def _size(n) -> str:
+    """A byte count for the details block: whole MiB below one GiB, one
+    decimal of GiB from there, so a value under a gibibyte never renders as
+    a misleadingly rounded 0.0 GiB. The switch to GiB happens where the
     whole-MiB rendering would itself round up to 1024, so no amount ever
-    prints as ~1024 MiB."""
+    prints as 1024 MiB. No approximation mark."""
     if round(n / _MIB) < 1024:
-        return f"~{n / _MIB:.0f} MiB"
-    return f"~{_gib(n)} GiB"
+        return f"{n / _MIB:.0f} MiB"
+    return f"{_gib(n)} GiB"
+
+
+def _amount(n) -> str:
+    """A byte count for a message: `_size`, with the approximation mark a
+    message prints ahead of an estimate."""
+    return "~" + _size(n)
 
 
 def _state_parts(state: int, checkpoints: int = 0, unit: str = "") -> str:
@@ -590,6 +598,17 @@ def _verdicts(est, free_bytes_per_gpu, ram_available):
     return cards, ram
 
 
+def _kv_per_1k(est, meta, weights_bytes, **kwargs) -> tuple:
+    """KV bytes per device for the next 1024 tokens of context: the
+    estimate at the current context plus 1024 less the current one, per
+    card then RAM."""
+    more = estimate_memory(meta, weights_bytes, ctx=est.ctx + 1024, **kwargs)
+    if more is None:
+        return ()
+    cards = tuple(m.kv - c.kv for c, m in zip(est.cards, more.cards, strict=False))
+    return (*cards, more.ram.kv - est.ram.kv)
+
+
 def fit_report(
     meta,
     weights_bytes,
@@ -603,6 +622,7 @@ def fit_report(
     draft_weights=0,
     mmproj_bytes=0,
     with_balanced=False,
+    with_details=False,
     uncounted=(),
 ):
     """Per-card and RAM verdicts plus messages for a profile; None when the
@@ -617,12 +637,14 @@ def fit_report(
     pays nothing for a search it will not show. uncounted names files, such
     as a draft model or a projector, whose bytes the estimate could not
     place under a configured folder; each produces a dialog message naming
-    the setting and the path."""
+    the setting and the path. FitReport.kv_per_1k carries the KV cost of
+    the next 1024 tokens of context per device, priced from the unadjusted
+    settings, and stays empty unless with_details asks for it: it costs a
+    second estimate call, which a caller that only reads the verdict
+    should not pay for."""
     if not free_bytes_per_gpu:
         return None
-    est = estimate_memory(
-        meta,
-        weights_bytes,
+    estimate_kwargs = dict(
         settings=settings,
         engine=engine,
         free_bytes_per_gpu=free_bytes_per_gpu,
@@ -631,8 +653,12 @@ def fit_report(
         draft_weights=draft_weights,
         mmproj_bytes=mmproj_bytes,
     )
+    est = estimate_memory(meta, weights_bytes, **estimate_kwargs)
     if est is None:
         return None
+    kv_per_1k = ()
+    if with_details:
+        kv_per_1k = _kv_per_1k(est, meta, weights_bytes, **estimate_kwargs)
     cards, ram = _verdicts(est, free_bytes_per_gpu, ram_available)
     eff = _pl.effective_settings(settings, raw_args)
     ik_moe_layers = None
@@ -689,8 +715,52 @@ def fit_report(
         uncounted=uncounted,
     )
     return FitReport(
-        est, cards, ram, tuple(messages), all(c.fits for c in cards), balanced
+        est,
+        cards,
+        ram,
+        tuple(messages),
+        all(c.fits for c in cards),
+        balanced,
+        kv_per_1k,
+        meta,
     )
+
+
+def _runs(indices) -> str:
+    """Contiguous runs of layer indices as "0 to 3, 8 to 11"; a single
+    layer reads as its own number."""
+    runs = []
+    for il in indices:
+        if runs and il == runs[-1][1] + 1:
+            runs[-1][1] = il
+        else:
+            runs.append([il, il])
+    return ", ".join(f"{a} to {b}" if a != b else str(a) for a, b in runs)
+
+
+def layer_range_text(layout, card: int) -> str:
+    """The block layers one card holds, with the output layer named on the
+    card charged for it. Row split names the layers offloaded, shared by
+    every card, since each card holds a fraction of each one; the ranges
+    cover the main model, a draft model's or projector's bytes sit in the
+    weights figure without a range."""
+    if layout.row_split:
+        if layout.gpu_layers:
+            text = "layers " + _runs(layout.gpu_layers) + ", row split"
+        else:
+            text = "no layers"
+    elif layout.card_layers[card]:
+        text = "layers " + _runs(layout.card_layers[card])
+    else:
+        text = "no layers"
+    return text + (" plus output" if layout.output_device == card else "")
+
+
+def ram_range_text(layout) -> str:
+    """The block layers left on the host, with the output layer named when
+    the host keeps it."""
+    text = "layers " + _runs(layout.ram_layers) if layout.ram_layers else "no layers"
+    return text + (" plus output" if layout.output_device is None else "")
 
 
 def render_lines(report: FitReport) -> list:
@@ -700,8 +770,11 @@ def render_lines(report: FitReport) -> list:
     kv_label = "KV up to" if est.kv_upper_bound else "KV"
     lines = []
     for c, ce in zip(report.cards, est.cards, strict=False):
+        range_prefix = (
+            f"{layer_range_text(est.layout, c.index)}, " if est.layout else ""
+        )
         parts = (
-            f"weights {_gib(ce.weights)}, {kv_label} {_gib(ce.kv)}"
+            f"{range_prefix}weights {_gib(ce.weights)}, {kv_label} {_gib(ce.kv)}"
             f"{_state_parts(ce.state)}, "
             f"compute ~{_gib(ce.compute)}, overhead {_gib(ce.overhead)}"
         )
@@ -717,8 +790,10 @@ def render_lines(report: FitReport) -> list:
                 f"GiB free ({parts}) short {_gib(-c.margin)} GiB</span>"
             )
     r = report.ram
+    ram_range_prefix = f"{ram_range_text(est.layout)}, " if est.layout else ""
     ram_parts = (
-        f"weights {_gib(est.ram.weights)}, {kv_label} {_gib(est.ram.kv)}"
+        f"{ram_range_prefix}weights {_gib(est.ram.weights)}, "
+        f"{kv_label} {_gib(est.ram.kv)}"
         f"{_state_parts(est.ram.state, est.ram.checkpoints)}, "
         f"buffers {_gib(est.ram.buffers)}"
     )
@@ -775,6 +850,58 @@ def render_tooltip(report: FitReport) -> str:
     return "\n".join(lines)
 
 
+def render_details(report: FitReport) -> list[str]:
+    """The tuning figures behind the readout, one plain line each: the
+    marginal KV cost of 1024 more tokens per device, each card's average
+    weight per layer with the expert share on a mixture-of-experts model,
+    the header facts, and the output tensor's size and device. With no
+    tensor table the per-card weight lines are replaced by one line saying
+    so, since no per-layer split exists to average."""
+    est = report.estimate
+    lay = est.layout
+    meta = report.meta
+    if lay is None or not report.kv_per_1k:
+        return []
+    per = report.kv_per_1k
+    devices = ", ".join(
+        [f"GPU{i} {_size(v)}" for i, v in enumerate(per[:-1])]
+        + [f"RAM {_size(per[-1])}"]
+    )
+    lines = [f"KV per 1024 tokens: {_size(sum(per))} ({devices})"]
+    if not lay.per_layer_known:
+        lines.append("weights per layer unknown without a tensor table")
+    else:
+        suffix = ", row split" if lay.row_split else ""
+        for i in range(len(lay.card_layers)):
+            held = lay.gpu_layers if lay.row_split else lay.card_layers[i]
+            if not held:
+                lines.append(f"GPU{i}: no layers")
+                continue
+            avg = lay.card_layer_bytes[i] // len(held)
+            noun = "layer" if len(held) == 1 else "layers"
+            line = f"GPU{i}: {_size(avg)} per layer over {len(held)} {noun}{suffix}"
+            if lay.expert_layer_bytes:
+                line += f", experts {_size(lay.expert_layer_bytes)} per layer"
+            lines.append(line)
+
+    def fact(name):
+        value = getattr(meta, name, None) if meta is not None else None
+        return str(value) if value else "?"
+
+    facts = (
+        f"heads {fact('n_head')}, KV heads {fact('n_head_kv')}, "
+        f"embedding {fact('n_embd')}, vocabulary {fact('n_vocab')}"
+    )
+    window = getattr(meta, "sliding_window", None) if meta is not None else None
+    if window:
+        facts += f", sliding window {window}"
+    lines.append(facts)
+    where = "in RAM" if lay.output_device is None else f"on GPU{lay.output_device}"
+    size = _size(lay.output_bytes) if lay.output_bytes else "of unknown size"
+    lines.append(f"output tensor {size} {where}")
+    return lines
+
+
 def render_dialog(report: FitReport) -> str | None:
     """The launch preflight dialog text: the same breakdown the readout
     shows, plain text, followed by a blank line and the messages marked
@@ -819,6 +946,26 @@ def to_json(report: FitReport) -> dict:
         },
         "messages": [m.text for m in report.messages],
     }
+    lay = est.layout
+    if lay is not None:
+        out["n_layers"] = lay.n_layers
+        out["output_device"] = "ram" if lay.output_device is None else lay.output_device
+        for card, held in zip(out["cards"], lay.card_layers, strict=False):
+            if lay.row_split:
+                held = lay.gpu_layers
+            card["layers"] = list(held)
+            if not lay.per_layer_known:
+                card["bytes_per_layer"] = None
+            elif held:
+                card["bytes_per_layer"] = lay.card_layer_bytes[card["index"]] // len(
+                    held
+                )
+            else:
+                card["bytes_per_layer"] = 0
+        out["ram"]["layers"] = list(lay.ram_layers)
+    if report.kv_per_1k:
+        per = report.kv_per_1k
+        out["kv_per_1k"] = {"total": sum(per), "cards": list(per[:-1]), "ram": per[-1]}
     if report.balanced is not None:
         out["balanced_split"] = {
             "value": report.balanced.value,

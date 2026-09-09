@@ -176,6 +176,12 @@ def _layer_of(name: str, n_layers: int):
     return None
 
 
+def layer_index(name: str, n_layers: int):
+    """Public alias of `_layer_of` for callers outside this module: block
+    index, n_layers for the output layer, None for input tensors."""
+    return _layer_of(name, n_layers)
+
+
 def _place_walk(
     tensors, n_layers, *, devices, rules, overrides, weights_fallback=0
 ) -> Placement:
@@ -284,7 +290,7 @@ class LayerSums:
 
 
 _SUMS_MEMO: dict = {}
-_SUMS_MEMO_LIMIT = 64
+MEMO_LIMIT = 64
 _FAMILY_MEMO: dict = {}
 
 
@@ -405,7 +411,7 @@ def layer_sums(
     and every other input, so one walk serves every count and every
     tensor split; the memo keeps a reference to the table so its identity
     cannot be reused while the entry lives, and empties itself past
-    _SUMS_MEMO_LIMIT entries. A table passed here must not be mutated in
+    MEMO_LIMIT entries. A table passed here must not be mutated in
     place afterwards, since a later call keys on the same identity and
     would return sums computed before the mutation."""
     key = (
@@ -421,7 +427,7 @@ def layer_sums(
     hit = _SUMS_MEMO.get(key)
     if hit is not None:
         return hit[1]
-    if len(_SUMS_MEMO) >= _SUMS_MEMO_LIMIT:
+    if len(_SUMS_MEMO) >= MEMO_LIMIT:
         _SUMS_MEMO.clear()
         _FAMILY_MEMO.clear()
     sums = _compute_layer_sums(
@@ -452,7 +458,7 @@ def _counted_family(tensors) -> str:
     if hit is not None:
         return hit[1]
     family = _compute_family(tensors)
-    if len(_FAMILY_MEMO) >= _SUMS_MEMO_LIMIT:
+    if len(_FAMILY_MEMO) >= MEMO_LIMIT:
         _FAMILY_MEMO.clear()
     _FAMILY_MEMO[id(tensors)] = (tensors, family)
     return family

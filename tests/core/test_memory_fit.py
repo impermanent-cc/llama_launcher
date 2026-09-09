@@ -30,7 +30,14 @@ def _meta(n_layers=8, moe=False, swa=None):
     )
 
 
-def _report(meta=None, free=(16 * GIB,), ram=64 * GIB, engine="llama.cpp", **settings):
+def _report(
+    meta=None,
+    free=(16 * GIB,),
+    ram=64 * GIB,
+    engine="llama.cpp",
+    with_details=True,
+    **settings,
+):
     settings = {"ctx-size": 4096, **settings}
     if settings.get("ctx-size") is None:
         settings.pop("ctx-size", None)
@@ -41,6 +48,7 @@ def _report(meta=None, free=(16 * GIB,), ram=64 * GIB, engine="llama.cpp", **set
         engine=engine,
         free_bytes_per_gpu=list(free),
         ram_available=ram,
+        with_details=with_details,
     )
 
 
@@ -1050,4 +1058,225 @@ def test_an_ik_dense_shortfall_report_shares_one_walk_across_the_search(monkeypa
     )
     assert any(not c.fits for c in r.cards)
     assert "--override-tensor" in " ".join(m.text for m in r.messages)
+    assert len(calls) == 2
+
+
+def test_kv_per_1k_is_the_marginal_cost_per_device():
+    r = _report(free=(16 * GIB, 8 * GIB), **{"tensor-split": "40,60"})
+    est = r.estimate
+    assert len(r.kv_per_1k) == 3
+    per_layer_1k = 2 * 8 * (512 // 8) * 1024 * 2  # K and V, 8 heads, 64 dims, f16
+    assert r.kv_per_1k[0] == 4 * per_layer_1k
+    assert r.kv_per_1k[1] == 4 * per_layer_1k
+    assert r.kv_per_1k[2] == 0
+    assert sum(r.kv_per_1k) * 4 == est.cards[0].kv + est.cards[1].kv
+
+
+def test_kv_per_1k_host_layers_land_on_the_ram_entry():
+    r = _report(**{"n-gpu-layers": 5})
+    assert r.kv_per_1k[0] > 0 and r.kv_per_1k[1] > 0
+    assert r.kv_per_1k[0] == r.kv_per_1k[1]
+
+
+def test_kv_per_1k_is_zero_past_a_sliding_window():
+    # Four default slots share the context, so a slot's share passes the
+    # window plus micro-batch (1024 + 512) only from 8192 tokens on.
+    meta = replace(
+        _meta(swa=1024), sliding_window_pattern=tuple(True for _ in range(8))
+    )
+    r = _report(meta, **{"ctx-size": 8192})
+    assert r.kv_per_1k == (0, 0)
+    assert r.estimate.cards[0].kv > 0
+    below = _report(meta, **{"ctx-size": 4096})
+    assert below.kv_per_1k[0] > 0
+
+
+def test_kv_per_1k_follows_each_cards_own_layers():
+    r = _report(free=(16 * GIB, 8 * GIB), **{"tensor-split": "60,40"})
+    per_layer_1k = 2 * 8 * (512 // 8) * 1024 * 2
+    assert r.kv_per_1k == (6 * per_layer_1k, 2 * per_layer_1k, 0)
+
+
+def test_render_lines_open_the_bracket_with_the_layer_range():
+    r = _report(free=(16 * GIB, 8 * GIB), **{"tensor-split": "40,60"})
+    lines = mf.render_lines(r)
+    assert "(layers 0 to 3, weights" in lines[0]
+    assert "(layers 4 to 7 plus output, weights" in lines[1]
+    assert "RAM: est" in lines[2] and "(no layers, weights" in lines[2]
+
+
+def test_render_lines_name_the_host_layers_and_output():
+    r = _report(**{"n-gpu-layers": 5})
+    lines = mf.render_lines(r)
+    assert "(layers 4 to 7 plus output, weights" in lines[0]
+    assert "(layers 0 to 3, weights" in lines[1]
+    none = mf.render_lines(_report(**{"n-gpu-layers": 0}))
+    assert "(no layers, weights" in none[0]
+    assert "(layers 0 to 7 plus output, weights" in none[1]
+
+
+def test_render_lines_row_split_names_no_range():
+    """Row split lists the layers every card shares rather than naming a
+    per-card range, since each card holds a fraction of each layer."""
+    r = _report(
+        free=(16 * GIB, 8 * GIB), **{"split-mode": "row", "tensor-split": "50,50"}
+    )
+    lines = mf.render_lines(r)
+    assert "(layers 0 to 7, row split" in lines[0]
+    assert "(layers 0 to 7, row split" in lines[1]
+    assert "plus output" in lines[0] and "plus output" not in lines[1]
+
+
+def test_render_lines_row_split_partial_offload():
+    """A partial offload under row split names the layers actually on a
+    card, shared by every card, with the rest on the RAM line."""
+    r = _report(
+        free=(16 * GIB, 8 * GIB),
+        **{"split-mode": "row", "tensor-split": "50,50", "n-gpu-layers": 4},
+    )
+    lines = mf.render_lines(r)
+    assert "(layers 5 to 7, row split" in lines[0]
+    assert "(layers 5 to 7, row split" in lines[1]
+    assert "(layers 0 to 4, weights" in lines[2]
+
+
+def test_render_lines_row_split_no_offload():
+    """Row split with no layers offloaded names no layers on either card."""
+    r = _report(
+        free=(16 * GIB, 8 * GIB),
+        **{"split-mode": "row", "tensor-split": "50,50", "n-gpu-layers": 0},
+    )
+    lines = mf.render_lines(r)
+    assert "(no layers" in lines[0]
+    assert "(no layers" in lines[1]
+
+
+def test_layer_range_text_joins_split_runs():
+    lay = replace(
+        _report().estimate.layout,
+        card_layers=((0, 1, 2, 3, 8, 9, 10, 11),),
+        row_split=False,
+        output_device=None,
+    )
+    assert mf.layer_range_text(lay, 0) == "layers 0 to 3, 8 to 11"
+    assert (
+        mf.layer_range_text(replace(lay, card_layers=((0, 2, 3, 4),)), 0)
+        == "layers 0, 2 to 4"
+    )
+    assert mf.layer_range_text(replace(lay, card_layers=((),)), 0) == "no layers"
+    assert (
+        mf.ram_range_text(replace(lay, ram_layers=(4, 5, 6, 7)))
+        == "layers 4 to 7 plus output"
+    )
+
+
+def test_render_details_lines():
+    r = _report(free=(16 * GIB, 8 * GIB), **{"tensor-split": "40,60"})
+    d = mf.render_details(r)
+    assert d[0] == "KV per 1024 tokens: 16 MiB (GPU0 8 MiB, GPU1 8 MiB, RAM 0 MiB)"
+    assert d[1] == "GPU0: 500 MiB per layer over 4 layers"
+    assert d[2] == "GPU1: 500 MiB per layer over 4 layers"
+    assert d[3] == "heads 8, KV heads 8, embedding 512, vocabulary 1000"
+    assert d[4] == "output tensor 100 MiB on GPU1"
+    assert "experts" not in "\n".join(d)
+
+
+def test_render_details_one_layer_and_unknown_output():
+    one = _report(free=(16 * GIB,), **{"n-gpu-layers": 2})
+    d = mf.render_details(one)
+    assert d[1] == "GPU0: 500 MiB per layer over 1 layer"
+    blob = mf.fit_report(
+        replace(_meta(), tensors=()),
+        8 * GIB,
+        settings={"ctx-size": 4096},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[16 * GIB],
+        ram_available=64 * GIB,
+        with_details=True,
+    )
+    blob_lines = mf.render_details(blob)
+    assert "weights per layer unknown without a tensor table" in blob_lines
+    assert blob_lines[-1] == "output tensor of unknown size on GPU0"
+    assert mf.to_json(blob)["cards"][0]["bytes_per_layer"] is None
+
+
+def test_render_details_moe_and_window_and_ram_output():
+    meta = replace(
+        _meta(moe=True, swa=1024), sliding_window_pattern=tuple(True for _ in range(8))
+    )
+    r = _report(meta, **{"n-gpu-layers": 5})
+    d = mf.render_details(r)
+    assert d[1] == "GPU0: 500 MiB per layer over 4 layers, experts 400 MiB per layer"
+    assert d[2].endswith(", sliding window 1024")
+    assert d[3] == "output tensor 100 MiB on GPU0"
+    none = mf.render_details(_report(**{"n-gpu-layers": 0}))
+    assert none[1] == "GPU0: no layers"
+    assert none[3] == "output tensor 100 MiB in RAM"
+
+
+def test_render_details_row_split_shares_the_layer_count():
+    """Under row split every card's line uses the shared layer count, not
+    its own card_layers, since row split spreads every layer's weight over
+    every card."""
+    r = _report(
+        free=(16 * GIB, 8 * GIB), **{"split-mode": "row", "tensor-split": "50,50"}
+    )
+    d = mf.render_details(r)
+    assert d[1] == "GPU0: 250 MiB per layer over 8 layers, row split"
+    assert d[2] == "GPU1: 250 MiB per layer over 8 layers, row split"
+
+
+def test_details_stay_out_of_tooltip_and_dialog():
+    r = _report(free=(3 * GIB,), fit="off")
+    assert "per layer" not in mf.render_tooltip(r)
+    assert "per layer" not in (mf.render_dialog(r) or "")
+
+
+def test_to_json_carries_layout_and_kv_per_1k():
+    r = _report(free=(16 * GIB, 8 * GIB), **{"tensor-split": "40,60"})
+    j = mf.to_json(r)
+    assert j["n_layers"] == 8
+    assert j["cards"][0]["layers"] == [0, 1, 2, 3]
+    assert j["cards"][1]["layers"] == [4, 5, 6, 7]
+    assert j["cards"][0]["bytes_per_layer"] == 500 * MIB
+    assert j["ram"]["layers"] == []
+    assert j["output_device"] == 1
+    assert (
+        j["kv_per_1k"]["total"] == sum(j["kv_per_1k"]["cards"]) + j["kv_per_1k"]["ram"]
+    )
+    assert json.loads(json.dumps(j))["n_layers"] == 8
+    host = mf.to_json(_report(**{"n-gpu-layers": 0}))
+    assert host["output_device"] == "ram" and host["ram"]["layers"] == list(range(8))
+
+
+def test_to_json_row_split_gives_every_card_the_full_layer_range():
+    """Under row split every card's JSON layer list is the same shared
+    range, since row split spreads every layer's weight over every card."""
+    r = _report(
+        free=(16 * GIB, 8 * GIB), **{"split-mode": "row", "tensor-split": "50,50"}
+    )
+    j = mf.to_json(r)
+    assert j["cards"][0]["layers"] == list(range(8))
+    assert j["cards"][1]["layers"] == list(range(8))
+    assert j["cards"][1]["bytes_per_layer"] == 250 * MIB
+
+
+def test_fit_report_omits_kv_per_1k_without_details(monkeypatch):
+    """fit_report leaves kv_per_1k empty unless with_details is asked for,
+    so a caller that only reads the verdict skips the second estimate: one
+    estimate_memory call without details, two (the report's own and the
+    marginal one) with."""
+    calls = []
+    real = mf.estimate_memory
+
+    def counting(*a, **k):
+        calls.append(1)
+        return real(*a, **k)
+
+    monkeypatch.setattr(mf, "estimate_memory", counting)
+    r = _report(with_details=False)
+    assert r.kv_per_1k == ()
+    assert len(calls) == 1
+    calls.clear()
+    _report(with_details=True)
     assert len(calls) == 2

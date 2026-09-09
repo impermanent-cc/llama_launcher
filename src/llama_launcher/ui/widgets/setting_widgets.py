@@ -16,6 +16,9 @@ from llama_launcher.ui.widgets.no_wheel import (
     NoWheelSpinBox,
 )
 
+DOT_WIDTH = 16
+MULTISELECT_COLUMNS = 2
+
 
 class SuggestionDot(QToolButton):
     """Inline per-setting indicator: filled \u25cf = suggested, hollow \u25cb = N/A.
@@ -27,6 +30,7 @@ class SuggestionDot(QToolButton):
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setAutoRaise(True)
+        self.setFixedWidth(DOT_WIDTH)
         self._on_apply = None
         self.clicked.connect(self._fire)
         self.set_state("none")
@@ -135,9 +139,10 @@ class SettingWidget(QWidget):
                 cb.toggled.connect(lambda: self.changed.emit())
                 self._checks[opt] = cb
                 boxes.append(cb)
-            # arrange in a compact grid (3 columns) so nothing overflows horizontally
+            # Two columns keep the widest row narrow enough for the settings
+            # column; "all" fills the first cell.
             for i, cb in enumerate(boxes):
-                grid.addWidget(cb, i // 3, i % 3)
+                grid.addWidget(cb, i // MULTISELECT_COLUMNS, i % MULTISELECT_COLUMNS)
             self._editor = container
         else:  # string
             self._editor = QLineEdit()
@@ -165,8 +170,9 @@ class SettingWidget(QWidget):
                 self._reveal_btn = reveal
             self._editor.textChanged.connect(lambda: self.changed.emit())
 
-        # Cap editor widths so dropdowns/inputs don't stretch the whole panel,
-        # and left-align them with a trailing stretch.
+        # Cap editor widths so dropdowns and inputs do not stretch the whole
+        # panel; the dot follows the editor and a trailing stretch
+        # left-aligns the row.
         _max_width = {
             "enum": 150,
             "int_or_token": 150,
@@ -181,10 +187,9 @@ class SettingWidget(QWidget):
         layout.addWidget(self._editor)
         if getattr(self, "_reveal_btn", None) is not None:
             layout.addWidget(self._reveal_btn)
-        layout.addStretch(1)
-
         self._dot = SuggestionDot(self)
         layout.addWidget(self._dot)
+        layout.addStretch(1)
 
         if setting.danger:
             self.setStyleSheet("#dangerSetting { border: 1px solid red; }")

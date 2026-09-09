@@ -104,6 +104,9 @@ from llama_launcher.ui.controllers.report_controller import (  # noqa: E402
     ReportController,
 )
 
+NAME_EDIT_BOUNDS = (160, 260)
+PROFILE_COMBO_BOUNDS = (200, 340)
+
 
 class MainWindow(QMainWindow):
     def __init__(self, parent=None):
@@ -257,9 +260,15 @@ class MainWindow(QMainWindow):
         self.nodes_btn.setToolTip("Add/test/remove remote podman-over-SSH nodes")
         self.nodes_btn.clicked.connect(self.open_nodes_dialog)
         self.status_label = QLabel("\u25cf stopped")
+        name_edit = self._configure_panel.name_edit
+        profile_combo = self._configure_panel.profile_combo
+        name_edit.setMinimumWidth(NAME_EDIT_BOUNDS[0])
+        name_edit.setMaximumWidth(NAME_EDIT_BOUNDS[1])
+        profile_combo.setMinimumWidth(PROFILE_COMBO_BOUNDS[0])
+        profile_combo.setMaximumWidth(PROFILE_COMBO_BOUNDS[1])
         bar.addWidget(QLabel("Name"))
-        bar.addWidget(self._configure_panel.name_edit, 1)
-        bar.addWidget(self._configure_panel.profile_combo, 1)
+        bar.addWidget(name_edit, 1)
+        bar.addWidget(profile_combo, 1)
         for b in (
             self._configure_panel.save_btn,
             self._configure_panel.save_as_btn,
@@ -269,7 +278,9 @@ class MainWindow(QMainWindow):
             self.stats_toggle_btn,
         ):
             bar.addWidget(b)
+        bar.addStretch(1)
         bar.addWidget(self.status_label)
+        self._top_bar = bar
         root.insertLayout(0, bar)
         self.stats_toggle_btn.toggled.connect(self.stats_dock.setVisible)
         # Also drive worker start/stop straight off the toggle: QDockWidget's
