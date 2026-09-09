@@ -11,6 +11,7 @@ from PySide6.QtWidgets import QInputDialog, QMessageBox
 from llama_launcher.core import memory_fit, vram
 from llama_launcher.core.command_builder import build_command
 from llama_launcher.core.nodes import connection_for
+from llama_launcher.core.pathmap import uncounted_paths
 from llama_launcher.core.spec import profile_port
 from llama_launcher.services import api_key as api_key_store
 from llama_launcher.services import (
@@ -549,22 +550,33 @@ class LaunchController:
         never trusts a render the form made before this click."""
         panel = self.window._configure_panel
         meta, weights = (
-            panel._cached_meta_weights(p.model, p.mounts) if p.model else (None, None)
+            panel.cached_meta_weights(p.model, p.mounts) if p.model else (None, None)
         )
         draft_meta, draft_weights = (
-            panel._cached_meta_weights(p.draft_model, p.mounts)
+            panel.cached_meta_weights(p.draft_model, p.mounts)
             if p.draft_model
             else (None, 0)
         )
         _mm, mmproj_bytes = (
-            panel._cached_meta_weights(p.mmproj, p.mounts) if p.mmproj else (None, 0)
+            panel.cached_meta_weights(p.mmproj, p.mounts) if p.mmproj else (None, 0)
         )
-        # Judge against the GPUs of the node the profile will LAUNCH on -- a
+        # Judge against the GPUs of the node the profile will LAUNCH on: a
         # remote-node profile checked against the local cards gets a wrong answer
-        # in both directions.
+        # in both directions. The panel's own probe, kept fresh for its live
+        # readout, is reused here while it is still keyed to this ssh target
+        # and within its TTL, so a launch click right after a render does not
+        # pay for a second round trip; a stale or differently-targeted probe
+        # still means a fresh one. A reused probe whose RAM reading failed
+        # has its RAM read again here rather than judging the RAM side
+        # against nothing.
         ssh = gpu_ssh_target(self.window.base_dir(), p.runtime.node)
-        gpus = gpu.query_gpus(ssh)
-        ram = pool_preflight.free_ram_bytes(ssh) or None
+        probe = panel.cached_probe(ssh)
+        if probe is None:
+            gpus, ram = gpu.query_gpus(ssh), pool_preflight.free_ram_bytes(ssh) or None
+        else:
+            gpus, ram = probe
+            if ram is None:
+                ram = pool_preflight.free_ram_bytes(ssh) or None
         mib = 1024 * 1024
         return memory_fit.fit_report(
             meta,
@@ -577,6 +589,7 @@ class LaunchController:
             draft_meta=draft_meta,
             draft_weights=draft_weights or 0,
             mmproj_bytes=mmproj_bytes or 0,
+            uncounted=uncounted_paths(p.draft_model, p.mmproj, p.mounts),
         )
 
     def vram_check(self) -> str | None:

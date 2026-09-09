@@ -2,7 +2,7 @@ from llama_launcher.core.sweep import MeasuredMemory, Sweep, SweepPoint
 from llama_launcher.services import sweep_store
 
 
-def _sweep():
+def _sweep(knob="n-cpu-ffn"):
     m = MeasuredMemory(
         ({"model": 1, "kv": 2, "compute": 3},),
         {"model": 0, "kv": 0, "compute": 0, "output": 4},
@@ -27,7 +27,7 @@ def _sweep():
     )
     return Sweep(
         "My Prof",
-        "n-cpu-ffn",
+        knob,
         "2026-09-06T10:00:00",
         (p,),
         {"sizes": [128], "n_predict": 8, "warmup": 0, "repeats": 1},
@@ -48,3 +48,16 @@ def test_load_missing_or_corrupt_is_none(tmp_path):
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text("{not json")
     assert sweep_store.load(tmp_path, "bad") is None
+
+
+def test_save_creates_the_sweeps_dir_with_a_private_file(tmp_path):
+    sweep_store.save(tmp_path, "P", _sweep())
+    p = sweep_store.sweep_path(tmp_path, "P")
+    assert p.parent.name == "sweeps" and p.parent.is_dir()
+    assert oct(p.stat().st_mode & 0o777) == "0o600"
+
+
+def test_a_second_save_replaces_the_first(tmp_path):
+    sweep_store.save(tmp_path, "P", _sweep(knob="n-cpu-ffn"))
+    sweep_store.save(tmp_path, "P", _sweep(knob="n-cpu-moe"))
+    assert sweep_store.load(tmp_path, "P")["knob"] == "n-cpu-moe"

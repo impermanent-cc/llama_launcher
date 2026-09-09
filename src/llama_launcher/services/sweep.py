@@ -12,7 +12,6 @@ from llama_launcher.core import sweep as core_sweep
 from llama_launcher.core.spec import profile_port
 from llama_launcher.core.validation import dial_host
 from llama_launcher.services import benchmark, headless, runtime
-from llama_launcher.services.health import probe_health
 
 _MIN_SWEEP_VERBOSITY = 4
 
@@ -34,19 +33,15 @@ def sweep_profile(profile, count: int, knob: str):
 
 
 def _wait_ready(host, port, timeout, should_cancel, *, name=None, binary=None) -> bool:
-    """Poll the server until it reports ready. A container that is no longer
-    running gives up at once instead of burning the whole timeout, so a
-    server that dies while loading costs one poll interval."""
-    deadline = time.monotonic() + float(timeout)
-    while time.monotonic() < deadline:
-        if should_cancel is not None and should_cancel():
-            return False
-        if probe_health(port, host=host) == "ready":
-            return True
-        if name and runtime.container_state(name, binary) != "running":
-            return False
-        time.sleep(1.0)
-    return False
+    """Poll the server through headless.wait_ready. A named container that
+    is no longer running gives up at once instead of burning the whole
+    timeout, so a server that dies while loading costs one poll interval."""
+    still_running = (
+        (lambda: runtime.container_state(name, binary) == "running") if name else None
+    )
+    return headless.wait_ready(
+        host, port, timeout, should_cancel=should_cancel, still_running=still_running
+    )
 
 
 def _read_log(name, binary) -> str:

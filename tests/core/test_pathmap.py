@@ -1,4 +1,8 @@
-from llama_launcher.core.pathmap import container_to_host, host_to_container
+from llama_launcher.core.pathmap import (
+    container_to_host,
+    host_to_container,
+    uncounted_paths,
+)
 from llama_launcher.core.spec import Mount
 
 
@@ -73,3 +77,29 @@ def test_container_skips_empty_mounts():
     ]
     assert container_to_host("/data/x.gguf", mounts) == "/h/data/x.gguf"
     assert container_to_host("/models/x.gguf", mounts) is None
+
+
+def test_uncounted_paths_both_unmounted():
+    mounts = [Mount(host="/h/models", container="/models")]
+    result = uncounted_paths("/nowhere/d.gguf", "/nowhere/p.mmproj", mounts)
+    assert result == (
+        ("Draft model", "/nowhere/d.gguf"),
+        ("Projector", "/nowhere/p.mmproj"),
+    )
+
+
+def test_uncounted_paths_one_mounted():
+    mounts = [Mount(host="/h/models", container="/models")]
+    result = uncounted_paths("/models/d.gguf", "/nowhere/p.mmproj", mounts)
+    assert result == (("Projector", "/nowhere/p.mmproj"),)
+
+
+def test_uncounted_paths_both_unset():
+    mounts = [Mount(host="/h/models", container="/models")]
+    assert uncounted_paths(None, None, mounts) == ()
+
+
+def test_uncounted_paths_mmproj_only():
+    mounts = [Mount(host="/h/models", container="/models")]
+    result = uncounted_paths(None, "/nowhere/p.mmproj", mounts)
+    assert result == (("Projector", "/nowhere/p.mmproj"),)

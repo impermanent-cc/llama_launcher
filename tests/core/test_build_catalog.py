@@ -78,3 +78,10 @@ def test_peer_max_batch_size_is_ik_only():
     ik = for_engine(BUILD_CATALOG, "ik_llama.cpp")
     assert "cuda-peer-max-batch-size" in ik
     assert "cuda-peer-max-batch-size" not in ml
+
+
+def test_every_engine_gated_option_carries_a_tooltip():
+    gated = [o for o in BUILD_CATALOG.values() if o.engine != "any"]
+    assert gated and all(o.tooltip.strip() for o in gated), [
+        o.key for o in gated if not o.tooltip.strip()
+    ]

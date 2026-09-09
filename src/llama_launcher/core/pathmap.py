@@ -41,3 +41,14 @@ def container_to_host(container_path: str, mounts) -> str | None:
         if container_path.startswith(prefix):
             return host + "/" + container_path[len(prefix) :]
     return None
+
+
+def uncounted_paths(draft_model: str | None, mmproj: str | None, mounts) -> tuple:
+    """(what, path) pairs for the draft model and the projector whose path
+    lies under no configured folder, in that order, each labelled "Draft
+    model" or "Projector"; empty when both are mounted or unset."""
+    return tuple(
+        (what, path)
+        for what, path in (("Draft model", draft_model), ("Projector", mmproj))
+        if path and container_to_host(path, mounts) is None
+    )

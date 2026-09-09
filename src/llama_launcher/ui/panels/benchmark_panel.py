@@ -21,6 +21,7 @@ from llama_launcher.core.sweep import (
     largest_row,
     measured_card_total,
     measured_ram_total,
+    parse_prompt_sizes,
 )
 from llama_launcher.ui.widgets.info_button import InfoButton
 
@@ -164,6 +165,8 @@ class BenchmarkPanel(QWidget):
         self.sweep_apply_btn.setEnabled(False)
         self.sweep_apply_btn.clicked.connect(self._on_sweep_apply_clicked)
         sweep_row.addWidget(self.sweep_apply_btn)
+        self.sweep_stamp = QLabel("")
+        sweep_row.addWidget(self.sweep_stamp)
         layout.addLayout(sweep_row)
         self.sweep_status = QLabel("")
         self.sweep_status.setWordWrap(True)
@@ -189,9 +192,8 @@ class BenchmarkPanel(QWidget):
         if self._bench_running:
             self.benchmark_cancel_requested.emit()
             return
-        try:
-            sizes = [int(s) for s in self.bench_sizes.text().split(",") if s.strip()]
-        except ValueError:
+        sizes = parse_prompt_sizes(self.bench_sizes.text())
+        if sizes is None:
             return
         self.benchmark_run_requested.emit(
             {
@@ -422,12 +424,18 @@ class BenchmarkPanel(QWidget):
             self._add_sweep_row(pt, is_best=best is not None and pt is best)
         self.sweep_apply_btn.setEnabled(best is not None and not self._sweep_running)
 
-    def show_sweep(self, sweep: dict, n_cards: int) -> None:
-        """Repaint the sweep table for one sweep, header rebuilt for n_cards."""
+    def show_sweep(self, sweep: dict, n_cards: int, *, stored: bool = True) -> None:
+        """Repaint the sweep table for one sweep, header rebuilt for n_cards,
+        labelled with the sweep's own stored timestamp. The label stays
+        blank when there is no timestamp (the empty table shown while a
+        fresh sweep starts) or when `stored` is False (a cancelled sweep,
+        which is shown but never written to disk)."""
         self._sweep_n_cards = n_cards
         self._rebuild_sweep_headers(n_cards)
         points = [self._to_sweep_point(p) for p in sweep.get("points", [])]
         self._render_sweep_points(points)
+        timestamp = sweep.get("timestamp", "") if stored else ""
+        self.sweep_stamp.setText(f"stored {timestamp}" if timestamp else "")
 
     def set_sweep_point(self, point: dict) -> None:
         """Update the row for this count if seen already, else append it."""
@@ -443,11 +451,12 @@ class BenchmarkPanel(QWidget):
 
     def clear_sweep(self) -> None:
         """Empty the sweep table and the state read from it: no points, no
-        best count and Apply disabled."""
+        best count, Apply disabled and no stored-sweep label."""
         self._sweep_points = []
         self._sweep_best_count = None
         self.sweep_table.setRowCount(0)
         self.sweep_apply_btn.setEnabled(False)
+        self.sweep_stamp.setText("")
 
     def reset(self):
         self.bench_table.clearSpans()

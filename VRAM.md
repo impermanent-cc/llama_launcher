@@ -123,13 +123,14 @@ own split: its KV and state priced at the profile's context plus 4096
 tokens, less the same figure at the profile's own context, divided by the
 step, so window caps, cache types and slot rules need no second formula.
 
-The search starts at the split the profile itself would use, and each
-round takes the best single-layer move across any boundary while one
-scores strictly better than the current candidate, stopping after at most
-32 moves. On two cards with a single-peaked capacity curve this reaches
-the best candidate; on three or more cards, on a curve with more than one
-peak, or where the best candidate lies further than the move budget, it
-can stop at a lower peak instead of the best one.
+On two cards every candidate is scored and the best-scoring one is
+returned. On three or more cards the search starts at the split the
+profile itself would use and climbs: each round scores every candidate one
+layer away across any boundary and takes the best of those while one
+scores strictly better than the current candidate, stopping when none does
+or after as many moves as there are entries placed on cards. On a capacity
+curve with more than one peak the climb can stop at a lower peak instead
+of the best candidate.
 
 The value is rendered as layer counts per card, for example `38,28`: a
 boundary given that way cannot round onto the wrong layer the way a

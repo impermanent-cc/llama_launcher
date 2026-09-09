@@ -36,35 +36,46 @@ def kv_cache_bytes(
     )
 
 
-def kv_layer_mask(meta, n_layers: int) -> tuple:
-    """Per layer, whether it holds a KV cache: every layer unless a per-layer
-    KV head count names it (zero means none), or a full-attention interval
-    does (layer i holds one when i + 1 is a multiple of it). The interval
-    counts only on a header that also carries recurrent-state sizes, so a
-    header naming an interval alone leaves no layer uncharged. A header with
-    recurrent-state sizes and no attention heads is purely recurrent: no
-    layer holds a cache. Regardless of the rule above, the last
-    `shared_kv_layers` layers own no cache of their own."""
+def attention_layer_mask(meta, n_layers: int) -> tuple:
+    """Per layer, whether it holds a KV cache before the shared tail is
+    cleared: every layer unless a per-layer KV head count names it (zero
+    means none), or a full-attention interval does (layer i holds one when
+    i + 1 is a multiple of it). The interval counts only on a header that
+    also carries recurrent-state sizes, so a header naming an interval alone
+    leaves no layer uncharged. A header with recurrent-state sizes and no
+    attention heads is purely recurrent: no layer holds a cache."""
     n = int(n_layers)
     heads = getattr(meta, "kv_layer_heads", None)
     if heads:
-        mask = tuple(bool(int(heads[i])) if i < len(heads) else True for i in range(n))
-    else:
-        interval = getattr(meta, "full_attention_interval", None)
-        if interval and int(interval) > 1 and recurrent_state_bytes(meta):
-            k = int(interval)
-            mask = tuple((i + 1) % k == 0 for i in range(n))
-        elif recurrent_state_bytes(meta) and not int(
-            getattr(meta, "n_head", None) or 0
-        ):
-            mask = tuple(False for _ in range(n))
-        else:
-            mask = tuple(True for _ in range(n))
+        return tuple(bool(int(heads[i])) if i < len(heads) else True for i in range(n))
+    interval = getattr(meta, "full_attention_interval", None)
+    if interval and int(interval) > 1 and recurrent_state_bytes(meta):
+        k = int(interval)
+        return tuple((i + 1) % k == 0 for i in range(n))
+    if recurrent_state_bytes(meta) and not int(getattr(meta, "n_head", None) or 0):
+        return tuple(False for _ in range(n))
+    return tuple(True for _ in range(n))
+
+
+def _clear_shared_tail(mask: tuple, meta, n_layers: int) -> tuple:
+    """`mask` with the last `shared_kv_layers` layers forced to False: those
+    layers own no cache of their own regardless of what `mask` says."""
+    n = int(n_layers)
     shared = int(getattr(meta, "shared_kv_layers", None) or 0)
-    if shared > 0:
-        cut = max(n - shared, 0)
-        mask = tuple(m if i < cut else False for i, m in enumerate(mask))
-    return mask
+    if shared <= 0:
+        return mask
+    cut = max(n - shared, 0)
+    return tuple(m if i < cut else False for i, m in enumerate(mask))
+
+
+def kv_layer_mask(meta, n_layers: int, *, attention=None) -> tuple:
+    """Per layer, whether it holds a KV cache: `attention_layer_mask` with
+    the last `shared_kv_layers` layers forced to own no cache of their
+    own. Accepts a precomputed attention mask via `attention` to avoid
+    recomputing it when the caller already has one."""
+    if attention is None:
+        attention = attention_layer_mask(meta, n_layers)
+    return _clear_shared_tail(attention, meta, n_layers)
 
 
 def recurrent_layer_mask(meta, kv_mask) -> tuple:
@@ -162,20 +173,20 @@ def effective_ctx_size(settings: dict, engine: str) -> int | None:
     count to the server, so the answer is None and the caller falls back to
     the model's own trained context.
     """
-    ctx = _positive_int(settings.get("ctx-size"))
+    ctx = positive_int(settings.get("ctx-size"))
     if ctx:
         return ctx
     setting = CATALOG["kv-unified-per-slot"]
     if not accepts(setting, engine):
         return None
-    per_slot = _positive_int(settings.get("kv-unified-per-slot"))
-    parallel = _positive_int(settings.get("parallel"))
+    per_slot = positive_int(settings.get("kv-unified-per-slot"))
+    parallel = positive_int(settings.get("parallel"))
     if per_slot and parallel:
         return per_slot * parallel
     return None
 
 
-def _positive_int(value) -> int | None:
+def positive_int(value) -> int | None:
     """A settings value as a positive int, or None. Profile JSON can carry a
     string or a bool where a number belongs, and a bool is not a slot count.
     Zero is rejected, unlike _non_negative_int."""
@@ -209,16 +220,20 @@ def router_fit_summary(
 
     A router has no model of its own; it keeps up to --models-max member
     models resident at once (0 = unlimited), so the worst case sums the
-    models-max LARGEST per-member estimates. The budget is the combined free
-    VRAM (children are placed like the default layer split). None when
-    unknowable -- no usable member estimate, or no GPU info -- so callers show
+    models-max LARGEST per-member estimates, each contributing its own
+    weights, KV and compute (a member estimate excludes the per-card
+    overhead). The per-card backend overhead is a property of the visible
+    cards, not of any one member, so it is charged once per visible card
+    regardless of how many members are counted. The budget is the combined
+    free VRAM (children are placed like the default layer split). None when
+    unknowable: no usable member estimate, or no GPU info, so callers show
     nothing rather than wrong numbers.
     """
     ests = sorted((int(e) for e in member_estimates if e and int(e) > 0), reverse=True)
     if not ests or not free_bytes_per_gpu:
         return None
     counted = len(ests) if int(models_max) <= 0 else min(int(models_max), len(ests))
-    est = sum(ests[:counted])
+    est = sum(ests[:counted]) + CARD_OVERHEAD_BYTES * len(free_bytes_per_gpu)
     free = available_free_bytes(free_bytes_per_gpu)
     ok, margin = fits(est, free)
     return RouterFit(
@@ -295,6 +310,12 @@ class CardEstimate:
     def total(self) -> int:
         return self.weights + self.kv + self.compute + self.overhead + self.state
 
+    @property
+    def working(self) -> int:
+        """Weights, KV, compute and recurrent state on this card: its total
+        less its own per-card overhead."""
+        return self.weights + self.kv + self.compute + self.state
+
 
 @dataclass(frozen=True)
 class RamEstimate:
@@ -336,9 +357,16 @@ class MemoryEstimate:
         return sum(c.total for c in self.cards)
 
     @property
+    def gpu_working(self) -> int:
+        """Every card's total less its own per-card overhead: the figure a
+        pool sum across several models should carry, since the overhead is
+        a property of the visible card, not of any one model on it."""
+        return sum(c.working for c in self.cards)
+
+    @property
     def model_total(self) -> int:
         """Weights, KV, recurrent state and checkpoints on every device, the
-        figure a pool or router readout spreads across its budget."""
+        figure a pool readout spreads across its budget."""
         return sum(c.weights + c.kv + c.state for c in self.cards) + (
             self.ram.weights + self.ram.kv + self.ram.state + self.ram.checkpoints
         )
@@ -348,7 +376,7 @@ def slot_count(settings, engine) -> int:
     """Request slots the server serves: the --parallel setting when it is a
     positive number, else the engine default of four on llama.cpp and one on
     ik_llama.cpp."""
-    n = _positive_int(settings.get("parallel"))
+    n = positive_int(settings.get("parallel"))
     if n:
         return n
     return 1 if engine == "ik_llama.cpp" else 4
@@ -554,8 +582,9 @@ def _model_part(meta, weights_bytes, *, settings, engine, free, ctx, ubatch, dra
             1, n, head_dim_v, ctx, v_quant
         )
 
-    mask = kv_layer_mask(meta, n_layers)
-    recurrent = recurrent_layer_mask(meta, mask)
+    attn = attention_layer_mask(meta, n_layers)
+    mask = kv_layer_mask(meta, n_layers, attention=attn)
+    recurrent = recurrent_layer_mask(meta, attn)
     rs = recurrent_state_bytes(meta) * slot_count(settings, engine)
     n_ckpt = _checkpoint_count(settings)
     ram_kv = ram_state = ram_ckpt = 0
@@ -669,10 +698,8 @@ def estimate_memory(
     free = [int(b) for b in free_bytes_per_gpu] or [0]
     n_cards = len(free)
     ctx = effective_ctx_size(eff, engine) or meta.ctx_train or 4096
-    batch = _positive_int(eff.get("batch-size")) or int(CATALOG["batch-size"].default)
-    ubatch = _positive_int(eff.get("ubatch-size")) or int(
-        CATALOG["ubatch-size"].default
-    )
+    batch = positive_int(eff.get("batch-size")) or int(CATALOG["batch-size"].default)
+    ubatch = positive_int(eff.get("ubatch-size")) or int(CATALOG["ubatch-size"].default)
     batch = min(batch, ctx)
     ubatch = min(ubatch, batch)
     flash = str(eff.get("flash-attn", "auto")) != "off"
@@ -692,7 +719,7 @@ def estimate_memory(
     ram_state, ram_ckpt = part.ram_state, part.ram_checkpoints
     compute = [0] * n_cards
     split_mode = eff.get("split-mode", "layer")
-    main_idx = _positive_int(eff.get("main-gpu")) or 0
+    main_idx = positive_int(eff.get("main-gpu")) or 0
     main_idx = main_idx if 0 <= main_idx < n_cards else 0
     ram_logits = _charge_compute(
         part,
@@ -709,7 +736,7 @@ def estimate_memory(
     )
     if draft_meta is not None and draft_meta.n_layers and draft_meta.n_embd:
         dctx = (
-            _positive_int(eff.get("ctx-size-draft"))
+            positive_int(eff.get("ctx-size-draft"))
             if accepts(CATALOG["ctx-size-draft"], engine)
             else None
         )

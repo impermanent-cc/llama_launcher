@@ -5,6 +5,7 @@ import sys
 
 from llama_launcher.core import memory_fit
 from llama_launcher.core.command_builder import build_command
+from llama_launcher.core.pathmap import uncounted_paths
 from llama_launcher.core.report import redact_secrets
 from llama_launcher.core.spec import profile_port
 from llama_launcher.core.validation import dial_host, validate
@@ -274,7 +275,15 @@ def _do_health(p, base_dir, as_json=False):
     )
 
 
-_ESTIMATE_EXIT = {True: 0, False: 3}
+def _estimate_exit(report) -> int:
+    """3 when a card is over budget, 6 when every card fits and RAM is over
+    budget, 0 otherwise; a RAM shortfall is a warning, so the JSON ok stays
+    true whenever every card fits."""
+    if not report.fits:
+        return 3
+    if report.ram.fits is False:
+        return 6
+    return 0
 
 
 def _do_estimate(p, base_dir, as_json=False):
@@ -308,6 +317,7 @@ def _do_estimate(p, base_dir, as_json=False):
             error="no GPU visible on the launch node",
             text_err=f"'{p.name}': no GPU visible on the launch node",
         )
+    uncounted = uncounted_paths(p.draft_model, p.mmproj, mounts)
     report = memory_fit.fit_report(
         meta,
         weights or 0,
@@ -320,6 +330,7 @@ def _do_estimate(p, base_dir, as_json=False):
         draft_weights=draft_weights or 0,
         mmproj_bytes=mmproj_bytes or 0,
         with_balanced=True,
+        uncounted=uncounted,
     )
     if report is None:
         return _emit(
@@ -330,7 +341,7 @@ def _do_estimate(p, base_dir, as_json=False):
             error="model metadata too thin for an estimate",
             text_err=f"'{p.name}': model metadata too thin for an estimate",
         )
-    code = _ESTIMATE_EXIT[report.fits]
+    code = _estimate_exit(report)
     if as_json:
         obj = {
             "action": "estimate",

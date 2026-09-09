@@ -587,6 +587,45 @@ def test_estimate_exit_3_when_over(monkeypatch, capsys):
     assert ">" in out
 
 
+def test_estimate_exits_6_when_only_ram_is_over_budget(monkeypatch, capsys):
+    _profiles(monkeypatch, [_server("s")])
+    _estimate_env(monkeypatch, free_mib=(30000,), ram=1)
+    assert app.main(["--estimate", "--profile", "s", "--json"]) == 6
+    obj = json.loads(capsys.readouterr().out)
+    assert obj["ok"] is True
+    assert obj["estimate"]["ram"]["fits"] is False
+
+
+def test_estimate_exits_3_when_a_card_and_ram_are_over(monkeypatch):
+    _profiles(monkeypatch, [_server("s", **{"fit": "off"})])
+    _estimate_env(monkeypatch, free_mib=(512,), ram=1)
+    assert app.main(["--estimate", "--profile", "s"]) == 3
+
+
+def test_estimate_exits_0_when_ram_is_unknown(monkeypatch):
+    _profiles(monkeypatch, [_server("s")])
+    _estimate_env(monkeypatch, free_mib=(30000,), ram=None)
+    assert app.main(["--estimate", "--profile", "s"]) == 0
+
+
+def test_estimate_names_an_unmounted_draft(monkeypatch, capsys):
+    p = dataclasses.replace(_server("s"), draft_model="/nowhere/d.gguf")
+    _profiles(monkeypatch, [p])
+    _estimate_env(monkeypatch, free_mib=(30000,))
+    app.main(["--estimate", "--profile", "s"])
+    out = capsys.readouterr().out
+    assert "Draft model /nowhere/d.gguf lies under no configured folder" in out
+
+
+def test_estimate_does_not_name_a_mounted_draft(monkeypatch, capsys):
+    p = dataclasses.replace(_server("s"), draft_model="/models/d.gguf")
+    _profiles(monkeypatch, [p])
+    _estimate_env(monkeypatch, free_mib=(30000,))
+    app.main(["--estimate", "--profile", "s"])
+    out = capsys.readouterr().out
+    assert "lies under no configured folder" not in out
+
+
 def test_estimate_exit_2_without_gpus(monkeypatch, capsys):
     _profiles(monkeypatch, [_server("s")])
     _estimate_env(monkeypatch, free_mib=())

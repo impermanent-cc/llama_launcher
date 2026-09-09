@@ -4,6 +4,7 @@ text and JSON."""
 
 import html
 import re
+import shlex
 from dataclasses import dataclass
 
 from . import balance as _balance
@@ -54,6 +55,17 @@ class FitReport:
 
 def _gib(n) -> str:
     return f"{n / _GIB:.1f}"
+
+
+def _amount(n) -> str:
+    """A byte count for a message: whole MiB below one GiB, one decimal of
+    GiB from there, so a shortfall under a gibibyte never renders as a
+    misleadingly rounded ~0.0 GiB. The switch to GiB happens where the
+    whole-MiB rendering would itself round up to 1024, so no amount ever
+    prints as ~1024 MiB."""
+    if round(n / _MIB) < 1024:
+        return f"~{n / _MIB:.0f} MiB"
+    return f"~{_gib(n)} GiB"
 
 
 def _state_parts(state: int, checkpoints: int = 0, unit: str = "") -> str:
@@ -295,7 +307,7 @@ def smallest_fitting_offload(
 def _shortfall_text(cards) -> str:
     parts = [
         f"GPU{c.index}: est ~{_gib(c.est)} GiB exceeds free ~{_gib(c.free)} "
-        f"GiB by ~{_gib(-c.margin)} GiB"
+        f"GiB by {_amount(-c.margin)}"
         for c in cards
         if not c.fits
     ]
@@ -306,7 +318,11 @@ def _suggestion_text(found, split_value=None) -> str:
     """The offload-count clause of a shortfall message: the smallest count
     that fits, naming the split it was found at when that split is a
     balanced suggestion rather than the profile's own, since the count is
-    minimal only in combination with that split."""
+    minimal only in combination with that split. Not called where the
+    named balanced split already fits every card on its own, since no
+    offload count is then needed. An --override-tensor value renders
+    shell-quoted as the whole value the search evaluated, so a value
+    carrying a quote of its own still reads back as one token."""
     at = f" at --tensor-split {split_value}" if split_value else ""
     if found is None:
         return (
@@ -315,7 +331,8 @@ def _suggestion_text(found, split_value=None) -> str:
             "cache type."
         )
     key, value = found
-    return f" Smallest offload that fits{at}: --{key} {value}."
+    shown = shlex.quote(value) if key == "override-tensor" else value
+    return f" Smallest offload that fits{at}: --{key} {shown}."
 
 
 def _ik_moe_offload(
@@ -367,20 +384,27 @@ def _ik_moe_offload(
 
 
 def _balanced_text(balanced, eff, fit_active: bool) -> str:
-    """The balanced-split sentence of a shortfall message: the value, the
-    value it replaces where the profile sets one, and, only where --fit
-    would otherwise act on the profile's own settings, the note that an
-    explicit split keeps it from acting."""
+    """The balanced-split sentence of a shortfall message: the value, every
+    card boundary the split falls on, the value it replaces where the
+    profile sets one, and, only where --fit would otherwise act on the
+    profile's own settings, the note that an explicit split keeps it from
+    acting."""
     if balanced is None:
         return ""
     current = str(eff.get("tensor-split", "") or "").strip()
     fitting = "fits every card" if balanced.fits else "does not fit on its own"
-    text = (
-        f" Balanced --tensor-split {balanced.value} "
-        f"(card 0 keeps layers up to {balanced.boundary_layers[0]}) {fitting}."
-        if balanced.boundary_layers
-        else f" Balanced --tensor-split {balanced.value} {fitting}."
-    )
+    if balanced.boundary_layers:
+        bounds = ", ".join(str(b) for b in balanced.boundary_layers)
+        if len(balanced.boundary_layers) == 1:
+            noun = "boundary at layer"
+        else:
+            noun = "boundaries at layers"
+        text = (
+            f" Balanced --tensor-split {balanced.value} "
+            f"(card {noun} {bounds}) {fitting}."
+        )
+    else:
+        text = f" Balanced --tensor-split {balanced.value} {fitting}."
     if current:
         text += f" It replaces the profile's --tensor-split {current}."
     if fit_active:
@@ -412,6 +436,7 @@ def _messages(
     mmproj_bytes,
     ik_moe_layers=None,
     balanced=None,
+    uncounted=(),
 ) -> list:
     eff = _pl.effective_settings(settings, raw_args)
     kwargs = dict(
@@ -428,37 +453,47 @@ def _messages(
     if ik_moe_layers is not None:
         out.append(Message(_ik_moe_note(ik_moe_layers), dialog=False))
         if over:
-            out.append(
-                Message(
-                    _shortfall_text(over) + " Even keeping every layer's "
-                    "experts in RAM does not fit.",
-                    dialog=True,
-                )
+            text = (
+                _shortfall_text(over) + " Even keeping every layer's "
+                "experts in RAM does not fit."
             )
+            differs = balanced is not None and (
+                tuple(balanced.layers_per_card) != tuple(balanced.start_layers_per_card)
+            )
+            if differs and balanced.fits:
+                text += _balanced_text(balanced, eff, False)
+            out.append(Message(text, dialog=True))
     elif over:
         differs = balanced is not None and (
             tuple(balanced.layers_per_card) != tuple(balanced.start_layers_per_card)
         )
-        profile_search = _offload_search(meta, weights_bytes, **kwargs)
-        balanced_search = None
-        if differs and balanced is not None and not balanced.fits:
-            balanced_search = _offload_search(
-                meta,
-                weights_bytes,
-                **{
-                    **kwargs,
-                    "settings": {**eff, "tensor-split": balanced.value},
-                    "raw_args": "",
-                },
+        if differs and balanced.fits:
+            name_balanced = True
+            found = None
+            suggestion = ""
+        else:
+            profile_search = _offload_search(meta, weights_bytes, **kwargs)
+            balanced_search = None
+            if differs:
+                balanced_search = _offload_search(
+                    meta,
+                    weights_bytes,
+                    **{
+                        **kwargs,
+                        "settings": {**eff, "tensor-split": balanced.value},
+                        "raw_args": "",
+                    },
+                )
+            smaller_at_balanced = balanced_search is not None and (
+                profile_search is None or balanced_search[1] < profile_search[1]
             )
-        smaller_at_balanced = balanced_search is not None and (
-            profile_search is None or balanced_search[1] < profile_search[1]
-        )
-        name_balanced = differs and (balanced.fits or smaller_at_balanced)
-        at_balanced = name_balanced and not balanced.fits
-        search = balanced_search if at_balanced else profile_search
-        found = next(iter(search[0].items())) if search is not None else None
-        suggestion = _suggestion_text(found, balanced.value if at_balanced else None)
+            name_balanced = differs and smaller_at_balanced
+            at_balanced = name_balanced
+            search = balanced_search if at_balanced else profile_search
+            found = next(iter(search[0].items())) if search is not None else None
+            suggestion = _suggestion_text(
+                found, balanced.value if at_balanced else None
+            )
         fit_active = _fit_active_mainline(eff, engine, len(free_bytes_per_gpu))
         balanced_text = (
             _balanced_text(balanced, eff, fit_active) if name_balanced else ""
@@ -524,8 +559,16 @@ def _messages(
         out.append(
             Message(
                 f"RAM: est ~{_gib(ram.est)} GiB exceeds available "
-                f"~{_gib(ram.available)} GiB by ~{_gib(-ram.margin)} GiB; "
+                f"~{_gib(ram.available)} GiB by {_amount(-ram.margin)}; "
                 f"{tail}",
+                dialog=True,
+            )
+        )
+    for what, path in uncounted:
+        out.append(
+            Message(
+                f"{what} {path} lies under no configured folder; "
+                "its bytes are not counted.",
                 dialog=True,
             )
         )
@@ -560,6 +603,7 @@ def fit_report(
     draft_weights=0,
     mmproj_bytes=0,
     with_balanced=False,
+    uncounted=(),
 ):
     """Per-card and RAM verdicts plus messages for a profile; None when the
     estimate is unknowable or no card is visible. On ik_llama.cpp with
@@ -570,7 +614,10 @@ def fit_report(
     expert bytes, so the plain shortfall applies instead. The balanced
     split is computed, and carried in FitReport.balanced, only when
     with_balanced is true or a card is over budget: a readout that fits
-    pays nothing for a search it will not show."""
+    pays nothing for a search it will not show. uncounted names files, such
+    as a draft model or a projector, whose bytes the estimate could not
+    place under a configured folder; each produces a dialog message naming
+    the setting and the path."""
     if not free_bytes_per_gpu:
         return None
     est = estimate_memory(
@@ -639,6 +686,7 @@ def fit_report(
         mmproj_bytes=mmproj_bytes,
         ik_moe_layers=ik_moe_layers,
         balanced=balanced,
+        uncounted=uncounted,
     )
     return FitReport(
         est, cards, ram, tuple(messages), all(c.fits for c in cards), balanced

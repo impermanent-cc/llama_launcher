@@ -167,6 +167,30 @@ def test_wait_ready_times_out(monkeypatch):
     assert headless.wait_ready("127.0.0.1", 8080, timeout=1.0, interval=0.5) is False
 
 
+def test_wait_ready_probes_once_even_at_timeout_zero(monkeypatch):
+    probes = []
+    monkeypatch.setattr(
+        headless, "probe_health", lambda port, host="": probes.append(1) or "ready"
+    )
+    assert headless.wait_ready("127.0.0.1", 8080, timeout=0) is True
+    assert probes == [1]
+
+
+def test_wait_ready_stops_on_cancel_and_on_a_dead_container(monkeypatch):
+    probes = []
+    monkeypatch.setattr(
+        headless, "probe_health", lambda port, host="": probes.append(1) or "starting"
+    )
+    monkeypatch.setattr(headless.time, "sleep", lambda s: None)
+
+    assert headless.wait_ready("h", 1, timeout=5, should_cancel=lambda: True) is False
+    assert probes == []  # the cancel check precedes the probe
+
+    probes.clear()
+    assert headless.wait_ready("h", 1, timeout=5, still_running=lambda: False) is False
+    assert probes == [1]  # one probe, then still_running ends it before a second
+
+
 def _server(name="s", bind="127.0.0.1", port=8080):
     p = Profile(
         name=name,

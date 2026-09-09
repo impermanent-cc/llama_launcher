@@ -21,7 +21,7 @@ def test_sweep_knob():
     assert sw.sweep_knob(False) == "n-cpu-ffn"
 
 
-def test_sweep_counts_inclusive_clamped_and_deduped():
+def test_sweep_counts_inclusive_and_clamped():
     assert sw.sweep_counts(0, 8, 2, 40) == [0, 2, 4, 6, 8]
     assert sw.sweep_counts(36, 44, 2, 40) == [36, 38, 40]
     assert sw.sweep_counts(5, 5, 2, 40) == [5]
@@ -126,6 +126,20 @@ def test_rs_lines_count_into_kv():
     m = sw.parse_load_log(RS_LOG)
     assert m.cards[0]["kv"] == int(62.83 * MIB) + 384 * MIB
     assert m.ram["kv"] == 10 * MIB
+
+
+def test_parse_prompt_sizes():
+    assert sw.parse_prompt_sizes("128, 512,2048") == [128, 512, 2048]
+    assert sw.parse_prompt_sizes("") == []
+    assert sw.parse_prompt_sizes("128, x") is None
+
+
+def test_a_card_output_buffer_counts_into_that_cards_compute():
+    m = sw.parse_load_log(
+        "llama_init_from_model: CUDA0 compute buffer size = 100.00 MiB\n"
+        "llama_init_from_model: CUDA0 output buffer size = 4.00 MiB\n"
+    )
+    assert m.cards[0]["compute"] == 104 * MIB
 
 
 def test_last_log_line_skips_blank_tail():

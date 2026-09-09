@@ -2,7 +2,9 @@ from llama_launcher.core.command_builder import (
     build_command,
     build_rpc_endpoints,
     build_worker_command,
+    setting_emits,
 )
+from llama_launcher.core.settings_catalog import CATALOG
 from llama_launcher.core.spec import Mount, Profile, RpcWorker, Runtime
 
 
@@ -145,3 +147,26 @@ def test_server_repeated_override_tensor_survives_beside_profile_value():
     # The owned pair renders first; the repeatable raw entries are appended
     # after it, in the order they appear in raw_args.
     assert argv[-4:] == ["-ot", "a=CPU", "-ot", "b=CPU"]
+
+
+def test_setting_emits_follows_the_argv_rule():
+    """setting_emits reports the same yes/no as the argv the setting would
+    render into: suppressed by a non-default load-mode, skipped as an enum
+    at its default, present for a zero int count, absent when unset, and
+    absent when the engine gate rejects the flag."""
+    p = Profile(
+        name="x",
+        settings={
+            "load-mode": "mmap",
+            "mlock": True,
+            "split-mode": "layer",
+            "n-cpu-moe": 0,
+        },
+    )
+    assert not setting_emits(p, "mlock")  # load-mode suppresses it
+    assert not setting_emits(p, "split-mode")  # enum at its default is SKIP
+    assert setting_emits(p, "n-cpu-moe")  # int 0 renders "--n-cpu-moe 0"
+    assert not setting_emits(p, "ctx-size")  # not set
+    ik_only = next(k for k, s in CATALOG.items() if s.engine == "ik_llama.cpp")
+    q = Profile(name="y", settings={ik_only: CATALOG[ik_only].default or 1})
+    assert not setting_emits(q, ik_only)  # engine gate

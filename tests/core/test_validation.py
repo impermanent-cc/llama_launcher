@@ -857,3 +857,45 @@ def test_per_slot_context_is_quiet_on_ik():
     p.settings["kv-unified-per-slot"] = 4096
     warns = [i for i in validate(p) if i.level == "warning"]
     assert not any("kv-unified-per-slot" in i.message for i in warns)
+
+
+def test_is_active_matches_the_emit_rule_and_treats_zero_counts_as_idle():
+    """_is_active follows setting_emits rather than the raw settings dict:
+    a load-mode-suppressed bool is idle, an int count of zero is idle
+    however it is spelled, and a raw arg is active regardless of value."""
+    p = Profile(
+        name="x",
+        settings={"load-mode": "mmap", "mlock": True, "n-cpu-moe": "0", "n-cpu-ffn": 0},
+    )
+    assert not _is_active(p, "mlock")
+    assert not _is_active(p, "n-cpu-moe")
+    assert not _is_active(p, "n-cpu-ffn")
+    p2 = Profile(name="x", settings={"n-cpu-moe": 3})
+    assert _is_active(p2, "n-cpu-moe")
+    p3 = Profile(name="x", raw_args="--n-cpu-moe 0")
+    assert _is_active(p3, "n-cpu-moe")
+
+
+def test_negation_pair_enum_side_at_its_default_is_idle_under_the_shared_rule():
+    """A negation pair's enum side sitting at its catalog default counts as
+    idle for _is_active, through the same setting_emits rule command_builder
+    renders argv with, not a re-derivation of the enum-default sentinel.
+
+    webui/no-webui is the catalog's only enum-sided negation pair, and its
+    two flags are gated to different engines (webui is ik_llama.cpp-only,
+    no-webui is llama.cpp-only), so the enum side is checked directly under
+    its accepting engine, where it is idle at its catalog default.
+    """
+    pos, neg = next(
+        (a, b)
+        for a, b in NEGATION_PAIRS
+        if "enum" in (CATALOG[a].type, CATALOG[b].type)
+    )
+    enum_key = pos if CATALOG[pos].type == "enum" else neg
+    engine = CATALOG[enum_key].engine
+    p = Profile(
+        name="x",
+        runtime=Runtime(engine=engine) if engine != "any" else Runtime(),
+        settings={enum_key: CATALOG[enum_key].default},
+    )
+    assert not _is_active(p, enum_key)

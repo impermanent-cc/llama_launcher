@@ -79,7 +79,10 @@ def parse_load_log(text: str) -> MeasuredMemory:
     """Per-device buffer sizes from llama-server's load-time log lines. A
     device named CUDA<n> is card n; every other device counts as RAM. A
     buffer line with no kind word (ik_llama.cpp's model line) counts as
-    model; a recurrent-state (RS) buffer line counts into KV."""
+    model; a recurrent-state (RS) buffer line counts into KV. A card has no
+    separate output figure, so a card's output buffer line adds into that
+    card's compute; an output line on any other device still counts into RAM
+    output."""
     cards: dict = {}
     ram = {"model": 0, "kv": 0, "compute": 0, "output": 0}
     for m in _LINE.finditer(text or ""):
@@ -89,14 +92,34 @@ def parse_load_log(text: str) -> MeasuredMemory:
         if card:
             i = int(card.group(1))
             slot = cards.setdefault(i, {"model": 0, "kv": 0, "compute": 0})
-            if kind in slot:
-                slot[kind] += nbytes
+            target = "compute" if kind == "output" else kind
+            if target in slot:
+                slot[target] += nbytes
         else:
             ram[kind] += nbytes
     n = max(cards) + 1 if cards else 0
     return MeasuredMemory(
         tuple(cards.get(i, {"model": 0, "kv": 0, "compute": 0}) for i in range(n)), ram
     )
+
+
+def parse_prompt_sizes(text: str) -> list | None:
+    """Comma-separated prompt sizes typed into a benchmark or sweep row: a
+    blank string is no sizes at all; any token that is not an int fails the
+    whole list rather than silently dropping it."""
+    text = (text or "").strip()
+    if not text:
+        return []
+    sizes = []
+    for token in text.split(","):
+        token = token.strip()
+        if not token:
+            continue
+        try:
+            sizes.append(int(token))
+        except ValueError:
+            return None
+    return sizes
 
 
 def last_log_line(text: str) -> str:

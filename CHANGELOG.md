@@ -12,6 +12,17 @@ not on the release page, so the two never drift.
 
 ### Added
 
+- A search field above the settings on the Configure tab: type part of a
+  flag, an alias such as `-ngl`, or a group name, and the matching row
+  scrolls into view and is highlighted; Enter and Shift+Enter step through
+  the matches, Escape clears. Rows hidden by the current mode or engine
+  never match.
+- `--estimate` exits 6 when every card fits but RAM is over budget, with
+  `ok` still true in the JSON; the README exit table carries the row.
+- The estimate warns, in the readout, the launch dialog and the CLI, when a
+  draft model or projector lies under no configured folder and its bytes
+  are therefore not counted.
+- The Benchmark tab labels a stored sweep with its timestamp.
 - An offload sweep in the Benchmark tab: launches the profile once per
   `--n-cpu-ffn` (dense) or `--n-cpu-moe` (MoE) count over a range the
   memory estimate prefills, benchmarks each, records the measured model, KV
@@ -58,6 +69,28 @@ not on the release page, so the two never drift.
 
 ### Changed
 
+- The memory estimate walks a model's tensor table once per render and
+  prices every balanced-split candidate and offload count from per-layer
+  sums: the fit readout on a model with tens of thousands of tensors
+  refreshes in tens of milliseconds instead of most of a second.
+- The balanced `--tensor-split` search scores every candidate on two cards
+  and climbs as many moves as there are entries on three or more.
+- Card shortfall messages name the balanced split on ik_llama.cpp with
+  `--fit` too, suggest no offload count where the named split already fits,
+  name every card boundary, shell-quote the whole `--override-tensor`
+  suggestion, and render amounts under 1 GiB in MiB.
+- The router readout charges the per-card overhead once per card rather
+  than once per member.
+- The launch preflight reuses the Configure tab's GPU and RAM probe while
+  it is fresh for the profile's node, so a launch on a remote node no
+  longer freezes the window for a second round trip.
+- An embedding or reranker model shows no offload recommendation dot; the
+  context suggestion reads the effective context from
+  `--kv-unified-per-slot` and `--parallel`.
+- The sweep status line keeps "Sweep cancelled." or "Sweep failed" after
+  the run ends, and a prompt size that is not a number gets its own refusal.
+- The `--video-timestamp-interval` tooltip states that 0 disables the
+  timestamps.
 - `--reasoning-preserve` is marked deprecated: llama.cpp 0.4.0 preserves the
   reasoning trace by default, so the flag only changes behaviour on an older
   image. Saved profiles keep their meaning; the key was not repurposed.
@@ -71,6 +104,12 @@ not on the release page, so the two never drift.
 
 ### Fixed
 
+- Validation's active-setting check follows the command builder's emit
+  rule: a flag `--load-mode` suppresses, an enum left at its default, or a
+  zero count (typed or the string "0") no longer counts as active.
+- A card's output buffer line in a sweep log counts into that card's
+  measured compute instead of being dropped.
+- Recurrent state is no longer charged to a layer in the shared-KV tail.
 - The RPC centralizing warning, the flag-pair warning and the VRAM preflight
   no longer fire for a flag the chosen engine never receives, and no longer
   treat a zero count as an active setting.

@@ -449,6 +449,55 @@ def _render_setting(setting, value) -> list[str]:
     return [setting.flag, str(value)]
 
 
+def _load_mode_suppression(profile: Profile, catalog: dict) -> set:
+    """The legacy keys a non-default --load-mode makes redundant.
+    --load-mode supersedes the legacy --no-mmap/--mlock flags upstream;
+    mixing them makes llama.cpp warn and only honour the last, so the two
+    keys are dropped whenever load-mode is set to a non-default value.
+    Enforced here, not just in the UI, so the CLI/headless path (which
+    skips the form) stays consistent too."""
+    lm = catalog.get("load-mode")
+    if lm is not None and profile.settings.get("load-mode", lm.default) != lm.default:
+        return {"no-mmap", "mlock"}
+    return set()
+
+
+def _setting_argv(profile: Profile, key: str, setting, suppress: set) -> list:
+    """The argv tokens one catalogued setting contributes: nothing for
+    port, a load-mode suppressed flag, a flag the engine rejects, an
+    unset key, an engine value that is skipped, or a False bool."""
+    if key == "port" or key in suppress:
+        return []
+    # Engine-gated flags (ik_llama.cpp) must never reach a mainline launch.
+    # current_profile() filters the UI path; this mirrors it for the
+    # headless/CLI path, which feeds profile.settings straight from JSON.
+    if not accepts(setting, profile.runtime.engine):
+        return []
+    if key not in profile.settings:
+        return []
+    # Per-engine VALUE rules (ik-only quants, spec-type renames, layer
+    # tokens, enum-default sentinel) live in one place shared with
+    # router_preset; the UI drops defaults via is_set(), this mirrors
+    # that on the headless path.
+    value = engine_value(key, setting, profile.settings[key], profile.runtime.engine)
+    if value is SKIP:
+        return []
+    return _render_setting(setting, value)
+
+
+def setting_emits(profile: Profile, key: str, catalog: dict = CATALOG) -> bool:
+    """Whether this one catalogued setting renders to at least a flag: the
+    engine accepts it, it is set on the profile, load-mode does not suppress
+    it, and its engine_value is not SKIP. Does not apply the router-only
+    skip, which stays a property of the argv loop in _owned_server_pairs,
+    not of a single setting."""
+    return bool(
+        _setting_argv(
+            profile, key, catalog[key], _load_mode_suppression(profile, catalog)
+        )
+    )
+
+
 def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") -> list:
     pairs: list = []
     if profile.model:
@@ -465,48 +514,18 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
         pairs.append((_draft_model_flag(profile.runtime.engine), profile.draft_model))
 
     port = profile_port(profile)
-    # --load-mode supersedes the legacy --no-mmap/--mlock flags upstream; mixing
-    # them makes llama.cpp warn and only honour the last. When load-mode will
-    # actually emit (a value at its default is skipped as an enum sentinel),
-    # drop the legacy flags so argv carries one or the other, never both.
-    # Enforced here, not just in the UI, so the CLI/headless path (which skips
-    # the form) stays consistent too.
-    lm = catalog.get("load-mode")
-    suppress = (
-        {"no-mmap", "mlock"}
-        if lm is not None
-        and profile.settings.get("load-mode", lm.default) != lm.default
-        else set()
-    )
-    # Emit changed settings in catalog order, skipping port (handled below).
+    suppress = _load_mode_suppression(profile, catalog)
+    # Emit changed settings in catalog order, skipping port (handled inside
+    # _setting_argv) and any router-only flag a profile JSON might carry.
     for key, setting in catalog.items():
-        if key == "port":
-            continue
-        if key in suppress:
-            continue
         # Router-only flags are rejected by a single-model llama-server. The UI
         # filters them out by mode, but a profile JSON can still carry one.
         if key in ROUTER_ONLY_KEYS:
             continue
-        # Engine-gated flags (ik_llama.cpp) must never reach a mainline launch.
-        # current_profile() filters the UI path; this mirrors it for the
-        # headless/CLI path, which feeds profile.settings straight from JSON.
-        if not accepts(setting, profile.runtime.engine):
+        rendered = _setting_argv(profile, key, setting, suppress)
+        if not rendered:
             continue
-        if key in profile.settings:
-            # Per-engine VALUE rules (ik-only quants, spec-type renames, layer
-            # tokens, enum-default sentinel) live in one place shared with
-            # router_preset; the UI drops defaults via is_set(), this mirrors
-            # that on the headless path.
-            value = engine_value(
-                key, setting, profile.settings[key], profile.runtime.engine
-            )
-            if value is SKIP:
-                continue
-            rendered = _render_setting(setting, value)
-            if not rendered:  # bool that is False -> emits nothing
-                continue
-            pairs.append((rendered[0], rendered[1] if len(rendered) > 1 else None))
+        pairs.append((rendered[0], rendered[1] if len(rendered) > 1 else None))
 
     pairs.append(("--host", host))
     pairs.append(("--port", str(port)))

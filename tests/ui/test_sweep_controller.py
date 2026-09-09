@@ -235,6 +235,22 @@ def test_sweep_refused_without_prompt_sizes(win):
     assert "prompt size" in win.benchmark_panel.sweep_status.text()
 
 
+def test_sweep_refused_for_a_prompt_size_that_is_not_a_number(win):
+    """A bad token gets its own refusal, distinct from an empty prompt-size
+    row."""
+    p = _prepared(win)
+    win.benchmark_panel.bench_sizes.setText("128, x")
+    captured = {}
+
+    win._benchmark._run_sweep_sync(CFG, run_sweep=_stub_run_sweep(captured))
+
+    assert captured == {}
+    assert sweep_store.load(default_base_dir(), p.name) is None
+    assert (
+        "whole numbers separated by commas" in win.benchmark_panel.sweep_status.text()
+    )
+
+
 def test_sweep_prefill_from_estimate(win, monkeypatch):
     _prepared(win)
     panel = win._configure_panel
@@ -716,3 +732,125 @@ def test_an_empty_sweep_never_replaces_the_stored_one(win, monkeypatch):
     win._benchmark._run_sweep_sync(CFG, run_sweep=fake)
 
     assert sweep_store.sweep_path(base, p.name).read_text() == before
+
+
+def test_the_status_line_clears_when_a_sweep_ends(win):
+    """A fit render during a sweep writes the running refusal; the sweep's
+    end refreshes the offer so the line does not outlive the run."""
+    _prepared(win)
+    ctl = win._benchmark
+    ctl._benchmark_thread = object()  # a run is in progress
+    ctl._sweep_reason_shown = None
+    ctl.refresh_sweep()
+    assert "already running" in win.benchmark_panel.sweep_status.text()
+    ctl._benchmark_thread = None
+    ctl._sweep_thread = None
+    ctl._on_sweep_thread_done()  # the sweep's own end refreshes the offer
+    assert "already running" not in win.benchmark_panel.sweep_status.text()
+
+
+def test_a_cancelled_sweeps_message_survives_the_thread_done_refresh(win):
+    """_on_sweep_thread_done's refresh clears the status line for a freshly
+    allowed sweep, but a cancelled sweep's own terminal message survives it."""
+    _prepared(win)
+    ctl = win._benchmark
+    sweep = core_sweep.Sweep("Solo", "n-cpu-ffn", "t", (_cancelled_point(0),), {})
+    ctl._on_sweep_finished(sweep)
+    assert win.benchmark_panel.sweep_status.text() == "Sweep cancelled."
+    ctl._sweep_thread = None
+    ctl._sweep_worker = None
+    ctl._on_sweep_thread_done()
+    assert win.benchmark_panel.sweep_status.text() == "Sweep cancelled."
+
+
+def test_a_failed_sweeps_message_survives_the_thread_done_refresh(win):
+    """The same refresh-after-thread-done must not erase a failure message
+    either."""
+    _prepared(win)
+    ctl = win._benchmark
+    ctl._on_sweep_failed("boom")
+    assert "Sweep failed: boom" in win.benchmark_panel.sweep_status.text()
+    ctl._sweep_thread = None
+    ctl._sweep_worker = None
+    ctl._on_sweep_thread_done()
+    assert "Sweep failed: boom" in win.benchmark_panel.sweep_status.text()
+
+
+def test_prefill_reads_the_real_smallest_offload(win):
+    """The sweep prefill starts at the smallest fitting count the estimate
+    finds, with no patching of the search."""
+    _prepared(win)
+    win._configure_panel._fit_gpus = [_gpu(free_mib=2048)]  # shrink so it doesn't fit
+    win._benchmark.refresh_sweep()
+    kwargs = win._configure_panel._fit_report_kwargs()
+    kwargs.pop("ram_available", None)
+    kwargs.pop("uncounted", None)
+    meta = kwargs.pop("meta")
+    weights = kwargs.pop("weights_bytes")
+    found = memory_fit.smallest_fitting_offload(meta, weights, **kwargs)
+    assert found is not None and found[1] > 0
+    assert win.benchmark_panel.sweep_config()["start"] == found[1]
+
+
+def test_a_terminal_message_never_re_offers_a_refused_sweep(win):
+    """Re-writing a finished sweep's terminal message does not re-enable Run
+    sweep over a refusal: a profile that cannot be swept keeps its refusal
+    on the status line."""
+    _prepared(win)
+    ctl = win._benchmark
+    ctl._on_sweep_finished(
+        core_sweep.Sweep("Solo", "n-cpu-ffn", "t", (_cancelled_point(0),), {})
+    )
+    win._configure_panel.load_profile(
+        Profile(
+            name="Host",
+            mode="router",
+            image="img",
+            members=[RouterMember(profile="Qwen")],
+            settings={"port": 8080},
+        )
+    )
+    ctl._sweep_thread = None
+    ctl._sweep_worker = None
+
+    ctl._on_sweep_thread_done()
+
+    assert "router has no model of its own" in win.benchmark_panel.sweep_status.text()
+    assert not win.benchmark_panel.sweep_run_btn.isEnabled()
+
+
+def test_a_sweep_that_produced_no_points_counts_as_cancelled(win):
+    """The guard for a runner that comes back with no point at all: nothing
+    is stored, the table carries no stored stamp, and the profile's own
+    stored sweep is left alone. The status line reads "Sweep cancelled."
+    because that is the message this guard emits; the planned counts are
+    never empty, so no production run reaches it."""
+    p = _prepared(win)
+    base = default_base_dir()
+    sweep_store.save(base, p.name, _two_point_sweep(p.name))
+    before = sweep_store.sweep_path(base, p.name).read_text()
+
+    win._benchmark._on_sweep_finished(
+        core_sweep.Sweep(p.name, "n-cpu-ffn", "2026-01-02T03:04:05", (), {})
+    )
+
+    assert win.benchmark_panel.sweep_stamp.text() == ""
+    assert sweep_store.sweep_path(base, p.name).read_text() == before
+    assert win.benchmark_panel.sweep_status.text() == "Sweep cancelled."
+
+
+def test_a_finished_sweep_does_not_inherit_the_previous_runs_message(win):
+    """A cancelled sweep's terminal message belongs to that run alone: the
+    next sweep starting drops it, so the successful run that follows ends
+    with a clear status line rather than "Sweep cancelled."."""
+    _prepared(win)
+    ctl = win._benchmark
+    ctl._on_sweep_finished(
+        core_sweep.Sweep("Solo", "n-cpu-ffn", "t", (_cancelled_point(0),), {})
+    )
+    assert win.benchmark_panel.sweep_status.text() == "Sweep cancelled."
+
+    ctl._run_sweep_sync(CFG, run_sweep=_stub_run_sweep({}))
+    ctl._on_sweep_thread_done()
+
+    assert win.benchmark_panel.sweep_status.text() == ""
