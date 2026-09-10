@@ -418,6 +418,16 @@ follows the buttons and the status label sits at the right edge. At a
 window width of 1600 px neither field passes its maximum and the
 Environment column stays inside its bounds.
 
+2.43 The Benchmark tab's run-history table renders `pp t/s` and `gen t/s` to
+one decimal and `total s` to two, reading the values the run stores at full
+precision. The `size` and `prompt_n` cells render the stored value's own
+text, so a count carries no decimals and no thousands separator. The cells of
+all five columns are right-aligned; the column headers and the run's group
+header row keep their own alignment. A stored value that is not a number
+renders as its own text, and a missing one renders an empty cell. The stored
+benchmark file, the sweep table of 2.31 and the delta summary line keep the
+precision they already have.
+
 ## 3. Constraints
 
 3.1 Python 3.12 and 3.13 are the tested floor and ceiling; the code needs

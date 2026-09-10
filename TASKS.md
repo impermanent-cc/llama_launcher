@@ -2,15 +2,14 @@
 
 ## Current phase
 
-Idle: no cycle open. The last cycle, feat/configure-density-and-readout,
-landed on 2026-09-09: the suggestion dot beside its editor and the tools
-boxes in two columns, a finer --ctx-size ladder, the layer count on the
-meta line with per-card layer ranges in the readout and a collapsible
-Details section, --estimate printing the details with new JSON keys, and
-bounded widths for the Environment column and the top bar fields. Next:
-the owner's GPU smoke below, then a release commit on main that sets
-pyproject to 0.2.0 and dates the CHANGELOG section, then the v0.2.0 tag
-and the GitHub release, each on the owner's yes.
+Idle: no cycle open. The last cycle, fix/benchmark-table-number-format,
+landed on 2026-09-10: the Benchmark tab's run-history table renders its
+stored numbers at a fixed decimal width instead of printing the raw float,
+right-aligned, with a stale or missing stored value rendering as its own
+text or an empty cell (SPEC 2.43). Next: the owner's GPU smokes below,
+including a re-shot bench.png, then a release commit on main that sets
+pyproject to 0.2.0 and dates the CHANGELOG section, then the v0.2.0 tag and
+the GitHub release, each on the owner's yes.
 
 ## Open items
 
@@ -161,6 +160,10 @@ and the GitHub release, each on the owner's yes.
 
 ## Pending owner smokes
 
+- [ ] Re-shoot assets/screenshots/bench.png on the 5080 plus A2000 box now
+      that the columns are formatted. README.md embeds it and the committed
+      capture still shows the full-precision, left-aligned numbers this
+      cycle removed. Needed before the v0.2.0 release.
 - [ ] On the 5080 plus A2000 box, load the 27B dense profile and the
       35B-A3B profile and compare the readout's per-card layer ranges
       against the per-card model buffer lines of a Verbosity 4 launch (the
@@ -262,41 +265,18 @@ and the GitHub release, each on the owner's yes.
 
 ## Done this cycle
 
-- The suggestion dot sits 16 px wide directly after its editor with the
-  row's stretch after it, and multiselect settings lay out in two columns,
-  so the settings column's minimum width fell from 613 to 487 px offscreen
-  and needs no horizontal scrollbar. Driven offscreen at 1600 px on the
-  e2b profile with a screenshot of the Configure tab.
-- --ctx-size presets: 1024 and the midpoints 12288, 24576, 49152, 98304 and
-  196608 join the ladder.
-- The Environment column is bounded to 420 to 640 px with the settings
-  column absorbing the rest (measured: 640 from a 1400 px window on); the
-  Name edit and the profile combo grow to 260 and 340 px and stop, with a
-  stretch before the status label.
-- The estimate carries a LayerLayout: each block layer's card from its KV
-  placement, host layers, the output device, row split, per-card weight
-  bytes over the layers the card holds (promoted host-layer bytes excluded),
-  one layer's expert share (lowest expert layer, EXPS_REGEX, memoised per
-  table and layer count) and the output tensor's size; a no-table model
-  reports per-layer weights as unknown. estimate_memory takes a ctx
-  override.
-- fit_report prices the KV cost of the next 1024 tokens per device as the
-  marginal cost at the profile's context, only with with_details, and
-  carries the meta for the header facts.
-- The meta line carries the layer count; each card line opens its bracket
-  with the layer range ("layers 4 to 7 plus output", "layers 0 to 7, row
-  split"), the RAM line names the host layers; a collapsible Details section
-  (collapsed at start, plain text) holds the KV per 1024 tokens, per-layer
-  weights with the expert share, the head, embedding and vocabulary counts,
-  the sliding window and the output tensor; --estimate prints the block
-  after the lines and --json carries n_layers, per-card layers and
-  bytes_per_layer, ram layers, kv_per_1k and output_device. On the e2b
-  profile: "layers 0 to 20" and "layers 21 to 34 plus output" at 60,40,
-  KV per 1024 tokens 6 MiB, 24 and 35 MiB per layer, output 216 MiB.
-- Two plan errors caught by the tests: the engine offloads the last block
-  layers first (so -ngl 5 on eight layers holds 4 to 7 plus the output), and
-  the default four slots share the context, so a sliding window binds only
-  from 8192 tokens with a 1024 window.
-- Docs: CHANGELOG [Unreleased], VRAM.md JSON keys and readout paragraph,
-  README's --estimate clause, SPEC 2.24, 2.25, 2.38 to 2.42, ROADMAP Later
-  (benchmark prompts, queued runs, the Speculative Decoding group width).
+- The run-history table's cells are built through _fmt_metric with a
+  per-column decimal count (_BENCH_COLUMN_DIGITS): one decimal on pp t/s and
+  gen t/s, two on total s, the size and prompt_n counts passed through as
+  their own text, and every cell right-aligned. The column headers and the
+  spanned run header keep their own alignment. A value that is not a real
+  number, a boolean included, renders as its own text and a missing one as
+  an empty cell, so a stale history file renders rather than raising inside
+  the repaint.
+- The stored benchmark file, the sweep table and the delta summary line are
+  untouched and keep the precision they had.
+- SPEC 2.43 states the behaviour; the CHANGELOG carries it under
+  [Unreleased].
+- The owner refreshed assets/screenshots/config.png (layer ranges, the
+  Details section and the two-column tools boxes) and bench.png (the sweep
+  table with its measured against estimated columns).
