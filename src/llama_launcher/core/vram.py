@@ -37,6 +37,16 @@ def kv_cache_bytes(
     )
 
 
+def _mtp_tail_mask(meta, n_layers: int) -> tuple:
+    """Per layer, whether it is one of the trailing positions the header's
+    multi-token-prediction count names: the last `nextn_predict_layers`
+    layers, none of them when the header carries no such count."""
+    n = int(n_layers)
+    nextn = int(getattr(meta, "nextn_predict_layers", None) or 0)
+    first_mtp = n - nextn
+    return tuple(il >= first_mtp for il in range(n))
+
+
 def attention_layer_mask(meta, n_layers: int) -> tuple:
     """Per layer, whether it holds a KV cache before the shared tail is
     cleared: every layer unless a per-layer KV head count names it (zero
@@ -44,18 +54,26 @@ def attention_layer_mask(meta, n_layers: int) -> tuple:
     i + 1 is a multiple of it). The interval counts only on a header that
     also carries recurrent-state sizes, so a header naming an interval alone
     leaves no layer uncharged. A header with recurrent-state sizes and no
-    attention heads is purely recurrent: no layer holds a cache."""
+    attention heads is purely recurrent: no layer holds a cache. Whatever
+    the pattern says, the trailing multi-token-prediction positions the
+    header names hold no cache."""
     n = int(n_layers)
     heads = getattr(meta, "kv_layer_heads", None)
     if heads:
-        return tuple(bool(int(heads[i])) if i < len(heads) else True for i in range(n))
-    interval = getattr(meta, "full_attention_interval", None)
-    if interval and int(interval) > 1 and recurrent_state_bytes(meta):
-        k = int(interval)
-        return tuple((i + 1) % k == 0 for i in range(n))
-    if recurrent_state_bytes(meta) and not int(getattr(meta, "n_head", None) or 0):
-        return tuple(False for _ in range(n))
-    return tuple(True for _ in range(n))
+        mask = tuple(bool(int(heads[i])) if i < len(heads) else True for i in range(n))
+    else:
+        interval = getattr(meta, "full_attention_interval", None)
+        if interval and int(interval) > 1 and recurrent_state_bytes(meta):
+            k = int(interval)
+            mask = tuple((i + 1) % k == 0 for i in range(n))
+        elif recurrent_state_bytes(meta) and not int(
+            getattr(meta, "n_head", None) or 0
+        ):
+            mask = tuple(False for _ in range(n))
+        else:
+            mask = tuple(True for _ in range(n))
+    tail = _mtp_tail_mask(meta, n)
+    return tuple(m and not t for m, t in zip(mask, tail, strict=True))
 
 
 def _clear_shared_tail(mask: tuple, meta, n_layers: int) -> tuple:
@@ -83,18 +101,21 @@ def recurrent_layer_mask(meta, kv_mask) -> tuple:
     """Per layer, whether it holds recurrent state: a layer the KV mask
     leaves uncached on a header carrying state sizes, minus the layers a
     per-layer feed-forward width array gives a non-zero width, which are
-    MLP-only rather than recurrent."""
+    MLP-only rather than recurrent, and minus the trailing positions the
+    header's multi-token-prediction count names, which hold none."""
     if not recurrent_state_bytes(meta):
         return tuple(False for _ in kv_mask)
     ff = getattr(meta, "ff_layers", None)
+    n = len(kv_mask)
+    tail = _mtp_tail_mask(meta, n)
     return tuple(
-        not cached and not (ff and il < len(ff) and int(ff[il]))
+        not cached and not tail[il] and not (ff and il < len(ff) and int(ff[il]))
         for il, cached in enumerate(kv_mask)
     )
 
 
 def recurrent_state_bytes(meta) -> int:
-    """f32 bytes of one recurrent layer's state for one request slot: the
+    """f32 bytes of one recurrent layer's state for one state cell: the
     convolution state, (kernel - 1) x (inner + 2 x groups x state), plus the
     state matrix, state x inner. Zero when the header carries no ssm
     sizes."""
@@ -333,7 +354,8 @@ class LayerLayout:
 @dataclass(frozen=True)
 class CardEstimate:
     """Card side of an estimate. `state` is the recurrent state of the
-    layers the card holds, at one copy per request slot; the context
+    layers the card holds, at one copy per state cell (the request slots,
+    plus a draft's speculative depth when one is present); the context
     checkpoints of those layers live in host memory and are counted in
     RamEstimate."""
 
@@ -418,6 +440,20 @@ def slot_count(settings, engine) -> int:
     if n:
         return n
     return 1 if engine == "ik_llama.cpp" else 4
+
+
+def state_cell_count(settings, engine, has_draft) -> int:
+    """Recurrent state cells the server allocates per layer: the request
+    slots of `slot_count`, plus the speculative sequences a draft model
+    asks for. The depth is `spec-draft-n-max`, a mainline-only row, and the
+    catalog default stands in when the setting is unset, zero, negative or
+    unparsable."""
+    cells = slot_count(settings, engine)
+    row = CATALOG["spec-draft-n-max"]
+    if not has_draft or not accepts(row, engine):
+        return cells
+    depth = positive_int(settings.get("spec-draft-n-max"))
+    return cells + (depth if depth else int(row.default))
 
 
 def _ssm_inner(meta) -> int:
@@ -523,9 +559,14 @@ class _Part:
     dist: object
 
 
-def _model_part(meta, weights_bytes, *, settings, engine, free, ctx, ubatch, draft):
+def _model_part(
+    meta, weights_bytes, *, settings, engine, free, ctx, ubatch, draft, cells
+):
     """Per-card weights, KV and recurrent state plus the same in RAM for one
-    model, with the checkpoints of every recurrent layer in RAM."""
+    model, with the checkpoints of every recurrent layer in RAM. `cells`
+    gives the recurrent state one copy per state cell. A draft holds a
+    cache only over the layers its own tensor table carries, at one
+    sequence, and no recurrent state."""
     n_layers = int(meta.n_layers)
     ngl_key = "spec-draft-ngl" if draft else "n-gpu-layers"
     ngl_value = (
@@ -585,10 +626,13 @@ def _model_part(meta, weights_bytes, *, settings, engine, free, ctx, ubatch, dra
     k_quant = settings.get("cache-type-k", "f16")
     v_quant = settings.get("cache-type-v", "f16")
     if draft:
+        # A draft's cache is f16 unless its own rows say otherwise; the
+        # main model's cache types do not reach it.
+        k_quant = v_quant = "f16"
         if accepts(CATALOG["cache-type-k-draft"], engine):
-            k_quant = settings.get("cache-type-k-draft", k_quant)
+            k_quant = settings.get("cache-type-k-draft", "f16")
         if accepts(CATALOG["cache-type-v-draft"], engine):
-            v_quant = settings.get("cache-type-v-draft", v_quant)
+            v_quant = settings.get("cache-type-v-draft", "f16")
     heads = n_head_kv or n_head or 1
     layer_heads = getattr(meta, "kv_layer_heads", None)
     windowed = window_layer_mask(meta, n_layers)
@@ -599,7 +643,7 @@ def _model_part(meta, weights_bytes, *, settings, engine, free, ctx, ubatch, dra
             ctx,
             window,
             ubatch,
-            slot_count(settings, engine),
+            1 if draft else slot_count(settings, engine),
             _flag_on(settings, engine, "kv-unified"),
         )
     else:
@@ -622,8 +666,19 @@ def _model_part(meta, weights_bytes, *, settings, engine, free, ctx, ubatch, dra
 
     attn = attention_layer_mask(meta, n_layers)
     mask = kv_layer_mask(meta, n_layers, attention=attn)
+    if draft and meta.tensors:
+        # A draft runs only the layers its own file carries, so each of
+        # them holds a cache whatever the shared header's pattern says.
+        charged = {
+            il
+            for il in (_pl.layer_index(t.name, n_layers) for t in meta.tensors)
+            if il is not None and il < n_layers
+        }
+        mask = tuple(il in charged for il in range(n_layers))
     recurrent = recurrent_layer_mask(meta, attn)
-    rs = recurrent_state_bytes(meta) * slot_count(settings, engine)
+    rs_per_cell = recurrent_state_bytes(meta)
+    rs_cells = 0 if draft else rs_per_cell * cells
+    rs_slots = 0 if draft else rs_per_cell * slot_count(settings, engine)
     n_ckpt = _checkpoint_count(settings)
     ram_kv = ram_state = ram_ckpt = 0
     state = [0] * n_cards
@@ -636,11 +691,11 @@ def _model_part(meta, weights_bytes, *, settings, engine, free, ctx, ubatch, dra
             else:
                 kv[card] += kv_bytes_at(il)
         elif recurrent[il]:
-            ram_ckpt += rs * n_ckpt
+            ram_ckpt += rs_slots * n_ckpt
             if card is None or kv_in_ram:
-                ram_state += rs
+                ram_state += rs_cells
             else:
-                state[card] += rs
+                state[card] += rs_cells
     return _Part(
         weights,
         kv,
@@ -838,6 +893,10 @@ def estimate_memory(
     batch = min(batch, ctx)
     ubatch = min(ubatch, batch)
     flash = str(eff.get("flash-attn", "auto")) != "off"
+    has_draft = bool(
+        draft_meta is not None and draft_meta.n_layers and draft_meta.n_embd
+    )
+    cells = state_cell_count(eff, engine, has_draft)
     part = _model_part(
         meta,
         weights_bytes,
@@ -847,6 +906,7 @@ def estimate_memory(
         ctx=ctx,
         ubatch=ubatch,
         draft=False,
+        cells=cells,
     )
     weights, kv = part.weights, part.kv
     state = part.state
@@ -869,7 +929,7 @@ def estimate_memory(
         split_mode=split_mode,
         main_idx=main_idx,
     )
-    if draft_meta is not None and draft_meta.n_layers and draft_meta.n_embd:
+    if has_draft:
         dctx = (
             positive_int(eff.get("ctx-size-draft"))
             if accepts(CATALOG["ctx-size-draft"], engine)
@@ -884,6 +944,7 @@ def estimate_memory(
             ctx=dctx or ctx,
             ubatch=ubatch,
             draft=True,
+            cells=cells,
         )
         dw, dkv = dpart.weights, dpart.kv
         draft_logits, _ = _charge_compute(

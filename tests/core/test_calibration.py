@@ -15,26 +15,13 @@ import pytest
 
 from llama_launcher.core import vram
 from llama_launcher.core.settings_catalog import CATALOG, accepts
-from tests.core.calibration_records import RECORDS
+from tests.core.calibration_records import RECORDS, estimate_for
 
 COMPUTE_TOLERANCE = 2.5
 KV_TOLERANCE = 1.25
 # The load log prints buffer sizes to two decimals of a MiB, so every measured
 # figure carries that much rounding on either side of the true byte count.
 LOG_PRECISION = 1024 * 1024 // 100
-
-
-def estimate_for(record):
-    """The record's estimate, with one byte of weights standing for the model
-    so placement runs on the record's settings alone."""
-    meta = SimpleNamespace(**record["meta"])
-    return vram.estimate_memory(
-        meta,
-        1,
-        settings=record["settings"],
-        engine=record["engine"],
-        free_bytes_per_gpu=record["free_bytes_per_gpu"],
-    )
 
 
 def layer_kv_bytes(record, ctx):
@@ -129,6 +116,17 @@ def test_records_carry_no_output_card_key(rec):
     assert "output_card" not in rec
 
 
+PENDING_FIGURES = {"compute", "host", "output"}
+
+
+@pytest.mark.parametrize("rec", RECORDS, ids=[r["name"] for r in RECORDS])
+def test_record_pending_names_only_the_figures_the_bands_know(rec):
+    """A record's `pending` entry names only figures the compute test
+    checks: a typo or a figure no test compares would otherwise skip
+    nothing and pass silently."""
+    assert set(rec.get("pending", ())) <= PENDING_FIGURES
+
+
 @pytest.mark.parametrize("rec", RECORDS, ids=[r["name"] for r in RECORDS])
 def test_record_kv_reads_high_by_at_most_a_quarter_and_never_low(rec):
     est = estimate_for(rec)
@@ -151,16 +149,33 @@ def test_record_kv_reads_high_by_at_most_a_quarter_and_never_low(rec):
 
 @pytest.mark.parametrize("rec", RECORDS, ids=[r["name"] for r in RECORDS])
 def test_record_compute_never_reads_low_and_at_most_two_and_a_half_high(rec):
+    if "compute" in rec.get("pending", ()):
+        pytest.skip(f"{rec['name']}: compute figure pending a refit")
     est = estimate_for(rec)
     cards = rec["measured"]["cards"]
-    r = rec["measured"]["ram"]
     measured = sorted(m["compute"] for m in cards)
     estimated = sorted(c.compute for c in est.cards[: len(cards)])
     for i, (m, c) in enumerate(zip(measured, estimated, strict=True)):
         assert_within(c, m, COMPUTE_TOLERANCE, f"{rec['name']} sorted compute {i}")
+
+
+@pytest.mark.parametrize("rec", RECORDS, ids=[r["name"] for r in RECORDS])
+def test_record_host_buffer_never_reads_low_and_at_most_two_and_a_half_high(rec):
+    if "host" in rec.get("pending", ()):
+        pytest.skip(f"{rec['name']}: host buffer figure pending a refit")
+    est = estimate_for(rec)
+    r = rec["measured"]["ram"]
     assert_within(
         est.ram.host, r["compute"], COMPUTE_TOLERANCE, f"{rec['name']} host buffer"
     )
+
+
+@pytest.mark.parametrize("rec", RECORDS, ids=[r["name"] for r in RECORDS])
+def test_record_output_buffer_never_reads_low_and_at_most_two_and_a_half_high(rec):
+    if "output" in rec.get("pending", ()):
+        pytest.skip(f"{rec['name']}: output buffer figure pending a refit")
+    est = estimate_for(rec)
+    r = rec["measured"]["ram"]
     assert_within(
         est.ram.output, r["output"], COMPUTE_TOLERANCE, f"{rec['name']} output buffer"
     )

@@ -23,6 +23,7 @@ from llama_launcher.core.vram import (
     recurrent_layer_mask,
     recurrent_state_bytes,
     slot_count,
+    state_cell_count,
     window_layer_mask,
     window_tokens,
 )
@@ -725,6 +726,24 @@ def test_kv_layer_mask_interval_array_and_default():
     m = _meta(kv_layer_heads=(2, 0, 2))
     assert kv_layer_mask(m, 3) == (True, False, True)
     assert kv_layer_mask(_meta(), 2) == (True, True)
+
+
+def test_dense_header_charges_no_kv_on_its_trailing_mtp_layer():
+    """A dense header with no recurrent-state sizes still charges no KV
+    cache on the trailing layer its multi-token-prediction count names,
+    though the attention layers before it still hold one."""
+    meta = _meta(n_layers=3, n_head=8, n_head_kv=4, nextn_predict_layers=1)
+    assert kv_layer_mask(meta, 3) == (True, True, False)
+
+
+def test_hybrid_header_charges_no_kv_where_the_interval_divides_the_tail():
+    """A hybrid header whose full-attention interval divides the trailing
+    multi-token-prediction index charges that index no KV cache, though the
+    interval pattern alone would mark it cached."""
+    meta = _hybrid_meta(nextn_predict_layers=1)
+    mask = kv_layer_mask(meta, 40)
+    assert mask[39] is False
+    assert mask[3] is True  # the interval still caches the layer before it
 
 
 def test_recurrent_state_bytes_matches_the_server_checkpoint():
@@ -1691,3 +1710,324 @@ def test_estimate_ctx_override_replaces_the_settings_context():
     )
     assert more.ctx == 8192 and base.ctx == 4096
     assert more.cards[0].kv == 2 * base.cards[0].kv
+
+
+def test_mtp_positions_hold_no_recurrent_state():
+    """The trailing multi-token-prediction positions the header names are
+    not recurrent, so a 65-position header with one of them yields 48
+    recurrent layers beside its 16 attention ones."""
+    kv_mask = tuple((il + 1) % 4 == 0 for il in range(65))
+    assert sum(kv_mask) == 16
+    mask = recurrent_layer_mask(_hybrid_meta(nextn_predict_layers=1), kv_mask)
+    assert len(mask) == 65
+    assert sum(mask) == 48
+    assert mask[0] is True  # uncached, so recurrent
+    assert mask[62] is True  # uncached, so recurrent
+    assert mask[63] is False  # a full-attention layer, so cached
+    assert mask[64] is False  # the multi-token-prediction position
+
+
+def test_without_the_key_every_uncached_layer_stays_recurrent():
+    """With no multi-token-prediction key every uncached layer is
+    recurrent."""
+    kv_mask = tuple((il + 1) % 4 == 0 for il in range(40))
+    mask = recurrent_layer_mask(_hybrid_meta(), kv_mask)
+    assert sum(mask) == 30
+
+
+def test_cells_are_slots_when_no_draft_model_is_present():
+    """With no draft model the cell count is the slot count."""
+    assert state_cell_count({"parallel": 2}, "llama.cpp", False) == 2
+    assert state_cell_count({}, "llama.cpp", False) == 4
+    assert state_cell_count({}, "ik_llama.cpp", False) == 1
+
+
+def test_a_draft_adds_its_speculative_depth():
+    """A draft model adds spec-draft-n-max sequences to the cells, and the
+    catalog default stands in for an unset or unusable depth."""
+    assert (
+        state_cell_count({"parallel": 1, "spec-draft-n-max": 2}, "llama.cpp", True) == 3
+    )
+    assert state_cell_count({"parallel": 1}, "llama.cpp", True) == 4
+    assert (
+        state_cell_count({"parallel": 1, "spec-draft-n-max": 0}, "llama.cpp", True) == 4
+    )
+
+
+def test_the_depth_is_ignored_without_a_draft_model():
+    """A depth left in the settings adds nothing when no draft is present."""
+    assert (
+        state_cell_count({"parallel": 2, "spec-draft-n-max": 2}, "llama.cpp", False)
+        == 2
+    )
+
+
+def test_the_depth_setting_is_mainline_only():
+    """The depth row is mainline-only, so on ik the cells are the slots."""
+    assert (
+        state_cell_count({"parallel": 1, "spec-draft-n-max": 2}, "ik_llama.cpp", True)
+        == 1
+    )
+
+
+_FREE = [14897 * MIB, 11768 * MIB]
+_PER_LAYER_STATE = 3268608
+
+
+def _estimate_27b(*, draft=False, draft_meta_override=None, depth=None, **extra):
+    settings = {
+        "ctx-size": 90112,
+        "cache-type-k": "q8_0",
+        "cache-type-v": "q8_0",
+        "tensor-split": "43,23",
+        "flash-attn": "on",
+        "n-gpu-layers": "all",
+    }
+    if depth is not None:
+        settings["spec-draft-n-max"] = depth
+    settings.update(extra)
+    # The 27B profile's header: 65 block positions, the last of them the
+    # multi-token-prediction layer, with a full-attention layer every fourth.
+    meta = _hybrid_meta(
+        n_layers=65,
+        n_head=24,
+        n_head_kv=4,
+        n_embd=5120,
+        n_ff=17408,
+        n_ff_exp=0,
+        n_expert_used=0,
+        expert_count=0,
+        ssm_inner_size=6144,
+        nextn_predict_layers=1,
+    )
+    if draft_meta_override is not None:
+        draft_meta = draft_meta_override
+        draft_weights = 1
+    else:
+        draft_meta = meta if draft else None
+        draft_weights = 1 if draft else 0
+    return vram.estimate_memory(
+        meta,
+        1,
+        settings=settings,
+        engine="llama.cpp",
+        free_bytes_per_gpu=_FREE,
+        draft_meta=draft_meta,
+        draft_weights=draft_weights,
+    )
+
+
+def test_state_matches_the_two_measured_runs():
+    """One slot with a draft at depth 2 gives three cells and two slots
+    with no draft gives two, over 48 recurrent layers of 3268608 bytes."""
+    drafted = _estimate_27b(draft=True, parallel=1, depth=2)
+    assert sum(c.state for c in drafted.cards) == _PER_LAYER_STATE * 48 * 3
+    plain = _estimate_27b(parallel=2)
+    assert sum(c.state for c in plain.cards) == _PER_LAYER_STATE * 48 * 2
+
+
+def test_cells_reach_the_state_and_not_the_cache():
+    """Full-attention KV does not follow the cell count, so a drafted
+    profile reads the same cache at one slot as at two."""
+    one = _estimate_27b(draft=True, parallel=1, depth=2)
+    two = _estimate_27b(draft=True, parallel=2, depth=2)
+    assert [c.kv for c in one.cards] == [c.kv for c in two.cards]
+
+
+def test_checkpoints_follow_slots_not_cells():
+    """The checkpoints term is 32 times the state of one request slot, so
+    a draft's speculative cells do not multiply it."""
+    drafted = _estimate_27b(draft=True, parallel=1, depth=2)
+    assert drafted.ram.checkpoints == 32 * _PER_LAYER_STATE * 48
+
+
+def test_an_unusable_draft_header_adds_no_cells():
+    """A draft header carrying no layers or no embedding width is not a
+    draft the estimate can price, so the cells stay at the slots."""
+    empty = _hybrid_meta(n_layers=0, n_embd=0)
+    est = _estimate_27b(parallel=1, draft_meta_override=empty, depth=2)
+    assert sum(c.state for c in est.cards) == _PER_LAYER_STATE * 48 * 1
+
+
+def _draft_meta(*, cached=True, windowed=False, tensors=None, **extra):
+    """A draft header declaring 65 block positions with the 27B's ssm
+    sizes whose tensor table carries only layer 0's weights. `cached`
+    marks layer 0 as an attention layer (for the cache figures); when
+    False layer 0 is left uncached and, since the header still carries ssm
+    sizes, recurrent-eligible. `windowed` additionally marks layer 0 as a
+    sliding-window layer so its cache depends on the slot count. `tensors`
+    replaces the default single-layer tensor table when given."""
+    n = 65
+    heads = [0] * n
+    if cached:
+        heads[0] = 4
+    kw = dict(
+        n_layers=n,
+        n_head=24,
+        n_head_kv=4,
+        n_embd=5120,
+        head_dim_k=256,
+        head_dim_v=256,
+        kv_layer_heads=tuple(heads),
+        ssm_inner_size=6144,
+        tensors=(TensorInfo("blk.0.attn_q.weight", 1, 0, 774 * MIB),)
+        if tensors is None
+        else tensors,
+    )
+    if windowed:
+        kw["sliding_window"] = 1024
+        kw["sliding_window_pattern"] = (True,) + (False,) * (n - 1)
+    kw.update(extra)
+    return _hybrid_meta(**kw)
+
+
+def _draft_part(*, ctx, settings_extra=None, cached=True, windowed=False, tensors=None):
+    settings = {"parallel": 1}
+    if settings_extra:
+        settings.update(settings_extra)
+    meta = _draft_meta(cached=cached, windowed=windowed, tensors=tensors)
+    return vram._model_part(
+        meta,
+        0,
+        settings=settings,
+        engine="llama.cpp",
+        free=[2 * GIB, 2 * GIB],
+        ctx=ctx,
+        ubatch=512,
+        draft=True,
+        cells=1,
+    )
+
+
+def test_draft_cache_counts_only_the_layers_its_file_carries():
+    """A draft whose header declares 65 positions but whose file carries one
+    layer is charged one layer's cache, 352 MiB at f16 over 90112 tokens."""
+    part = _draft_part(ctx=90112)
+    assert sum(part.kv) == 352 * MIB
+
+
+def test_a_draft_cache_type_defaults_to_f16_not_the_main_models():
+    """With no draft cache rows set, the draft is priced at f16 whatever
+    the main model's cache types are."""
+    part = _draft_part(
+        ctx=90112,
+        settings_extra={"cache-type-k": "q8_0", "cache-type-v": "q8_0"},
+    )
+    assert sum(part.kv) == 352 * MIB
+
+
+def test_draft_cache_ignores_the_main_models_cache_types():
+    """The draft cache follows cache-type-k-draft and cache-type-v-draft
+    whatever the main model's cache types are set to, at a quantisation
+    that differs from both f16 and the main model's own."""
+    part = _draft_part(
+        ctx=90112,
+        settings_extra={
+            "cache-type-k": "q8_0",
+            "cache-type-v": "q8_0",
+            "cache-type-k-draft": "q4_0",
+            "cache-type-v-draft": "q4_0",
+        },
+    )
+    assert sum(part.kv) == 99 * MIB
+
+
+def test_draft_cache_is_one_sequence_whatever_parallel_says():
+    """Slots do not multiply a draft's cache, so a windowed draft layer
+    reads the same cache at one slot as at four."""
+    one = _draft_part(ctx=90112, windowed=True, settings_extra={"parallel": 1})
+    four = _draft_part(ctx=90112, windowed=True, settings_extra={"parallel": 4})
+    assert sum(one.kv) == sum(four.kv)
+
+
+def test_draft_holds_no_recurrent_state():
+    """A draft carrying ssm sizes in its header is charged no state, even
+    for the one recurrent-eligible layer its tensor table carries."""
+    part = _draft_part(ctx=90112, cached=False)
+    assert sum(part.state) == 0
+    assert part.ram_state == 0
+    assert part.ram_checkpoints == 0
+
+
+def test_a_draft_with_only_non_layer_tensors_is_charged_no_cache():
+    """A draft whose tensor table names no block, only a token embedding
+    and an output tensor, resolves no layer index and is charged no
+    cache."""
+    tensors = (
+        TensorInfo("token_embd.weight", 1, 0, 10 * MIB),
+        TensorInfo("output.weight", 1, 0, 10 * MIB),
+    )
+    part = _draft_part(ctx=90112, tensors=tensors)
+    assert sum(part.kv) == 0
+
+
+def test_a_draft_with_an_empty_tensor_table_falls_back_to_the_header():
+    """A draft with no tensor table at all falls back to the header's own
+    layer count, still 352 MiB since only layer 0 is an attention layer."""
+    part = _draft_part(ctx=90112, tensors=())
+    assert sum(part.kv) == 352 * MIB
+
+
+def test_a_draft_caches_the_layers_it_carries_whatever_the_pattern_says():
+    """A draft's carried layer holds a cache even where the shared
+    header's full-attention interval leaves that index uncached."""
+    n = 65
+    meta = _hybrid_meta(
+        n_layers=n,
+        n_head=24,
+        n_head_kv=4,
+        n_embd=5120,
+        head_dim_k=256,
+        head_dim_v=256,
+        kv_layer_heads=None,
+        full_attention_interval=4,
+        nextn_predict_layers=1,
+        tensors=(TensorInfo("blk.64.attn_q.weight", 1, 0, 774 * MIB),),
+    )
+    part = vram._model_part(
+        meta,
+        0,
+        settings={"parallel": 1},
+        engine="llama.cpp",
+        free=[2 * GIB, 2 * GIB],
+        ctx=90112,
+        ubatch=512,
+        draft=True,
+        cells=1,
+    )
+    assert sum(part.kv) == 352 * MIB
+
+
+def test_a_partial_tensor_table_does_not_shrink_a_main_models_layers():
+    """The tensor-carried charged set applies to a draft only: a main
+    model with a partial tensor table still charges every layer its header
+    declares."""
+    n = 65
+    heads = [0] * n
+    heads[0] = 4
+    meta = _hybrid_meta(
+        n_layers=n,
+        n_head=24,
+        n_head_kv=4,
+        n_embd=5120,
+        head_dim_k=256,
+        head_dim_v=256,
+        kv_layer_heads=tuple(heads),
+        ssm_inner_size=6144,
+        tensors=(TensorInfo("blk.0.attn_q.weight", 1, 0, 774 * MIB),),
+    )
+    part = vram._model_part(
+        meta,
+        0,
+        settings={"parallel": 1},
+        engine="llama.cpp",
+        free=[2 * GIB, 2 * GIB],
+        ctx=90112,
+        ubatch=512,
+        draft=False,
+        cells=1,
+    )
+    # Layer 0 is the only attention layer (kv_layer_heads); the other 64
+    # are recurrent-eligible and stay charged as state, not dropped.
+    assert sum(part.kv) == 352 * MIB
+    assert sum(part.state) > 0

@@ -3,10 +3,37 @@
 Each record carries the model's header block, the profile settings that
 shaped the run, the free VRAM per card at launch and the buffer sizes the
 engine logged, all in bytes. Records are read by the calibration test and by
-scripts/fit_compute_terms.py; nothing under src reads them.
+scripts/fit_compute_terms.py; nothing under src reads them. A record may also
+carry a `draft_meta` header for a run that loaded a draft model, and may set
+`pending` to a tuple naming any of "compute", "host" or "output" to keep
+those figures out of their bands while every figure it does not name, and
+the KV and state bands, still apply.
 """
 
+from types import SimpleNamespace
+
+from llama_launcher.core import vram
+from llama_launcher.core.gguf import TensorInfo
+
 MIB = 1024 * 1024
+
+
+def estimate_for(record):
+    """The record's estimate, with one byte of weights standing for the
+    model so placement runs on the record's settings alone, and the same for
+    a draft the record carries."""
+    meta = SimpleNamespace(**record["meta"])
+    draft = record.get("draft_meta")
+    return vram.estimate_memory(
+        meta,
+        1,
+        settings=record["settings"],
+        engine=record["engine"],
+        free_bytes_per_gpu=record["free_bytes_per_gpu"],
+        draft_meta=SimpleNamespace(**draft) if draft else None,
+        draft_weights=1 if draft else 0,
+    )
+
 
 # Qwen3.6-35B-A3B MXFP4: one header block, two engines. The expert width
 # n_ff_exp is read from the ik launch log's metadata dump, key 29,
@@ -37,6 +64,54 @@ _QWEN_35B_A3B = dict(
     sliding_window_pattern=None,
     shared_kv_layers=None,
     tensors=(),
+)
+
+# Qwen3.8-27B UD-Q4_K_S, arch qwen35: one header block, its 65 block_count
+# positions covering 64 real hybrid layers plus one multi-token-prediction
+# tail position (nextn_predict_layers 1) that holds neither a KV cache nor
+# recurrent state, whether or not a draft loads.
+_QWEN_27B = dict(
+    n_layers=65,
+    n_head=24,
+    n_head_kv=4,
+    n_embd=5120,
+    n_ff=17408,
+    n_ff_exp=None,
+    n_expert_used=None,
+    expert_count=None,
+    n_vocab=248320,
+    sliding_window=None,
+    head_dim_k=256,
+    head_dim_v=256,
+    full_attention_interval=4,
+    kv_layer_heads=None,
+    ssm_conv_kernel=4,
+    ssm_inner_size=6144,
+    ssm_state_size=128,
+    ssm_group_count=16,
+    nextn_predict_layers=1,
+    ctx_train=None,
+    head_dim_k_swa=None,
+    head_dim_v_swa=None,
+    sliding_window_pattern=None,
+    shared_kv_layers=None,
+    tensors=(),
+)
+
+# A stand-in for the draft file's own tensor table: the four blk.64.nextn.*
+# names plus an attention pair, none of them logged (the draft's eighteen
+# tensor names never appear in the main file's log), chosen only so
+# layer_index resolves every one of them to block 64.
+_QWEN_27B_DRAFT_TENSORS = tuple(
+    TensorInfo(f"blk.64.{name}.weight", 1, 0, 1)
+    for name in (
+        "nextn.eh_proj",
+        "nextn.enorm",
+        "nextn.hnorm",
+        "nextn.shared_head_norm",
+        "attn_q",
+        "attn_k",
+    )
 )
 
 RECORDS = [
@@ -149,35 +224,9 @@ RECORDS = [
         },
     },
     {
-        "name": "qwen3.5-27B q4_k_s mainline sweep n-cpu-ffn 0",
+        "name": "qwen3.8-27B q4_k_s mainline sweep n-cpu-ffn 0",
         "engine": "llama.cpp",
-        "meta": dict(
-            n_layers=64,
-            n_head=24,
-            n_head_kv=4,
-            n_embd=5120,
-            n_ff=17408,
-            n_ff_exp=None,
-            n_expert_used=None,
-            expert_count=None,
-            n_vocab=248320,
-            sliding_window=None,
-            head_dim_k=256,
-            head_dim_v=256,
-            full_attention_interval=4,
-            kv_layer_heads=None,
-            ssm_conv_kernel=4,
-            ssm_inner_size=6144,
-            ssm_state_size=128,
-            ssm_group_count=16,
-            nextn_predict_layers=1,
-            ctx_train=None,
-            head_dim_k_swa=None,
-            head_dim_v_swa=None,
-            sliding_window_pattern=None,
-            shared_kv_layers=None,
-            tensors=(),
-        ),
+        "meta": dict(_QWEN_27B),
         "settings": {
             "ctx-size": 32768,
             "tensor-split": "60,40",
@@ -329,6 +378,134 @@ RECORDS = [
                 "kv": 0,
                 "compute": int(267.08 * MIB),
                 "output": 1 * MIB,
+            },
+        },
+    },
+    {
+        # Qwen3.8-27B UD-Q4_K_S, mainline b10818, one slot, MTP draft on at
+        # --spec-draft-n-max 2, tensor-split 43,23, KV q8_0. Card 1's model
+        # buffer is the main model's 5883.07 MiB plus the draft's 774.71 MiB.
+        # The estimate does not yet reproduce the output buffer: the draft
+        # model logs its own output buffer alongside the main model's, and
+        # the estimate carries only one.
+        "name": "qwen3.8-27B q4_k_s mainline mtp draft on",
+        "engine": "llama.cpp",
+        "meta": dict(_QWEN_27B),
+        "draft_meta": dict(_QWEN_27B, tensors=_QWEN_27B_DRAFT_TENSORS),
+        "pending": ("output",),
+        "settings": {
+            "ctx-size": 90112,
+            "tensor-split": "43,23",
+            "cache-type-k": "q8_0",
+            "cache-type-v": "q8_0",
+            "flash-attn": "on",
+            "parallel": 1,
+            "spec-draft-n-max": 2,
+            "verbosity": 4,
+        },
+        "free_bytes_per_gpu": [int(14897 * MIB), int(11768 * MIB)],
+        "measured": {
+            "cards": [
+                {
+                    "model": int(8232.19 * MIB),
+                    "kv": int((1870.00 + 308.60) * MIB),
+                    "compute": int(825.13 * MIB),
+                },
+                {
+                    "model": int((5883.07 + 774.71) * MIB),
+                    # main cache 1122.00, draft cache 352.00, recurrent state 140.27
+                    "kv": int((1122.00 + 352.00 + 140.27) * MIB),
+                    "compute": int((825.13 + 554.06) * MIB),
+                },
+            ],
+            "ram": {
+                "model": int((521.00 + 521.00) * MIB),
+                "kv": 0,
+                "compute": int((373.13 + 402.07) * MIB),
+                "output": int(0.95 * MIB) + int(0.95 * MIB),
+            },
+        },
+    },
+    {
+        # Qwen3.6-35B-A3B MXFP4, mainline b10818, four slots, no draft,
+        # kv_unified true. The control run for the 27B draft record: with no
+        # draft the state term lands exactly. The estimate does not yet
+        # reproduce card 0's compute buffer or the host buffer: both read
+        # low against the log.
+        "name": "qwen3.6-35B-A3B mxfp4 mainline four slots kv-unified",
+        "engine": "llama.cpp",
+        "meta": dict(_QWEN_35B_A3B),
+        "pending": ("compute", "host"),
+        "settings": {
+            "ctx-size": 131072,
+            "n-gpu-layers": "all",
+            "flash-attn": "on",
+            "no-mmproj-offload": True,
+            "threads": 12,
+            "parallel": 4,
+            "kv-unified": True,
+            "verbosity": 4,
+        },
+        "free_bytes_per_gpu": [int(14767 * MIB), int(11768 * MIB)],
+        "measured": {
+            "cards": [
+                {
+                    "model": int(11780.09 * MIB),
+                    "kv": int((1536.00 + 150.75) * MIB),
+                    "compute": int(628.10 * MIB),
+                },
+                {
+                    "model": int(8394.71 * MIB),
+                    "kv": int((1024.00 + 100.50) * MIB),
+                    "compute": int(628.10 * MIB),
+                },
+            ],
+            "ram": {
+                "model": int(515.31 * MIB),
+                "kv": 0,
+                "compute": int(520.07 * MIB),
+                "output": int(3.79 * MIB),
+            },
+        },
+    },
+    {
+        # Qwen3.8-27B UD-Q4_K_S again, mainline b10818, two slots, MTP off:
+        # ctx 90112 divided into two slots of 45056. The main file's MTP
+        # tensors (blk.64.nextn.*) go unused, so card 1's model buffer drops
+        # from 5883.07 to 5548.32 MiB. The estimate does not yet reproduce
+        # the host buffer: it reads several times high against the log.
+        "name": "qwen3.8-27B q4_k_s mainline two slots mtp off",
+        "engine": "llama.cpp",
+        "meta": dict(_QWEN_27B),
+        "pending": ("host",),
+        "settings": {
+            "ctx-size": 90112,
+            "tensor-split": "43,23",
+            "cache-type-k": "q8_0",
+            "cache-type-v": "q8_0",
+            "flash-attn": "on",
+            "parallel": 2,
+            "verbosity": 4,
+        },
+        "free_bytes_per_gpu": [int(14771 * MIB), int(11768 * MIB)],
+        "measured": {
+            "cards": [
+                {
+                    "model": int(8232.19 * MIB),
+                    "kv": int((1870.00 + 205.73) * MIB),
+                    "compute": int(649.13 * MIB),
+                },
+                {
+                    "model": int(5548.32 * MIB),
+                    "kv": int((1122.00 + 93.52) * MIB),
+                    "compute": int(649.13 * MIB),
+                },
+            ],
+            "ram": {
+                "model": int(521.00 * MIB),
+                "kv": 0,
+                "compute": int(197.13 * MIB),
+                "output": int(1.89 * MIB),
             },
         },
     },

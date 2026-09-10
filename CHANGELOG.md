@@ -169,6 +169,15 @@ not on the release page, so the two never drift.
 - Benchmark history table: prompt-eval and generation throughput now read to
   one decimal and the total to two, right-aligned, instead of printing the
   stored float at full precision.
+- Memory estimate: a draft model's KV cache is sized from the layers its own
+  file carries, at one sequence and at f16 unless its own cache-type
+  settings say otherwise, instead of a copy of the main model's cache;
+  multi-token-prediction positions are charged neither a cache nor recurrent
+  state; and the state is charged once per state cell, the request slots
+  plus a loaded draft's speculative depth, with the checkpoints term left
+  per request slot. On a 27B hybrid with a draft this moves the estimate
+  onto the measured figures: the cache falls from twice the truth to exact,
+  and the context checkpoints from 9.5 GiB to 4.7.
 
 ## [0.1.1] - 2026-09-03
 
