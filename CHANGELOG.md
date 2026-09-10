@@ -166,6 +166,9 @@ not on the release page, so the two never drift.
   to each card, and the compute terms were refitted against the measured
   runs, so a card that does not hold the output layer no longer reads far
   below the buffer the server reserves there.
+- Benchmark history table: prompt-eval and generation throughput now read to
+  one decimal and the total to two, right-aligned, instead of printing the
+  stored float at full precision.
 
 ## [0.1.1] - 2026-09-03
 

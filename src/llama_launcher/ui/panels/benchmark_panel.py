@@ -27,6 +27,24 @@ from llama_launcher.ui.widgets.info_button import InfoButton
 
 _BENCH_TABLE_HEADERS = ["size", "prompt_n", "pp t/s", "gen t/s", "total s"]
 
+# One entry per column of _BENCH_TABLE_HEADERS: the decimals a stored value
+# is rendered with, None for a count that renders as a bare integer.
+_BENCH_COLUMN_DIGITS = (None, None, 1, 1, 2)
+
+
+def _fmt_metric(value, digits: int | None) -> str:
+    """Cell text for a stored metric value at a column's decimal width.
+
+    A missing value is an empty cell and a value that is not a real number
+    keeps its own text, so a stale history file renders rather than raising.
+    """
+    if value is None:
+        return ""
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        return str(value)
+    return str(value) if digits is None else f"{value:.{digits}f}"
+
+
 # Per-column explanations shown as header tooltips; the InfoButton popover next
 # to the table repeats the throughput ones inline so they're available without
 # hovering, without keeping the reminder text always on screen.
@@ -298,10 +316,14 @@ class BenchmarkPanel(QWidget):
                 row.get("gen_tok_s"),
                 row.get("total_s"),
             ]
-            for c, val in enumerate(values):
-                self.bench_table.setItem(
-                    r, c, QTableWidgetItem("" if val is None else str(val))
+            for c, (val, digits) in enumerate(
+                zip(values, _BENCH_COLUMN_DIGITS, strict=True)
+            ):
+                item = QTableWidgetItem(_fmt_metric(val, digits))
+                item.setTextAlignment(
+                    Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
                 )
+                self.bench_table.setItem(r, c, item)
 
     def set_benchmark_history(self, runs: list) -> None:
         """Repaint the table as one labelled group per stored run, newest first."""

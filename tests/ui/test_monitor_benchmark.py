@@ -1,3 +1,5 @@
+from PySide6.QtCore import Qt
+
 from llama_launcher.ui.panels.benchmark_panel import BenchmarkPanel
 from llama_launcher.ui.widgets.info_button import InfoButton
 
@@ -19,6 +21,84 @@ def _run(ts="t0", model="qwen.gguf", size=512, extra=None):
             }
         ],
     }
+
+
+def _run_with_rows(rows):
+    return {"timestamp": "t0", "snapshot": {"model": "m.gguf"}, "rows": rows}
+
+
+def test_metric_columns_use_fixed_decimals(qtbot):
+    """Throughput reads to one decimal and total seconds to two, from the
+    full-precision values the run stores, and an integer column passes a
+    non-integral stored count through rather than rounding it off."""
+    p = BenchmarkPanel()
+    qtbot.addWidget(p)
+    p.set_benchmark_history(
+        [
+            _run_with_rows(
+                [
+                    {
+                        "target_size": 2048,
+                        "prompt_n": 4,
+                        "pp_tok_s": 36.430463408001145,
+                        "gen_tok_s": 43.00310070555444,
+                        "total_s": 3.0863406666666666,
+                    },
+                    {"target_size": 512.5},
+                ]
+            )
+        ]
+    )
+    row = 1  # 0 is the run's group header
+    assert p.bench_table.item(row, 0).text() == "2048"
+    assert p.bench_table.item(row, 1).text() == "4"
+    assert p.bench_table.item(row, 2).text() == "36.4"
+    assert p.bench_table.item(row, 3).text() == "43.0"
+    assert p.bench_table.item(row, 4).text() == "3.09"
+    assert p.bench_table.item(row + 1, 0).text() == "512.5"
+
+
+def test_metric_columns_right_align(qtbot):
+    """Every column of a metric row is right-aligned so the digits line up,
+    while the group header row above it keeps its own default alignment."""
+    p = BenchmarkPanel()
+    qtbot.addWidget(p)
+    p.set_benchmark_history([_run()])
+    assert not (
+        p.bench_table.item(0, 0).textAlignment() & int(Qt.AlignmentFlag.AlignRight)
+    )
+    for col in range(p.bench_table.columnCount()):
+        alignment = p.bench_table.item(1, col).textAlignment()
+        assert alignment & int(Qt.AlignmentFlag.AlignRight)
+
+
+def test_metric_cell_tolerates_non_numeric_and_missing(qtbot):
+    """A stale stored value renders as its own text and a missing one as an
+    empty cell, rather than raising during the repaint. A stored boolean
+    renders as its own text too, rather than as the number 0 or 1."""
+    p = BenchmarkPanel()
+    qtbot.addWidget(p)
+    p.set_benchmark_history(
+        [
+            _run_with_rows(
+                [
+                    {
+                        "target_size": 128,
+                        "prompt_n": None,
+                        "pp_tok_s": "n/a",
+                        "gen_tok_s": 12,
+                        "total_s": None,
+                    },
+                    {"gen_tok_s": True},
+                ]
+            )
+        ]
+    )
+    assert p.bench_table.item(1, 1).text() == ""
+    assert p.bench_table.item(1, 2).text() == "n/a"
+    assert p.bench_table.item(1, 3).text() == "12.0"
+    assert p.bench_table.item(1, 4).text() == ""
+    assert p.bench_table.item(2, 3).text() == "True"
 
 
 def test_run_click_emits_config(qtbot):
