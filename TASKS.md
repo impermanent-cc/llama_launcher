@@ -62,8 +62,13 @@ the GitHub release, each on the owner's yes.
       flash attention on.
 - [ ] The checkpoints term charges the --ctx-checkpoints maximum (32 by
       default) times the recurrent state per slot to RAM, although the
-      server creates checkpoints on demand; no log line measures the term.
-      Watch a long session on the 35B-A3B for RAM growth into it.
+      server creates checkpoints on demand. Confirmed 2026-09-10 to be
+      exactly 32 times the state on both profiles (9776 MiB of the 27B's
+      11.4 GiB RAM estimate, 8040 MiB of the 35B's 9.6 GiB), with no
+      load-time allocation answering it in either log; the 35B run does
+      carry "speculative decoding will use checkpoints", so the
+      checkpoints are real and only their size is unmeasured. Watch a long
+      session on the 35B-A3B for RAM growth into it.
 - [ ] Multi-head latent attention (deepseek2 and kin) is priced at the
       header's per-head key and value lengths, far above the engine's
       latent cache; reading kv_lora_rank plus the rope dimension would fix
@@ -72,13 +77,32 @@ the GitHub release, each on the owner's yes.
       output tensor to a card while -ngl leaves the output layer in RAM
       still sends the logits term to the host buffer; the device flag wins
       over the override.
+- [ ] recurrent_layer_mask marks the output layer recurrent: it marks every
+      layer the KV mask leaves uncached, and the layer count is the block
+      count plus one for the output. Measured on the 27B profile
+      2026-09-10, whose 64 blocks split 16 attention to 48 recurrent: the
+      estimate charges 49 layers of state.
+- [ ] The recurrent state is charged one cell per request slot, while
+      llama.cpp allocates n_rs_seq plus one. On the 27B profile 2026-09-10,
+      n_seq_max 1 and n_rs_seq 2 gave three cells per layer, so the measured
+      448.88 MiB is 48 layers times 3 cells times the per-layer 3268608
+      bytes that vram.recurrent_state_bytes already computes exactly. The
+      per-layer formula is right; the multiplier is not.
+- [ ] The 35B-A3B's host weight estimate reads 1372.95 MiB against a logged
+      host model buffer of 515.31 MiB (2026-09-10), while the 27B's host
+      weights are exact. Nothing yet explains the difference.
 - [ ] recurrent_layer_mask treats any layer with a non-zero per-layer
       feed-forward width as not recurrent, so a hybrid whose recurrent block
       also carries an MLP would be charged no state (SPEC 2.32 as written).
-- [ ] An MTP draft (--spec-type draft-mtp, gemma4-assistant) reserves a
-      3320 MiB compute buffer on card 0 for 58 MiB of weights and shares the
-      main model's KV (shared_kv_layers 4); the estimate has no term for it
-      and charges the draft KV as if it had its own cache.
+- [ ] The estimate prices a draft model as a clone of the main model's KV
+      and recurrent state. Measured on the 27B profile 2026-09-10: the KV
+      estimate is exactly twice the main model's cache on both cards (3740
+      against 1870 MiB on card 0, 2244 against 1122 on card 1), while the
+      draft's real cache is 352 MiB on card 1 alone and it holds no
+      recurrent state at all, its context reporting n_rs_seq 0 and logging
+      no RS buffer. An MTP draft also reserves a large compute buffer for a
+      small weight (554 MiB on card 1 here, 3320 MiB on card 0 of the
+      gemma4-assistant run) that no term covers.
 - [ ] With --n-gpu-layers all and no tensor table the estimate puts the
       output layer on a card, but all three Gemma 4 runs of 2026-09-06 kept
       the tied token embedding in host RAM (the logged host model buffer is
@@ -160,14 +184,14 @@ the GitHub release, each on the owner's yes.
 
 ## Pending owner smokes
 
-- [ ] Re-shoot assets/screenshots/bench.png on the 5080 plus A2000 box now
-      that the columns are formatted. README.md embeds it and the committed
-      capture still shows the full-precision, left-aligned numbers this
-      cycle removed. Needed before the v0.2.0 release.
+- [x] Re-shoot assets/screenshots/bench.png on the 5080 plus A2000 box now
+      that the columns are formatted. Done 2026-09-10: the history table
+      reads 32.9, 43.9 and 3.04, right-aligned.
 - [ ] On the 5080 plus A2000 box, load the 27B dense profile and the
       35B-A3B profile and compare the readout's per-card layer ranges
       against the per-card model buffer lines of a Verbosity 4 launch (the
-      boundary layer must match), the Details block's KV per 1024 tokens
+      boundary layer must match; the 2026-09-10 log settles this half, the
+      model buffers matching the estimate to the byte on both profiles), the Details block's KV per 1024 tokens
       against the KV growth between two context sizes in the log, and the
       per-layer weight against one layer moved by --tensor-split. Also
       confirm the settings column shows no horizontal scrollbar at your
@@ -184,11 +208,16 @@ the GitHub release, each on the owner's yes.
       buffer lines the run becomes a seventh entry in
       tests/core/calibration_records.py; without them it stays a reported
       smoke.
-- [ ] Re-run `--estimate --json` for the 27B dense and 35B-A3B profiles on
-      the 5080 plus A2000 box and compare each card's `kv + state + compute`
-      and the RAM `buffers` against the sweep files' measured figures; then
-      re-run one sweep per profile and report the measured against
-      estimated columns.
+- [x] Re-run `--estimate --json` for the 27B dense and 35B-A3B profiles on
+      the 5080 plus A2000 box and compare against the measured figures. Done
+      2026-09-10 against one Verbosity 4 log carrying both profiles, filed
+      with the estimates and a term by term table in
+      DevDocs/llama_launcher/calibration-2026-09-10. Weights are exact on
+      every device on both profiles, the draft's own buffers included, and
+      the 35B's KV and recurrent state are exact on both cards. The 27B's
+      KV reads exactly twice the truth and its recurrent state 32 percent
+      under; see the open items below. Not done: a second sweep per profile
+      with the measured against estimated columns.
 - [ ] Re-read the g31b_ud4k container's log once the run has finished: the
       2026-09-06 paste ends at the model buffer lines, with no KV or
       compute figures.
