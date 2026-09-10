@@ -2,14 +2,17 @@
 
 ## Current phase
 
-Idle: no cycle open. The last cycle, fix/benchmark-table-number-format,
-landed on 2026-09-10: the Benchmark tab's run-history table renders its
-stored numbers at a fixed decimal width instead of printing the raw float,
-right-aligned, with a stale or missing stored value rendering as its own
-text or an empty cell (SPEC 2.43). Next: the owner's GPU smokes below,
-including a re-shot bench.png, then a release commit on main that sets
-pyproject to 0.2.0 and dates the CHANGELOG section, then the v0.2.0 tag and
-the GitHub release, each on the owner's yes.
+Idle: no cycle open. The last cycle, fix/draft-cache-and-state-cells,
+landed on 2026-09-10: the memory estimate now prices a draft model's cache
+and every model's recurrent state from what llama.cpp allocates, measured
+against one Verbosity 4 log of three runs (SPEC 2.17, 2.19 and 2.32; the
+log, the estimates and a term by term table are in
+DevDocs/llama_launcher/calibration-2026-09-10). Both 27B runs now reproduce
+the logged weights, KV and recurrent state exactly on both cards. Next: the
+owner's GPU smokes below, the first of which settles the state cell rule,
+then a release commit on main that sets pyproject to 0.2.0 and dates the
+CHANGELOG section, then the v0.2.0 tag and the GitHub release, each on the
+owner's yes.
 
 ## Open items
 
@@ -77,32 +80,12 @@ the GitHub release, each on the owner's yes.
       output tensor to a card while -ngl leaves the output layer in RAM
       still sends the logits term to the host buffer; the device flag wins
       over the override.
-- [ ] recurrent_layer_mask marks the output layer recurrent: it marks every
-      layer the KV mask leaves uncached, and the layer count is the block
-      count plus one for the output. Measured on the 27B profile
-      2026-09-10, whose 64 blocks split 16 attention to 48 recurrent: the
-      estimate charges 49 layers of state.
-- [ ] The recurrent state is charged one cell per request slot, while
-      llama.cpp allocates n_rs_seq plus one. On the 27B profile 2026-09-10,
-      n_seq_max 1 and n_rs_seq 2 gave three cells per layer, so the measured
-      448.88 MiB is 48 layers times 3 cells times the per-layer 3268608
-      bytes that vram.recurrent_state_bytes already computes exactly. The
-      per-layer formula is right; the multiplier is not.
 - [ ] The 35B-A3B's host weight estimate reads 1372.95 MiB against a logged
       host model buffer of 515.31 MiB (2026-09-10), while the 27B's host
       weights are exact. Nothing yet explains the difference.
 - [ ] recurrent_layer_mask treats any layer with a non-zero per-layer
       feed-forward width as not recurrent, so a hybrid whose recurrent block
       also carries an MLP would be charged no state (SPEC 2.32 as written).
-- [ ] The estimate prices a draft model as a clone of the main model's KV
-      and recurrent state. Measured on the 27B profile 2026-09-10: the KV
-      estimate is exactly twice the main model's cache on both cards (3740
-      against 1870 MiB on card 0, 2244 against 1122 on card 1), while the
-      draft's real cache is 352 MiB on card 1 alone and it holds no
-      recurrent state at all, its context reporting n_rs_seq 0 and logging
-      no RS buffer. An MTP draft also reserves a large compute buffer for a
-      small weight (554 MiB on card 1 here, 3320 MiB on card 0 of the
-      gemma4-assistant run) that no term covers.
 - [ ] With --n-gpu-layers all and no tensor table the estimate puts the
       output layer on a card, but all three Gemma 4 runs of 2026-09-06 kept
       the tied token embedding in host RAM (the logged host model buffer is
@@ -115,9 +98,38 @@ the GitHub release, each on the owner's yes.
       every activation in f32; the fitted logits coefficient absorbs the
       factor rather than the formula naming the width.
 - [ ] The draft model's memory estimate uses the main model's micro-batch
-      size and slot count, although llama.cpp builds the draft context with
-      one sequence and its own batch; the pre-existing context fallback
-      makes the same approximation.
+      size, although llama.cpp builds the draft context with its own batch.
+      The slot half of this is fixed: a draft's cache is priced at one
+      sequence.
+- [ ] An MTP draft reserves a large compute buffer for a small weight (554
+      MiB on card 1 of the 2026-09-10 run, 3320 MiB on card 0 of the
+      gemma4-assistant run) and no term covers it.
+- [ ] A COMPUTE_TERMS refit is owed, and the three 2026-09-10 records name
+      the figures it must reach: the 35B's card 0 compute at 0.883 and its
+      host buffer at 0.833, both reading low, and the two-slot 27B's host
+      buffer at 861.84 MiB against 197.13 measured, 4.37 times high. Each
+      record marks those figures pending, so the bands hold everywhere else
+      and the fitting script leaves them out of the region it fits.
+- [ ] The drafted run logs two output buffers, the main model's and the
+      draft's at 0.95 MiB each, while the estimate charges one; the record
+      marks its output figure pending.
+- [ ] A 27B profile with no draft loaded is charged the weights of the
+      file's unused blk.64.nextn.* tensors, 334.75 MiB on the card holding
+      the tail (5883.07 MiB with the draft on against 5548.32 with it off,
+      2026-09-10). Placement counts every block tensor in the table whatever
+      nextn_predict_layers says; extending the exclusion to placement is the
+      natural follow-up to this cycle.
+- [ ] The estimate prices a draft at the main model's context when
+      ctx-size-draft is unset, while llama.cpp server appears to build the
+      draft context at n_ctx divided by n_parallel. The only drafted
+      measurement ran one slot, so it cannot show the difference; the
+      pending smoke settles it.
+- [ ] A standalone draft that is itself a hybrid would be over-charged: a
+      draft is priced a cache on every layer its file carries, recurrent
+      ones included, and no measurement covers such a model. Over-charging
+      is the safe direction for a fit check.
+- [ ] An ik_llama.cpp draft adds no state cells, since spec-draft-n-max is
+      mainline-only while ik carries its own draft-params row.
 - [ ] The ik calibration record's card 0 KV lower bound clears by a few KiB
       only through the log-precision allowance; a second ik measurement
       would settle whether the one-layer slack is enough.
@@ -184,6 +196,15 @@ the GitHub release, each on the owner's yes.
 
 ## Pending owner smokes
 
+- [ ] Run the 27B profile at `--parallel 2` with the MTP draft on. It
+      settles two open questions at once. The state cell rule: three
+      candidates fit both measured runs, `slots + depth` predicting 4 cells
+      (598.50 MiB of state), `max(slots, depth + 1)` predicting 3 (448.88
+      MiB) and `slots x (depth + 1)` predicting 6 (897.75 MiB); read
+      `llama_memory_recurrent: size` and report which. The draft context:
+      the draft's KV buffer reads 352.00 MiB if the draft keeps the full
+      context and 176.00 MiB if llama.cpp divides it by the slot count.
+      The estimate implements `slots + depth` and the full context.
 - [x] Re-shoot assets/screenshots/bench.png on the 5080 plus A2000 box now
       that the columns are formatted. Done 2026-09-10: the history table
       reads 32.9, 43.9 and 3.04, right-aligned.
@@ -294,18 +315,31 @@ the GitHub release, each on the owner's yes.
 
 ## Done this cycle
 
-- The run-history table's cells are built through _fmt_metric with a
-  per-column decimal count (_BENCH_COLUMN_DIGITS): one decimal on pp t/s and
-  gen t/s, two on total s, the size and prompt_n counts passed through as
-  their own text, and every cell right-aligned. The column headers and the
-  spanned run header keep their own alignment. A value that is not a real
-  number, a boolean included, renders as its own text and a missing one as
-  an empty cell, so a stale history file renders rather than raising inside
-  the repaint.
-- The stored benchmark file, the sweep table and the delta summary line are
-  untouched and keep the precision they had.
-- SPEC 2.43 states the behaviour; the CHANGELOG carries it under
-  [Unreleased].
-- The owner refreshed assets/screenshots/config.png (layer ranges, the
-  Details section and the two-column tools boxes) and bench.png (the sweep
-  table with its measured against estimated columns).
+- A draft model's KV cache is sized over the layers its own tensor table
+  carries rather than the layer count its header declares, each priced at
+  the index its tensor names give, at one sequence whatever --parallel
+  says, and at f16 unless its own cache-type rows say otherwise. Every
+  layer a draft's file carries holds a cache, whatever the full-attention
+  pattern of the header it shares with the main model says. A draft adds no
+  recurrent state.
+- The trailing multi-token-prediction positions the header's
+  nextn_predict_layers names hold neither a KV cache nor recurrent state in
+  the model that declares them, which took the 27B from 49 charged
+  recurrent layers to 48.
+- Recurrent state is charged once per state cell, the slots plus the
+  speculative depth a loaded draft asks for, while the checkpoints term
+  stays per request slot. On the 27B that moves the checkpoints from 9776
+  MiB to about 4.68 GiB.
+- The three 2026-09-10 runs are calibration records. Records may mark
+  individual figures pending, which keeps those out of their bands while
+  every other figure stays pinned, and the fitting script leaves them out
+  of the region it fits. Without that last part the new records left the
+  fitter with an empty feasible set.
+- Both 27B records reproduce the measured KV plus state at a ratio of
+  1.0000 per card; the drafted run's card 1 reads 1614.27 MiB estimated
+  against 1614.27 measured.
+- The 2026-09-06 27B record is reconciled onto the 65-position header the
+  file actually declares, and each record now carries its own logged free
+  VRAM rather than the first run's.
+- Docs: CHANGELOG [Unreleased], VRAM.md's recurrent-state and draft
+  paragraphs, SPEC 2.17, 2.19 and 2.32.

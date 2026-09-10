@@ -31,12 +31,11 @@ Run from the repository root: .venv/bin/python scripts/fit_compute_terms.py
 import itertools
 import sys
 from pathlib import Path
-from types import SimpleNamespace
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from llama_launcher.core import vram
-from tests.core.calibration_records import RECORDS
+from tests.core.calibration_records import RECORDS, estimate_for
 
 COARSE_GRID = {
     "logits": [0.0, 0.25, 0.5, 0.75, 1.0],
@@ -80,32 +79,27 @@ MAINLINE = [r for r in RECORDS if r["engine"] != IK_ENGINE]
 IK = [r for r in RECORDS if r["engine"] == IK_ENGINE]
 
 
-def estimate_for(record):
-    meta = SimpleNamespace(**record["meta"])
-    return vram.estimate_memory(
-        meta,
-        1,
-        settings=record["settings"],
-        engine=record["engine"],
-        free_bytes_per_gpu=record["free_bytes_per_gpu"],
-    )
-
-
 def fitted_figures(record):
     """(name, estimated, measured) for every figure the coefficients move:
     the sorted per-card compute buffers, the host compute buffer and the
-    output buffer."""
+    output buffer, leaving out any figure the record marks pending, since no
+    coefficient the grid searches can move a figure a record marks that way."""
+    pending = record.get("pending", ())
     est = estimate_for(record)
-    cards = record["measured"]["cards"]
-    measured = sorted(m["compute"] for m in cards)
-    estimated = sorted(c.compute for c in est.cards[: len(cards)])
-    out = [
-        (f"{record['name']} sorted compute {i}", c, m)
-        for i, (m, c) in enumerate(zip(measured, estimated, strict=True))
-    ]
+    out = []
+    if "compute" not in pending:
+        cards = record["measured"]["cards"]
+        measured = sorted(m["compute"] for m in cards)
+        estimated = sorted(c.compute for c in est.cards[: len(cards)])
+        out.extend(
+            (f"{record['name']} sorted compute {i}", c, m)
+            for i, (m, c) in enumerate(zip(measured, estimated, strict=True))
+        )
     r = record["measured"]["ram"]
-    out.append((f"{record['name']} host buffer", est.ram.host, r["compute"]))
-    out.append((f"{record['name']} output buffer", est.ram.output, r["output"]))
+    if "host" not in pending:
+        out.append((f"{record['name']} host buffer", est.ram.host, r["compute"]))
+    if "output" not in pending:
+        out.append((f"{record['name']} output buffer", est.ram.output, r["output"]))
     return out
 
 

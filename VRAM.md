@@ -25,11 +25,14 @@ Per card:
   head count when absent); all of it moves to RAM under
   `--no-kv-offload`;
 - the recurrent state of every layer that holds no KV cache on a header
-  carrying recurrent-state sizes, one copy per request slot, charged to
-  the card that holds the layer (or to RAM where its KV would go); a
-  header with state sizes and no attention heads is purely recurrent, and
-  a layer with no KV heads but a non-zero per-layer feed-forward width is
-  MLP-only and holds neither cache nor state;
+  carrying recurrent-state sizes, never one of the trailing
+  multi-token-prediction positions the header's `nextn_predict_layers`
+  names, one copy per state cell (the request slot count plus a draft
+  model's speculative depth, `spec-draft-n-max`, when one is configured),
+  charged to the card that holds the layer (or to RAM where its KV would
+  go); a header with state sizes and no attention heads is purely
+  recurrent, and a layer with no KV heads but a non-zero per-layer
+  feed-forward width is MLP-only and holds neither cache nor state;
 - a compute buffer (see the formula below), counted only on a card that
   holds weights or KV, except under `split-mode row`, where it is counted
   once, on `--main-gpu`, and only when `--main-gpu` itself holds weights
@@ -45,8 +48,9 @@ In RAM:
   kept off a card or tied to the embeddings);
 - their KV cache and recurrent state;
 - the context checkpoints: `--ctx-checkpoints` times the recurrent state
-  of every recurrent layer, wherever that layer sits, since llama-server
-  keeps its checkpoints as host vectors;
+  of every recurrent layer per request slot, not per state cell, wherever
+  that layer sits, since llama-server keeps its checkpoints as host
+  vectors;
 - a host compute buffer: the host term of the compute formula times the
   same per-card formula without its logits or vocabulary term (the host
   reserves a card-sized buffer for the same graph rather than one that
@@ -76,11 +80,19 @@ A draft model is placed by the same function, gated on the draft twins of
 the offload flags (`spec-draft-override-tensor`, `spec-draft-n-cpu-moe`
 and `spec-draft-cpu-moe`, which also accept upstream's
 `--override-tensor-draft`, `--n-cpu-moe-draft` and `--cpu-moe-draft`
-spellings), and its KV cache uses `--ctx-size-draft` when set and the main
-context otherwise. Its weights, KV, recurrent state, checkpoints and
-compute buffer add into the same per-card and RAM totals as the main
-model's. A projector file's bytes add to `--main-gpu`'s weights unless
-`--no-mmproj-offload` is set, in which case they go to RAM instead.
+spellings). Its KV cache is sized over the layers its own tensor table
+carries, never the layer count its header declares, at `--ctx-size-draft`
+when set and the main context otherwise, for one sequence whatever the
+main model's slot count, and at `cache-type-k-draft` and
+`cache-type-v-draft` when those are set and f16 otherwise, independently
+of the main model's cache types. A draft model adds no recurrent state of
+its own, though it does add its speculative depth (`spec-draft-n-max`) to
+the state cell count the main model's recurrent layers charge, and its
+checkpoints stay sized per request slot like the main model's. Its
+weights, KV and compute buffer add into the same per-card and RAM totals
+as the main model's. A projector file's bytes add to `--main-gpu`'s
+weights unless `--no-mmproj-offload` is set, in which case they go to RAM
+instead.
 
 A sliding-window model whose header carries a per-layer window pattern
 (`attention.sliding_window_pattern`, as Gemma 4 writes it) has each window

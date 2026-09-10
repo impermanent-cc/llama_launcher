@@ -116,8 +116,16 @@ places everything on `--main-gpu`; ik's `graph` mode is placed like
 `layer`.
 
 2.17 A draft model is placed by the same function with the draft twins of
-the offload flags, and carries its own KV cache at the draft context when
-set and the main context otherwise. The draft twins are the catalog's
+the offload flags. Every layer its own tensor table carries holds a cache,
+whatever the full-attention pattern of the header it shares with the main
+model says, and never the layer count that header declares; a draft whose
+header carries no tensor table falls back to the layer set of 2.18. Each
+layer is priced by the sizing rules of 2.18 at the index its tensor names
+give, at the draft context when set and the main context otherwise, for one
+sequence whatever the main model's slot count, and at the cache types
+`cache-type-k-draft` and `cache-type-v-draft` when those are set and f16
+otherwise, independently of the main model's cache types. A draft model
+adds no recurrent state. The draft twins are the catalog's
 existing mainline-only rows `spec-draft-override-tensor`,
 `spec-draft-n-cpu-moe` and `spec-draft-cpu-moe`, which also accept
 upstream's `--override-tensor-draft`, `--n-cpu-moe-draft` and
@@ -139,7 +147,8 @@ smaller of the per-slot context and the sliding window plus the micro-batch
 size, rounded up to a multiple of 256 tokens (with `--kv-unified`, one
 stream holding the smaller of the context and the window times the slot
 count plus the micro-batch size); with `--swa-full`, and on ik_llama.cpp
-always, it holds the full context. A draft model follows the same rules.
+always, it holds the full context. A draft model follows the same per-layer
+sizing rules, at the layer set, sequence count and cache types of 2.17.
 A model whose header carries a sliding window but no pattern array is
 estimated at full context on every KV layer; that case, and a
 sliding-window model on ik_llama.cpp, is labelled as an upper bound
@@ -166,7 +175,13 @@ low on the sum across cards (on the RAM figure for a record with no card
 figures), and per card within one layer's KV of that;
 compute and host buffers never read low and read at most two and a half
 times high, compared per card as sorted figures since the output card
-follows settings the records do not carry. The calibration procedure
+follows settings the records do not carry. A record may mark individual
+figures pending, naming any of the compute, host-buffer and output-buffer
+comparisons, which keeps the named figures out of their bands while every
+figure it does not name, and the KV and state bands, still apply; the
+fitting script reads every record and leaves the figures a record marks
+pending out of the region it fits, since no coefficient it searches can
+move them. The calibration procedure
 against llama.cpp's memory breakdown is documented, per engine, so the
 constants can be refitted when upstream changes its graphs.
 
@@ -298,21 +313,27 @@ stored sweep of 2.30 into the table, labelled with that sweep's timestamp;
 a profile without one shows an empty table and no label. The compute constants of 2.19
 are not changed by a sweep.
 
-2.32 A recurrent layer (a layer the attention rules of 2.18 leave uncached,
-before the shared-KV tail is cleared, and without a dense
-feed-forward width where the header carries per-layer widths, on a model
-whose header carries recurrent-state sizes; every layer on a model with
-state sizes and no attention heads) adds its state in f32, the convolution
-state (kernel size minus one, times inner size plus twice the group count
-times state size) plus the state matrix (state size times inner size),
-once per request slot, to the card that holds the layer, or to RAM where KV
-would go. A checkpoints term, the `--ctx-checkpoints` setting (default 32)
-times the recurrent state of every recurrent layer per slot, is charged to
-RAM, where the server keeps its checkpoints. Both appear in every readout
-total, the dialog and `--estimate --json` (card key `state`, RAM keys
-`state` and `checkpoints`), and the sweep's estimated figures of 2.31
-include the state and exclude the checkpoints. A per-layer KV head-count
-array sizes each layer's cache by its own count.
+2.32 A recurrent layer (a block layer, never one of the trailing
+multi-token-prediction positions the header's `nextn_predict_layers` names,
+that the attention rules of 2.18 leave uncached, before the shared-KV tail
+is cleared, and without a dense feed-forward width where the header carries
+per-layer widths, on a model whose header carries recurrent-state sizes;
+every block layer on a model with state sizes and no attention heads) adds
+its state in f32, the convolution state (kernel size minus one, times inner
+size plus twice the group count times state size) plus the state matrix
+(state size times inner size), once per state cell, to the card that holds
+the layer, or to RAM where KV would go. The state cell count is the request
+slot count plus the speculative sequence count, that being
+`spec-draft-n-max` when a draft model the estimate can price is loaded, the
+catalog default where that setting is unset or not a positive number, and
+zero where no such draft is loaded or the engine does not accept the
+setting. A checkpoints term, the `--ctx-checkpoints` setting (default 32)
+times the recurrent state of every recurrent layer per request slot, not per
+state cell, is charged to RAM, where the server keeps its checkpoints. Both
+appear in every readout total, the dialog and `--estimate --json` (card key
+`state`, RAM keys `state` and `checkpoints`), and the sweep's estimated
+figures of 2.31 include the state and exclude the checkpoints. A per-layer
+KV head-count array sizes each layer's cache by its own count.
 
 2.33 A balanced `--tensor-split` is computed whenever the estimate is
 knowable, at least two cards are visible, at least as many layers are placed

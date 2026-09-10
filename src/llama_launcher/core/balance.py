@@ -36,7 +36,7 @@ def marginal_bytes_per_token(
 ):
     """Each card's KV and state total at the profile's own context,
     subtracted from the same total one STEP_TOKENS further out and divided
-    by STEP_TOKENS: the recurrent-state term is per request slot and does
+    by STEP_TOKENS: the recurrent-state term is per state cell and does
     not move with context, so it cancels out and what is left is the rate
     the KV cache grows by, with window caps, cache types and slot rules
     needing no second formula. Never negative. None when the estimate is
