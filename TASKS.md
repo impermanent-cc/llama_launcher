@@ -32,11 +32,12 @@ each on the owner's yes.
       implementation loaded ("speculative decoding context initialized",
       2026-09-10). Find the upstream commit that lifted the restriction
       and drop or version-gate the warning.
-- Owner: the main window's minimum width rose from about 843 to 1032 px,
-      driven by the top bar's Name and profile picker minimums (160 and
-      200 px) plus six buttons, so a 1024 px display no longer fits the
-      window. Lowering NAME_EDIT_BOUNDS[0] or letting the buttons collapse
-      fixes it; ENV_COLUMN_MIN (420) is inert while that minimum stands.
+- [ ] The main window's minimum width is about 1032 px, from the top
+      bar's Name and profile picker minimums (160 and 200 px) plus six
+      buttons, so a 1024 px display no longer fits the window; the owner
+      accepted it on their display on 2026-09-10. Lowering
+      NAME_EDIT_BOUNDS[0] or letting the buttons collapse would fix it;
+      ENV_COLUMN_MIN (420) is inert while that minimum stands.
 - [ ] The readout's layer ranges follow the KV cache placement while a model
       with no tensor table parks its whole weight blob at the output
       position, so a partial offload of such a model names host layers with
@@ -145,9 +146,6 @@ each on the owner's yes.
       router.png blob (91a946f) was still fetchable by exact SHA on
       2026-09-02 and the repository is public; nothing records the request
       as filed.
-- [ ] Owner, GitHub: the repository has no topics (gh reported none on
-      2026-09-10; project memory records twelve set on 2026-08-24, so the
-      history rewrite or a re-creation lost them).
 - [ ] A mounted draft model or projector whose file is absent yields
       (None, None) from inspect_file exactly like an unmounted one, so it
       counts zero bytes with no message; SPEC 2.35 covers only the unmounted
@@ -227,20 +225,18 @@ each on the owner's yes.
       the KV matches exactly per card at two context sizes of the 27B
       (32768 and 90112) and on both cards of the 35B, which pins the KV
       per 1024 tokens.
-- [ ] Confirm on your display that the settings column shows no horizontal
-      scrollbar at your usual window size, that the Environment column and
-      the top bar fields stop at their maxima, and that the 1032 px window
-      minimum is acceptable (the first owner item above).
-- [ ] Take a profile that is over budget on one card on the 5080 plus
+- [x] Confirm on your display that the settings column shows no horizontal
+      scrollbar, that the Environment column and the top bar fields stop at
+      their maxima, and that the 1032 px window minimum is acceptable.
+      Confirmed by the owner on 2026-09-10.
+- [x] Take a profile that is over budget on one card on the 5080 plus
       A2000 box, apply the suggested `--tensor-split` from
       `--estimate --json`, launch at Verbosity 4 and check the per-card
-      model buffer lines against the predicted boundary layer and the KV
-      figures against the predicted per-card marginal cost. The boundary
-      layer must match exactly and each card's model buffer must land
-      inside the tolerance the calibration records use. With complete
-      buffer lines the run becomes a seventh entry in
-      tests/core/calibration_records.py; without them it stays a reported
-      smoke.
+      model buffer lines against the predicted boundary layer. Done by the
+      owner before 2026-09-10: the suggestion is what put the 27B on the
+      layer-count split 43,23, and that launch is the 2026-09-10 27B
+      calibration record, whose model buffers match the estimate to the
+      byte on both cards.
 - [x] Re-run `--estimate --json` for the 27B dense and 35B-A3B profiles on
       the 5080 plus A2000 box and compare against the measured figures. Done
       2026-09-10 against one Verbosity 4 log carrying both profiles, filed
@@ -251,9 +247,9 @@ each on the owner's yes.
       KV reads exactly twice the truth and its recurrent state 32 percent
       under; see the open items below. Not done: a second sweep per profile
       with the measured against estimated columns.
-- [ ] Re-read the g31b_ud4k container's log once the run has finished: the
-      2026-09-06 paste ends at the model buffer lines, with no KV or
-      compute figures.
+- [x] Re-read the g31b_ud4k container's log once the run has finished.
+      Dropped 2026-09-10: the owner deleted the 31B profile because it ran
+      poorly on the box, so the 2026-09-06 paste stays model buffers only.
 - [x] Measure one dense non-hybrid model on the 5080 plus A2000 box. Done
       2026-09-06 with Gemma 4 12B (dense, MTP draft), 26B-A4B (MoE) and 31B
       (dense, model buffers only), mainline b10818 at Verbosity 4 with
