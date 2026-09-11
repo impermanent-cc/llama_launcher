@@ -6,8 +6,10 @@ A PySide6/Qt6 desktop app that builds a `podman`/`docker` `llama-server` command
 and launches it in a terminal (an auto-detected emulator, foreground so `Ctrl-C` works), then
 observes the named container from outside. Tabbed **Configure / Monitor** UI with profiles, a
 curated `llama-server` settings catalog (plus a raw-args escape hatch), typed mounts,
-mmproj/LoRA/draft-model pickers, model-aware capability detection, VRAM preflight, a live
-throughput/MTP monitor, and a repeatable speed benchmark for A/B-ing config changes.
+mmproj/LoRA/draft-model pickers, model-aware capability detection, a per-card and RAM memory
+estimate that places every tensor the way the engine does (see [`VRAM.md`](VRAM.md)), a live
+throughput/MTP monitor, a repeatable speed benchmark for A/B-ing config changes, and an
+offload sweep that measures each `--n-cpu-moe` or `--n-cpu-ffn` count and applies the fastest.
 
 Beyond single-container launches it can also run a **prebuilt binary natively** (no container),
 drive **remote machines** over podman-over-SSH, **pool VRAM+RAM across nodes** via llama.cpp

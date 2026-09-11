@@ -10,55 +10,24 @@ not on the release page, so the two never drift.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-09-11
+
+The memory estimate is the headline. The Configure readout, the launch
+dialog and a new `--estimate` command place every tensor of a model the way
+the engine does, per card and in RAM, across `--tensor-split`,
+`--n-gpu-layers`, `--n-cpu-moe`, `--n-cpu-ffn` and `--override-tensor`,
+with the KV cache, the recurrent state of hybrid models, sliding-window
+layers and draft models priced from the GGUF header and calibrated against
+measured llama.cpp 0.4.0 and ik_llama.cpp runs. A shortfall message names
+the smallest offload count or the balanced `--tensor-split` that fits. The
+Benchmark tab gains an offload sweep that measures each count and writes
+the fastest into the profile, the Configure tab gains a search field over
+the settings and a Details section under the readout, and the catalog
+tracks the llama.cpp 0.4.0 flags. `VRAM.md` describes the estimate and how
+to calibrate it.
+
 ### Added
 
-- The readout's meta line carries the model's layer count, and each card
-  line opens with the layer range that card holds ("layers 0 to 27 plus
-  output"), or "all GPU layers, row split" under `--split-mode row`; the
-  RAM line names the layers left on the host.
-- A collapsible Details section under the readout with the KV cost of the
-  next 1024 tokens per device, each card's average weight per layer (and the
-  expert share on a mixture-of-experts model), the model's head, embedding
-  and vocabulary counts, and the output tensor's size and device.
-  `--estimate` prints the same block after the readout lines, and `--json`
-  carries `n_layers`, per-card `layers` and `bytes_per_layer`, `kv_per_1k`
-  and `output_device`.
-- Finer `--ctx-size` presets: 1024 and the midpoints 12288, 24576, 49152,
-  98304 and 196608 join the ladder.
-- A search field above the settings on the Configure tab: type part of a
-  flag, an alias such as `-ngl`, or a group name, and the matching row
-  scrolls into view and is highlighted; Enter and Shift+Enter step through
-  the matches, Escape clears. Rows hidden by the current mode or engine
-  never match.
-- `--estimate` exits 6 when every card fits but RAM is over budget, with
-  `ok` still true in the JSON; the README exit table carries the row.
-- The estimate warns, in the readout, the launch dialog and the CLI, when a
-  draft model or projector lies under no configured folder and its bytes
-  are therefore not counted.
-- The Benchmark tab labels a stored sweep with its timestamp.
-- An offload sweep in the Benchmark tab: launches the profile once per
-  `--n-cpu-ffn` (dense) or `--n-cpu-moe` (MoE) count over a range the
-  memory estimate prefills, benchmarks each, records the measured model, KV
-  and compute buffers from the server log and shows their per-card total
-  beside the estimate, marks the fastest count and writes it into the
-  profile on Apply. Sweep launches on mainline llama.cpp run at log
-  verbosity 4, the level at which 0.4.0 prints the buffer lines; the parser
-  reads the timestamped 0.4.0 format and ik_llama.cpp's buffer lines.
-- Four llama.cpp 0.4.0 server flags: `--kv-unified-per-slot` (per-slot context
-  limit, under GPU and Memory) and `--video-fps`,
-  `--video-timestamp-interval` and `--video-ffmpeg-dir` (Multimodal). All four
-  are mainline-only and never reach an ik_llama.cpp launch.
-- `--no-reasoning-preserve`, the control for switching reasoning preservation
-  off now that llama.cpp 0.4.0 enables it by default.
-- A warning when a flag and its `--no-` twin would both act on a launch,
-  naming which one llama-server will honour. Derived from the catalog, so it
-  covers any such pair, and it sees a half supplied through raw args.
-- A warning when `--kv-unified-per-slot` is set but the slot count is not an
-  explicit number, since the KV pool size is then unknowable before launch.
-- `--n-cpu-ffn` now reaches everything its MoE sibling reached: the capability
-  dots (recommended on a dense model, worth tuning on a MoE one), the RPC
-  centralizing warning, the benchmark run snapshot and the over-budget VRAM
-  hint.
 - The VRAM preflight reads the GGUF tensor table and places every tensor
   the way the engine does: per card under `--tensor-split` or free-memory
   proportions, or in RAM under `--n-gpu-layers`, `--cpu-moe`, `--n-cpu-moe`,
@@ -73,12 +42,59 @@ not on the release page, so the two never drift.
 - Shortfall messages name the smallest `--n-cpu-moe` or `--n-cpu-ffn` that
   fits, or the equivalent `--override-tensor` pattern where the engine lacks
   the flag; with `--fit` active the message says what llama.cpp will shrink.
-- The draft offload rows accept upstream's `--override-tensor-draft`,
-  `--n-cpu-moe-draft` and `--cpu-moe-draft` spellings as aliases.
 - The memory estimate suggests a capacity-balanced `--tensor-split`: a card
   shortfall message names it, and `--estimate --json` carries it as
   `balanced_split`. It is a suggestion; what the estimate assumes about an
   unset split is unchanged.
+- The readout's meta line carries the model's layer count, and each card
+  line opens with the layer range that card holds ("layers 0 to 27 plus
+  output"), or "all GPU layers, row split" under `--split-mode row`; the
+  RAM line names the layers left on the host.
+- A collapsible Details section under the readout with the KV cost of the
+  next 1024 tokens per device, each card's average weight per layer (and the
+  expert share on a mixture-of-experts model), the model's head, embedding
+  and vocabulary counts, and the output tensor's size and device.
+  `--estimate` prints the same block after the readout lines, and `--json`
+  carries `n_layers`, per-card `layers` and `bytes_per_layer`, `kv_per_1k`
+  and `output_device`.
+- `--estimate` exits 6 when every card fits but RAM is over budget, with
+  `ok` still true in the JSON; the README exit table carries the row.
+- The estimate warns, in the readout, the launch dialog and the CLI, when a
+  draft model or projector lies under no configured folder and its bytes
+  are therefore not counted.
+- An offload sweep in the Benchmark tab: launches the profile once per
+  `--n-cpu-ffn` (dense) or `--n-cpu-moe` (MoE) count over a range the
+  memory estimate prefills, benchmarks each, records the measured model, KV
+  and compute buffers from the server log and shows their per-card total
+  beside the estimate, marks the fastest count and writes it into the
+  profile on Apply. Sweep launches on mainline llama.cpp run at log
+  verbosity 4, the level at which 0.4.0 prints the buffer lines; the parser
+  reads the timestamped 0.4.0 format and ik_llama.cpp's buffer lines.
+- The Benchmark tab labels a stored sweep with its timestamp.
+- A search field above the settings on the Configure tab: type part of a
+  flag, an alias such as `-ngl`, or a group name, and the matching row
+  scrolls into view and is highlighted; Enter and Shift+Enter step through
+  the matches, Escape clears. Rows hidden by the current mode or engine
+  never match.
+- Finer `--ctx-size` presets: 1024 and the midpoints 12288, 24576, 49152,
+  98304 and 196608 join the ladder.
+- Four llama.cpp 0.4.0 server flags: `--kv-unified-per-slot` (per-slot context
+  limit, under GPU and Memory) and `--video-fps`,
+  `--video-timestamp-interval` and `--video-ffmpeg-dir` (Multimodal). All four
+  are mainline-only and never reach an ik_llama.cpp launch.
+- `--no-reasoning-preserve`, the control for switching reasoning preservation
+  off now that llama.cpp 0.4.0 enables it by default.
+- The draft offload rows accept upstream's `--override-tensor-draft`,
+  `--n-cpu-moe-draft` and `--cpu-moe-draft` spellings as aliases.
+- `--n-cpu-ffn` now reaches everything its MoE sibling reached: the capability
+  dots (recommended on a dense model, worth tuning on a MoE one), the RPC
+  centralizing warning, the benchmark run snapshot and the over-budget VRAM
+  hint.
+- A warning when a flag and its `--no-` twin would both act on a launch,
+  naming which one llama-server will honour. Derived from the catalog, so it
+  covers any such pair, and it sees a half supplied through raw args.
+- A warning when `--kv-unified-per-slot` is set but the slot count is not an
+  explicit number, since the KV pool size is then unknowable before launch.
 
 ### Changed
 
@@ -256,6 +272,7 @@ delete and a use-in-profile action.
 Docker and podman paths, single-server plus router modes, and the embedding
 and reranking (RAG) path validated live. Known gap: AMD/ROCm GPUs untested.
 
-[Unreleased]: https://github.com/impermanent-cc/llama_launcher/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/impermanent-cc/llama_launcher/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/impermanent-cc/llama_launcher/releases/tag/v0.2.0
 [0.1.1]: https://github.com/impermanent-cc/llama_launcher/releases/tag/v0.1.1
 [0.1.0]: https://github.com/impermanent-cc/llama_launcher/releases/tag/v0.1.0

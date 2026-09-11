@@ -2,14 +2,12 @@
 
 ## Current phase
 
-Idle: no cycle open. The last cycle, fix/state-cells-per-slot, landed on
-2026-09-10: recurrent state is charged per state unit, the request slot
-count times one plus the speculative sequence count under a rollback
-spec-type (SPEC 2.32), the fourth 2026-09-10 run is a calibration record
-that separates that rule from slots plus depth, and validation no longer
-warns that draft-mtp needs a single slot (SPEC 2.44). Next: the release
-commit on main that sets pyproject to 0.2.0 and dates the CHANGELOG section,
-then the v0.2.0 tag and the GitHub release, each on the owner's yes.
+Idle: no cycle open. v0.2.0 was cut on 2026-09-11: the release commit on
+main sets pyproject and uv.lock to 0.2.0, dates the CHANGELOG section and
+opens an empty Unreleased section, and the v0.2.0 tag and GitHub release
+follow it. Next: whatever the owner picks from ROADMAP.md "Next"; the
+Gemma tied output tensor and the balanced split in the sweep are the two
+estimate items that measured runs already motivate.
 
 ## Open items
 
