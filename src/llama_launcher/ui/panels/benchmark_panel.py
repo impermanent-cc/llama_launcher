@@ -110,6 +110,9 @@ class BenchmarkPanel(QWidget):
         bench_config.addWidget(InfoButton(_BENCH_INTRO))
         bench_config.addWidget(QLabel("Prompt sizes:"))
         self.bench_sizes = QLineEdit("128, 512, 2048")
+        self.bench_sizes.setToolTip(
+            "Prompt sizes in tokens: positive whole numbers separated by commas."
+        )
         bench_config.addWidget(self.bench_sizes)
         bench_config.addWidget(QLabel("n-predict:"))
         self.bench_npredict = QSpinBox()
@@ -212,6 +215,8 @@ class BenchmarkPanel(QWidget):
             return
         sizes = parse_prompt_sizes(self.bench_sizes.text())
         if sizes is None:
+            self.bench_sizes.setFocus()
+            self.bench_sizes.selectAll()
             return
         self.benchmark_run_requested.emit(
             {

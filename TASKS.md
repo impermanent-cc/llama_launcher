@@ -2,20 +2,36 @@
 
 ## Current phase
 
-Idle: no cycle open. The last cycle, fix/draft-cache-and-state-cells,
-landed on 2026-09-10: the memory estimate now prices a draft model's cache
-and every model's recurrent state from what llama.cpp allocates, measured
-against one Verbosity 4 log of three runs (SPEC 2.17, 2.19 and 2.32; the
-log, the estimates and a term by term table are in
-DevDocs/llama_launcher/calibration-2026-09-10). Both 27B runs now reproduce
-the logged weights, KV and recurrent state exactly on both cards. Next: the
-owner's GPU smokes below, the first of which settles the state cell rule,
-then a release commit on main that sets pyproject to 0.2.0 and dates the
-CHANGELOG section, then the v0.2.0 tag and the GitHub release, each on the
-owner's yes.
+Idle: no cycle open. The last cycle, chore/smokes-readme-easy-wins, landed
+on 2026-09-10: the owner smokes the 2026-09-10 logs settled are ticked,
+README carries the CI badge and the layer-range and Details sentences,
+and the easy open items are cleared (one literal_ampersands helper behind
+the group titles and the metrics button, the placement alias, the balanced
+predicate, the strict draft-KV zip, a shared card-layers helper, the
+unread SearchEntry key, a positive prompt-size guard on vram.positive_int,
+the setting_widgets comment, RPC.md to ASCII and off the guard allowlist).
+Next: a fix cycle for the recurrent state cell rule the fourth 2026-09-10
+run settled (the first open item, slots x (depth + 1)), carrying that run
+as the fourth calibration record and the stale draft-mtp --parallel
+warning; then the release commit on main that sets pyproject to 0.2.0 and
+dates the CHANGELOG section, then the v0.2.0 tag and the GitHub release,
+each on the owner's yes.
 
 ## Open items
 
+- [ ] The recurrent state cell rule is `slots x (depth + 1)`, not
+      `slots + depth`: the fourth 2026-09-10 run (27B, --parallel 2, MTP
+      draft on) logs 897.75 MiB of state, 48 layers times 6 units, with the
+      log's own accounting reading 2 cells at 2 seqs plus 2 rs_seq; per
+      card 617.20 MiB (33 layers) and 280.55 (15). vram.state_cell_count
+      returns 4 units there and the estimate reads 299.25 MiB low. SPEC
+      2.32 says "slots plus depth" and must change with it; the run is the
+      fourth calibration record once the rule lands. Next fix cycle.
+- [ ] validation warns that draft-mtp does not support --parallel above 1,
+      but mainline b10818 ran the 27B with two slots and the draft-mtp
+      implementation loaded ("speculative decoding context initialized",
+      2026-09-10). Find the upstream commit that lifted the restriction
+      and drop or version-gate the warning.
 - Owner: the main window's minimum width rose from about 843 to 1032 px,
       driven by the top bar's Name and profile picker minimums (160 and
       200 px) plus six buttons, so a 1024 px display no longer fits the
@@ -29,19 +45,19 @@ owner's yes.
 - [ ] A card holding a draft model or projector but no main-model layer reads
       "no layers" beside non-zero weights and KV per 1024 tokens; SPEC 2.24
       says the ranges cover the main model, and the line does not.
-- [ ] Group box titles carrying "&" ("Server & Tools", "Model & Context")
-      render the ampersand as a mnemonic underscore on some platforms
-      (seen offscreen); QGroupBox titles need "&&".
 - [ ] memory_fit.render_lines and render_details guard against an estimate
       with no layout or an empty kv_per_1k, which fit_report never produces;
-      to_json's bytes_per_layer indexes card_layer_bytes by card["index"]
-      inside a positional zip, and _kv_per_1k zips with strict=False where
-      strict=True would surface a length mismatch.
+      to_json's two card zips stay strict=False on the same equal-length
+      invariant _kv_per_1k now zips strictly.
+- [ ] The guard allowlist lives three times: tests/guard/conftest.py and
+      two grep steps in ci.yml's sanity job, which skip only the lock files,
+      anchor on exact names and never fail on a stale entry as the pytest
+      guard does. Replacing the grep steps with `pytest tests/guard` (the
+      test job already runs it) would leave one list; design call, since the
+      sanity job runs without Python.
 - [ ] The Speculative Decoding group is now the widest in the settings
       column (436 px offscreen), from bool rows whose checkbox text repeats
       the flag beside the row label (ROADMAP Later).
-- [ ] placement.layer_index is a public alias of _layer_of with one caller
-      in vram; renaming _layer_of would remove the pair.
 - [ ] --device is not modelled: every visible card is counted and gets the
       per-card overhead even when the launch excludes it (VRAM.md, known
       limits).
@@ -51,10 +67,6 @@ owner's yes.
 - [ ] Split-model parts hardlinked under two names with a disagreeing
       split.count key count twice (malformed layout only); the Configure
       cache stamps only the first part.
-- [ ] src/llama_launcher/ui/widgets/setting_widgets.py:147 carries a
-      doubled-hyphen prose separator and narrates history in a comment; one
-      for the documentation cycle's prose sweep, along with RPC.md's
-      non-ASCII at lines 143 and 163.
 - [ ] The RAM estimate does not model llama.cpp's CPU_REPACK buffer: on a
       CPU-only launch the server keeps a repacked second copy of the
       weights it runs on the CPU (1.2 GiB beside the 2.5 GiB mmap of the
@@ -119,11 +131,6 @@ owner's yes.
       2026-09-10). Placement counts every block tensor in the table whatever
       nextn_predict_layers says; extending the exclusion to placement is the
       natural follow-up to this cycle.
-- [ ] The estimate prices a draft at the main model's context when
-      ctx-size-draft is unset, while llama.cpp server appears to build the
-      draft context at n_ctx divided by n_parallel. The only drafted
-      measurement ran one slot, so it cannot show the difference; the
-      pending smoke settles it.
 - [ ] A standalone draft that is itself a hybrid would be over-charged: a
       draft is priced a cache on every layer its file carries, recurrent
       ones included, and no measurement covers such a model. Over-charging
@@ -138,8 +145,9 @@ owner's yes.
       router.png blob (91a946f) was still fetchable by exact SHA on
       2026-09-02 and the repository is public; nothing records the request
       as filed.
-- [ ] Owner, GitHub: the repository has no topics, and README carries no CI
-      badge although Actions has been green since 2026-09-01.
+- [ ] Owner, GitHub: the repository has no topics (gh reported none on
+      2026-09-10; project memory records twelve set on 2026-08-24, so the
+      history rewrite or a re-creation lost them).
 - [ ] A mounted draft model or projector whose file is absent yields
       (None, None) from inspect_file exactly like an unmounted one, so it
       counts zero bytes with no message; SPEC 2.35 covers only the unmounted
@@ -157,9 +165,6 @@ owner's yes.
       unreachable until a carded sliding-window record exists (the only
       sliding-window record is CPU-only), and the slack prices KV alone while
       the band compares kv plus state, safe at today's state sizes.
-- [ ] core.sweep.parse_prompt_sizes accepts 0 and negative sizes, as the
-      parse it replaced did; a token > 0 guard is a one-liner if the
-      benchmark client cannot use them.
 - [ ] benchmark_controller.sweep_prefill(profile=None)'s default has no
       production caller (three tests call it bare); the memo reset at the
       top of configure_panel._refresh_fit_line is defensive and no test
@@ -180,11 +185,9 @@ owner's yes.
       Passing a structured (count, regex) through estimate_memory and place
       would drop the parse.
 - [ ] Cleanup: placement._compute_layer_sums repeats _place_walk's tensor
-      walk with the parity tests covering the untied fixture only;
-      memory_fit._messages carries the balanced-differs predicate twice;
-      the search-entry visibility closure is a third copy of the
-      getWidgetPosition/isRowVisible idiom; SearchEntry.key is written and
-      never read.
+      walk with the parity tests covering the untied fixture only, and the
+      search-entry visibility closure is a third copy of the
+      getWidgetPosition/isRowVisible idiom.
 - [ ] configure_panel.cached_probe does not adopt a pending
       _fit_probe_result, so a launch clicked inside the 150 ms poll gap
       re-probes with a fresh reading already in hand; the tests pin this
@@ -196,29 +199,38 @@ owner's yes.
 
 ## Pending owner smokes
 
-- [ ] Run the 27B profile at `--parallel 2` with the MTP draft on. It
-      settles two open questions at once. The state cell rule: three
-      candidates fit both measured runs, `slots + depth` predicting 4 cells
-      (598.50 MiB of state), `max(slots, depth + 1)` predicting 3 (448.88
-      MiB) and `slots x (depth + 1)` predicting 6 (897.75 MiB); read
-      `llama_memory_recurrent: size` and report which. The draft context:
-      the draft's KV buffer reads 352.00 MiB if the draft keeps the full
-      context and 176.00 MiB if llama.cpp divides it by the slot count.
-      The estimate implements `slots + depth` and the full context.
+- [ ] Re-shoot assets/screenshots/config.png and build.png on the 5080 plus
+      A2000 box: both show group titles with the ampersand swallowed
+      ("Model _Context", "Features _networking") that now render as
+      ampersands.
+- [x] Run the 27B profile at `--parallel 2` with the MTP draft on. Done
+      2026-09-10, the fourth run in
+      DevDocs/llama_launcher/calibration-2026-09-10/verb4-27b-and-35b.md.
+      `llama_memory_recurrent: size = 897.75 MiB (2 cells, 64 layers, 2
+      seqs 2 rs_seq)`: the rule is `slots x (depth + 1)`, six units, and
+      the estimate's `slots + depth` reads 299.25 MiB low (the first open
+      item). The draft's KV buffer read 352.00 MiB at 45056 cells times 2/2
+      seqs: the draft keeps the full context, divided per slot like the
+      main model's, so the estimate's full-context pricing holds. The
+      launcher's draft-mtp warning against --parallel above 1 fired and
+      was ignored; the server ran both slots with the draft (the second
+      open item).
 - [x] Re-shoot assets/screenshots/bench.png on the 5080 plus A2000 box now
       that the columns are formatted. Done 2026-09-10: the history table
       reads 32.9, 43.9 and 3.04, right-aligned.
-- [ ] On the 5080 plus A2000 box, load the 27B dense profile and the
-      35B-A3B profile and compare the readout's per-card layer ranges
-      against the per-card model buffer lines of a Verbosity 4 launch (the
-      boundary layer must match; the 2026-09-10 log settles this half, the
-      model buffers matching the estimate to the byte on both profiles), the Details block's KV per 1024 tokens
-      against the KV growth between two context sizes in the log, and the
-      per-layer weight against one layer moved by --tensor-split. Also
-      confirm the settings column shows no horizontal scrollbar at your
-      usual window size, the Environment column and the top bar fields stop
-      at their maxima, and the 1032 px window minimum is acceptable on your
-      display.
+- [x] On the 5080 plus A2000 box, compare the readout's per-card layer
+      ranges, KV per 1024 tokens and per-layer weight against Verbosity 4
+      launches of the 27B and 35B-A3B profiles. Done across the 2026-09-06
+      and 2026-09-10 logs: the per-card model buffers match the estimate to
+      the byte on both profiles at two different splits of the 27B (60,40
+      and 43,23), which pins the boundary layer and the per-layer weight;
+      the KV matches exactly per card at two context sizes of the 27B
+      (32768 and 90112) and on both cards of the 35B, which pins the KV
+      per 1024 tokens.
+- [ ] Confirm on your display that the settings column shows no horizontal
+      scrollbar at your usual window size, that the Environment column and
+      the top bar fields stop at their maxima, and that the 1032 px window
+      minimum is acceptable (the first owner item above).
 - [ ] Take a profile that is over budget on one card on the 5080 plus
       A2000 box, apply the suggested `--tensor-split` from
       `--estimate --json`, launch at Verbosity 4 and check the per-card
@@ -315,31 +327,20 @@ owner's yes.
 
 ## Done this cycle
 
-- A draft model's KV cache is sized over the layers its own tensor table
-  carries rather than the layer count its header declares, each priced at
-  the index its tensor names give, at one sequence whatever --parallel
-  says, and at f16 unless its own cache-type rows say otherwise. Every
-  layer a draft's file carries holds a cache, whatever the full-attention
-  pattern of the header it shares with the main model says. A draft adds no
-  recurrent state.
-- The trailing multi-token-prediction positions the header's
-  nextn_predict_layers names hold neither a KV cache nor recurrent state in
-  the model that declares them, which took the 27B from 49 charged
-  recurrent layers to 48.
-- Recurrent state is charged once per state cell, the slots plus the
-  speculative depth a loaded draft asks for, while the checkpoints term
-  stays per request slot. On the 27B that moves the checkpoints from 9776
-  MiB to about 4.68 GiB.
-- The three 2026-09-10 runs are calibration records. Records may mark
-  individual figures pending, which keeps those out of their bands while
-  every other figure stays pinned, and the fitting script leaves them out
-  of the region it fits. Without that last part the new records left the
-  fitter with an empty feasible set.
-- Both 27B records reproduce the measured KV plus state at a ratio of
-  1.0000 per card; the drafted run's card 1 reads 1614.27 MiB estimated
-  against 1614.27 measured.
-- The 2026-09-06 27B record is reconciled onto the 65-position header the
-  file actually declares, and each record now carries its own logged free
-  VRAM rather than the first run's.
-- Docs: CHANGELOG [Unreleased], VRAM.md's recurrent-state and draft
-  paragraphs, SPEC 2.17, 2.19 and 2.32.
+- Smokes: the --parallel 2 MTP run and the readout comparison are ticked
+  with their findings; the UI half of the readout smoke stands alone.
+- README: CI badge; the Quickstart names the layer ranges and the Details
+  section.
+- Group box titles on the Configure and Build tabs render a literal
+  ampersand ("Model && Context" as the Qt title).
+- A benchmark or sweep prompt size of 0 or below is refused.
+- placement.layer_index replaces the _layer_of pair; memory_fit computes
+  the balanced-differs predicate once, zips the draft KV delta strictly
+  and indexes bytes_per_layer positionally; SearchEntry drops its unread
+  key.
+- A lone ampersand in the Monitor tab's "Enable --metrics & relaunch"
+  button renders too; the three sites share ui.widgets.text.literal_ampersands.
+- The setting_widgets string-editor comment describes instead of
+  narrating; RPC.md is ASCII and off the guard allowlist in
+  tests/guard/conftest.py and ci.yml; AGENTS.md and ROADMAP.md say so.
+- The fourth 2026-09-10 run is filed in DevDocs with its findings.

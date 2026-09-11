@@ -73,6 +73,7 @@ from llama_launcher.ui.widgets.setting_widgets import (
     make_widget,
 )
 from llama_launcher.ui.widgets.status_banner import StatusBanner
+from llama_launcher.ui.widgets.text import literal_ampersands
 
 ENV_COLUMN_MIN = 420
 ENV_COLUMN_MAX = 640
@@ -548,7 +549,7 @@ class ConfigurePanel(QWidget):
         self._setting_rows: dict[str, tuple] = {}
         for key, setting in CATALOG.items():
             if setting.group not in groups:
-                box = QGroupBox(setting.group)
+                box = QGroupBox(literal_ampersands(setting.group))
                 groups[setting.group] = QFormLayout(box)
                 self._group_boxes[setting.group] = box
                 right_layout.addWidget(box)
@@ -700,9 +701,7 @@ class ConfigurePanel(QWidget):
             by_group.setdefault(setting.group, []).append(key)
         for group, box in self._group_boxes.items():
             out.append(
-                SearchEntry(
-                    (group,), "group", group, box, lambda b=box: not b.isHidden()
-                )
+                SearchEntry((group,), "group", box, lambda b=box: not b.isHidden())
             )
             for key in by_group[group]:
                 form, w = self._setting_rows[key]
@@ -715,7 +714,7 @@ class ConfigurePanel(QWidget):
                 setting = CATALOG[key]
                 out.append(
                     SearchEntry(
-                        (setting.flag, *setting.aliases), "setting", key, label, visible
+                        (setting.flag, *setting.aliases), "setting", label, visible
                     )
                 )
         return out

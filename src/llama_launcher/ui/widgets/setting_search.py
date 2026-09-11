@@ -9,13 +9,12 @@ from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QWidget
 @dataclass(frozen=True)
 class SearchEntry:
     """One jump target: the texts a query is matched against, whether it is
-    a group or a setting, its key, the widget to scroll to and tint, and a
+    a group or a setting, the widget to scroll to and tint, and a
     callable saying whether it is visible under the current mode and
     engine."""
 
     texts: tuple
     kind: str
-    key: str
     widget: object
     is_visible: object
 

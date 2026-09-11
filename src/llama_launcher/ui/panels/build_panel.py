@@ -64,6 +64,7 @@ from llama_launcher.store.profiles import list_profiles, save_profile
 from llama_launcher.ui.widgets.no_wheel import NoWheelComboBox
 from llama_launcher.ui.widgets.setting_widgets import make_row_label, make_widget
 from llama_launcher.ui.widgets.table_columns import set_resizable_columns
+from llama_launcher.ui.widgets.text import literal_ampersands
 
 
 class _OutputsGather(QRunnable):
@@ -382,7 +383,7 @@ class BuildPanel(QWidget):
         groups: dict[str, QFormLayout] = {}
         for key, setting in for_engine(BUILD_CATALOG, engine).items():
             if setting.group not in groups:
-                box = QGroupBox(setting.group)
+                box = QGroupBox(literal_ampersands(setting.group))
                 groups[setting.group] = QFormLayout(box)
                 self._group_boxes[setting.group] = box
                 self._right_layout.addWidget(box)

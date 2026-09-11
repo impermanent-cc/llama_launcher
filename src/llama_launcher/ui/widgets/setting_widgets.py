@@ -146,11 +146,11 @@ class SettingWidget(QWidget):
             self._editor = container
         else:  # string
             self._editor = QLineEdit()
-            # Start at the catalog default, same as every other branch: a
-            # fresh editor for a non-empty-default setting (cors-origins "*",
-            # blas-vendor "Generic", ...) must not read as "explicitly set to
-            # blank" -- that polluted saved configs with phantom ""-valued
-            # options and made is_set() True on untouched forms.
+            # Start at the catalog default, as every other branch does: a
+            # fresh editor for a setting with a non-empty default (cors-origins
+            # "*", blas-vendor "Generic") must not read as explicitly set to
+            # blank, or is_set() is True on an untouched form and the saved
+            # config carries a phantom "" value.
             if setting.default:
                 self._editor.setText(str(setting.default))
             if getattr(setting, "secret", False):

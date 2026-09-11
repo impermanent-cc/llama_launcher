@@ -82,6 +82,8 @@ not on the release page, so the two never drift.
 
 ### Changed
 
+- A benchmark or sweep prompt size of 0 or below is refused the same way as
+  one that is not a number.
 - The suggestion dot sits directly after its setting's editor instead of
   at the row's far edge, and the `--tools` boxes lay out in two columns,
   so the settings column no longer needs a horizontal scrollbar.
@@ -126,6 +128,10 @@ not on the release page, so the two never drift.
 
 ### Fixed
 
+- Group box titles carrying an ampersand ("Model & Context" on the
+  Configure tab, "CPU & ISA" on the Build tab) and the Monitor tab's
+  "Enable --metrics & relaunch" button render it as an ampersand instead
+  of a mnemonic underline.
 - Validation's active-setting check follows the command builder's emit
   rule: a flag `--load-mode` suppresses, an enum left at its default, or a
   zero count (typed or the string "0") no longer counts as active.

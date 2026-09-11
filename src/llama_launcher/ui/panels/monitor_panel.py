@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
 from llama_launcher.core.mtp_stats import parse_draft_stats, sparkline
 from llama_launcher.ui.widgets.info_button import InfoButton
 from llama_launcher.ui.widgets.stat_card import StatCard
+from llama_launcher.ui.widgets.text import literal_ampersands
 
 
 class MonitorPanel(QWidget):
@@ -85,7 +86,9 @@ class MonitorPanel(QWidget):
         summary_row.addWidget(self.summary, 1)
         summary_row.addWidget(InfoButton(_legend))
         layout.addLayout(summary_row)
-        self.enable_metrics_btn = QPushButton("Enable --metrics & relaunch")
+        self.enable_metrics_btn = QPushButton(
+            literal_ampersands("Enable --metrics & relaunch")
+        )
         self.enable_metrics_btn.setVisible(False)
         self.enable_metrics_btn.clicked.connect(self.enable_metrics_requested)
         layout.addWidget(self.enable_metrics_btn)

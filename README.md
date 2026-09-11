@@ -1,5 +1,7 @@
 # Llama Launcher
 
+[![CI](https://github.com/impermanent-cc/llama_launcher/actions/workflows/ci.yml/badge.svg)](https://github.com/impermanent-cc/llama_launcher/actions/workflows/ci.yml)
+
 A PySide6/Qt6 desktop app that builds a `podman`/`docker` `llama-server` command from a GUI
 and launches it in a terminal (an auto-detected emulator, foreground so `Ctrl-C` works), then
 observes the named container from outside. Tabbed **Configure / Monitor** UI with profiles, a
@@ -41,7 +43,9 @@ After installing (below), the GUI opens on the **Configure** tab:
    is something like `/models`. This makes the host directory visible inside the container.
 2. **Pick a model.** Use the **Model** row's **Browse…** to select a `.gguf` under that mount.
    The launcher reads its metadata and shows a live memory estimate per card and
-   for RAM (see [`VRAM.md`](VRAM.md)).
+   for RAM, each card line naming the layer range it holds; the **Details** section
+   under it gives the KV cost of the next 1024 tokens and the weight per layer
+   (see [`VRAM.md`](VRAM.md)).
 3. **Set the image.** Click **Detect** to list llama.cpp images you've already pulled, or type
    one, e.g. `ghcr.io/ggml-org/llama.cpp:server-cuda` (GPU) or a CPU-tagged build for
    CPU-only (see [Running without a GPU](#running-without-a-gpu)). **Fetch latest** asks

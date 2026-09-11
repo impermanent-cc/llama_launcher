@@ -23,7 +23,6 @@ ALLOWLIST: tuple[str, ...] = (
     # dashes are cleaned up in a documentation cycle.
     "README.md",
     "CHANGELOG.md",
-    "RPC.md",
 )
 
 BINARY_SUFFIXES = {

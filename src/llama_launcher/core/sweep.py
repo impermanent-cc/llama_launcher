@@ -4,6 +4,8 @@ lines llama-server logs at load, and the winning point."""
 import re
 from dataclasses import dataclass
 
+from .vram import positive_int
+
 _MIB = 1024 * 1024
 _LINE = re.compile(
     r"^\s*(?:\S+ [A-Z] )?\w+:\s+(?P<dev>\S+)\s+"
@@ -105,8 +107,8 @@ def parse_load_log(text: str) -> MeasuredMemory:
 
 def parse_prompt_sizes(text: str) -> list | None:
     """Comma-separated prompt sizes typed into a benchmark or sweep row: a
-    blank string is no sizes at all; any token that is not an int fails the
-    whole list rather than silently dropping it."""
+    blank string is no sizes at all; any token that is not a positive int
+    fails the whole list rather than silently dropping it."""
     text = (text or "").strip()
     if not text:
         return []
@@ -115,10 +117,10 @@ def parse_prompt_sizes(text: str) -> list | None:
         token = token.strip()
         if not token:
             continue
-        try:
-            sizes.append(int(token))
-        except ValueError:
+        size = positive_int(token)
+        if size is None:
             return None
+        sizes.append(size)
     return sizes
 
 
