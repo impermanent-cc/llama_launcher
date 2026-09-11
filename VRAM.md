@@ -27,12 +27,15 @@ Per card:
 - the recurrent state of every layer that holds no KV cache on a header
   carrying recurrent-state sizes, never one of the trailing
   multi-token-prediction positions the header's `nextn_predict_layers`
-  names, one copy per state cell (the request slot count plus a draft
-  model's speculative depth, `spec-draft-n-max`, when one is configured),
-  charged to the card that holds the layer (or to RAM where its KV would
-  go); a header with state sizes and no attention heads is purely
-  recurrent, and a layer with no KV heads but a non-zero per-layer
-  feed-forward width is MLP-only and holds neither cache nor state;
+  names, one copy per state unit (one cell per request slot, each holding
+  the slot's own state plus one per speculative sequence,
+  `spec-draft-n-max`, under a rollback `spec-type` of draft-mtp,
+  draft-eagle3, draft-dflash or draft-dspark, whether the head speculating
+  is a draft file or the model's own multi-token-prediction head), charged
+  to the card that holds the layer (or to RAM where its KV would go); a
+  header with state sizes and no attention heads is purely recurrent, and a
+  layer with no KV heads but a non-zero per-layer feed-forward width is
+  MLP-only and holds neither cache nor state;
 - a compute buffer (see the formula below), counted only on a card that
   holds weights or KV, except under `split-mode row`, where it is counted
   once, on `--main-gpu`, and only when `--main-gpu` itself holds weights
@@ -48,7 +51,7 @@ In RAM:
   kept off a card or tied to the embeddings);
 - their KV cache and recurrent state;
 - the context checkpoints: `--ctx-checkpoints` times the recurrent state
-  of every recurrent layer per request slot, not per state cell, wherever
+  of every recurrent layer per request slot, not per state unit, wherever
   that layer sits, since llama-server keeps its checkpoints as host
   vectors;
 - a host compute buffer: the host term of the compute formula times the
@@ -86,13 +89,13 @@ when set and the main context otherwise, for one sequence whatever the
 main model's slot count, and at `cache-type-k-draft` and
 `cache-type-v-draft` when those are set and f16 otherwise, independently
 of the main model's cache types. A draft model adds no recurrent state of
-its own, though it does add its speculative depth (`spec-draft-n-max`) to
-the state cell count the main model's recurrent layers charge, and its
-checkpoints stay sized per request slot like the main model's. Its
-weights, KV and compute buffer add into the same per-card and RAM totals
-as the main model's. A projector file's bytes add to `--main-gpu`'s
-weights unless `--no-mmproj-offload` is set, in which case they go to RAM
-instead.
+its own, though each request slot charges one state unit per speculative
+sequence (`spec-draft-n-max`) beside its own on the main model's recurrent
+layers, and its checkpoints stay sized per request slot like the main
+model's. Its weights, KV and compute buffer add into the same per-card and
+RAM totals as the main model's. A projector file's bytes add to
+`--main-gpu`'s weights unless `--no-mmproj-offload` is set, in which case
+they go to RAM instead.
 
 A sliding-window model whose header carries a per-layer window pattern
 (`attention.sliding_window_pattern`, as Gemma 4 writes it) has each window
@@ -214,20 +217,20 @@ llama.cpp's and ik_llama.cpp's own logged numbers, not derived from either
 engine's source. `COMPUTE_TERMS` and `ENGINE_COMPUTE_SCALE` are f32
 coefficients per micro-batch token and engine multipliers respectively;
 `CARD_OVERHEAD_BYTES` is a byte count. SPEC 2.19 sets the tolerance a fit
-must meet: KV plus recurrent state reads high by at most a quarter and
-never low on the sum across cards (on the RAM figure instead, for a record
-with no card figures), and per card within one layer's KV of that;
-compute and host buffers never read low and read at most two and a
-half times high, compared per card as sorted figures since the output card
-follows settings the records do not carry. `COMPUTE_TERMS` and
-`ENGINE_COMPUTE_SCALE` are fit against six calibration records measured
-2026-09-06. A sweep in the
-Benchmark tab gives one combined measured against estimated total per card
-and for RAM, a quick check on the estimate as a whole; refitting the three
-constants still needs the manual procedure below, because the compute
-figure has to be read on its own and the overhead comes from the exit-time
-memory breakdown table, which a sweep's log read never sees since it
-happens while the server is still running.
+must meet: KV plus recurrent state reads high by at most a quarter and never
+low on the sum across cards (on the RAM figure instead, for a record with no
+card figures), and per card within one layer's KV of that; compute and host
+buffers never read low and read at most two and a half times high, compared
+per card as sorted figures since the output card follows settings the
+records do not carry. `COMPUTE_TERMS` and `ENGINE_COMPUTE_SCALE` are fit
+against the calibration records in tests/core/calibration_records.py,
+measured 2026-09-06 and 2026-09-10. A sweep in the Benchmark tab gives one
+combined measured against estimated total per card and for RAM, a quick
+check on the estimate as a whole; refitting the three constants still needs
+the manual procedure below, because the compute figure has to be read on its
+own and the overhead comes from the exit-time memory breakdown table, which
+a sweep's log read never sees since it happens while the server is still
+running.
 
 Each engine logs its buffers differently, so the read step splits by
 engine; steps 1, 4, 5 and 6 are the same for both.

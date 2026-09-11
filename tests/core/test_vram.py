@@ -23,7 +23,7 @@ from llama_launcher.core.vram import (
     recurrent_layer_mask,
     recurrent_state_bytes,
     slot_count,
-    state_cell_count,
+    state_unit_count,
     window_layer_mask,
     window_tokens,
 )
@@ -1735,37 +1735,63 @@ def test_without_the_key_every_uncached_layer_stays_recurrent():
     assert sum(mask) == 30
 
 
-def test_cells_are_slots_when_no_draft_model_is_present():
-    """With no draft model the cell count is the slot count."""
-    assert state_cell_count({"parallel": 2}, "llama.cpp", False) == 2
-    assert state_cell_count({}, "llama.cpp", False) == 4
-    assert state_cell_count({}, "ik_llama.cpp", False) == 1
-
-
-def test_a_draft_adds_its_speculative_depth():
-    """A draft model adds spec-draft-n-max sequences to the cells, and the
-    catalog default stands in for an unset or unusable depth."""
+def test_units_are_slots_without_a_rollback_spec_type():
+    """With no rollback spec-type each slot holds one state unit, whatever
+    spec-draft-n-max says and whether a draft model is loaded or not."""
+    assert state_unit_count({"parallel": 2}, "llama.cpp") == 2
+    assert state_unit_count({}, "llama.cpp") == 4
+    assert state_unit_count({}, "ik_llama.cpp") == 1
+    assert state_unit_count({"spec-type": "none"}, "llama.cpp") == 4
     assert (
-        state_cell_count({"parallel": 1, "spec-draft-n-max": 2}, "llama.cpp", True) == 3
-    )
-    assert state_cell_count({"parallel": 1}, "llama.cpp", True) == 4
-    assert (
-        state_cell_count({"parallel": 1, "spec-draft-n-max": 0}, "llama.cpp", True) == 4
-    )
-
-
-def test_the_depth_is_ignored_without_a_draft_model():
-    """A depth left in the settings adds nothing when no draft is present."""
-    assert (
-        state_cell_count({"parallel": 2, "spec-draft-n-max": 2}, "llama.cpp", False)
+        state_unit_count(
+            {"parallel": 2, "spec-type": "draft-simple", "spec-draft-n-max": 2},
+            "llama.cpp",
+        )
         == 2
     )
 
 
-def test_the_depth_setting_is_mainline_only():
-    """The depth row is mainline-only, so on ik the cells are the slots."""
+def test_a_rollback_spec_type_multiplies_each_slot_by_its_depth_plus_one():
+    """Every slot holds the speculative sequences beside its own under a
+    rollback spec-type (draft-mtp here), whether the head speculating is a
+    draft file or the model's own multi-token-prediction head."""
     assert (
-        state_cell_count({"parallel": 1, "spec-draft-n-max": 2}, "ik_llama.cpp", True)
+        state_unit_count(
+            {"parallel": 1, "spec-type": "draft-mtp", "spec-draft-n-max": 2},
+            "llama.cpp",
+        )
+        == 3
+    )
+    assert (
+        state_unit_count(
+            {"parallel": 2, "spec-type": "draft-mtp", "spec-draft-n-max": 2},
+            "llama.cpp",
+        )
+        == 6
+    )
+
+
+def test_the_depth_defaults_when_unset_or_zero():
+    """The catalog default stands in for an unset or zero depth under a
+    rollback spec-type."""
+    assert state_unit_count({"parallel": 1, "spec-type": "draft-mtp"}, "llama.cpp") == 4
+    assert (
+        state_unit_count(
+            {"parallel": 1, "spec-type": "draft-mtp", "spec-draft-n-max": 0},
+            "llama.cpp",
+        )
+        == 4
+    )
+
+
+def test_the_depth_setting_is_mainline_only():
+    """The depth row is mainline-only, so on ik a rollback spec-type still
+    leaves the units at the slots."""
+    assert (
+        state_unit_count(
+            {"parallel": 1, "spec-type": "draft-mtp", "spec-draft-n-max": 2},
+            "ik_llama.cpp",
+        )
         == 1
     )
 
@@ -1818,35 +1844,56 @@ def _estimate_27b(*, draft=False, draft_meta_override=None, depth=None, **extra)
 
 
 def test_state_matches_the_two_measured_runs():
-    """One slot with a draft at depth 2 gives three cells and two slots
-    with no draft gives two, over 48 recurrent layers of 3268608 bytes."""
-    drafted = _estimate_27b(draft=True, parallel=1, depth=2)
+    """One slot with a draft-mtp draft at depth 2 gives three units and two
+    slots with no draft gives two, over 48 recurrent layers of 3268608
+    bytes."""
+    drafted = _estimate_27b(
+        draft=True, parallel=1, depth=2, **{"spec-type": "draft-mtp"}
+    )
     assert sum(c.state for c in drafted.cards) == _PER_LAYER_STATE * 48 * 3
     plain = _estimate_27b(parallel=2)
     assert sum(c.state for c in plain.cards) == _PER_LAYER_STATE * 48 * 2
 
 
-def test_cells_reach_the_state_and_not_the_cache():
-    """Full-attention KV does not follow the cell count, so a drafted
+def test_units_reach_the_state_and_not_the_cache():
+    """Full-attention KV does not follow the unit count, so a drafted
     profile reads the same cache at one slot as at two."""
-    one = _estimate_27b(draft=True, parallel=1, depth=2)
-    two = _estimate_27b(draft=True, parallel=2, depth=2)
+    one = _estimate_27b(draft=True, parallel=1, depth=2, **{"spec-type": "draft-mtp"})
+    two = _estimate_27b(draft=True, parallel=2, depth=2, **{"spec-type": "draft-mtp"})
     assert [c.kv for c in one.cards] == [c.kv for c in two.cards]
 
 
-def test_checkpoints_follow_slots_not_cells():
+def test_checkpoints_follow_slots_not_units():
     """The checkpoints term is 32 times the state of one request slot, so
-    a draft's speculative cells do not multiply it."""
-    drafted = _estimate_27b(draft=True, parallel=1, depth=2)
+    a draft's speculative units do not multiply it."""
+    drafted = _estimate_27b(
+        draft=True, parallel=1, depth=2, **{"spec-type": "draft-mtp"}
+    )
     assert drafted.ram.checkpoints == 32 * _PER_LAYER_STATE * 48
 
 
-def test_an_unusable_draft_header_adds_no_cells():
-    """A draft header carrying no layers or no embedding width is not a
-    draft the estimate can price, so the cells stay at the slots."""
+def test_units_follow_the_spec_type_not_the_draft_file():
+    """The unit count follows the rollback spec-type, not whether a draft
+    file is loaded: a rollback spec-type multiplies with no draft header at
+    all, and a priced draft under a non-rollback spec-type does not
+    multiply."""
+    no_draft_header = _estimate_27b(parallel=2, depth=2, **{"spec-type": "draft-mtp"})
+    assert sum(c.state for c in no_draft_header.cards) == _PER_LAYER_STATE * 48 * 6
+    priced_draft = _estimate_27b(
+        draft=True, parallel=2, depth=2, **{"spec-type": "draft-simple"}
+    )
+    assert sum(c.state for c in priced_draft.cards) == _PER_LAYER_STATE * 48 * 2
+
+
+def test_a_degenerate_draft_header_prices_as_no_draft():
+    """A draft header carrying no layers and no embedding width is not a
+    draft the estimate can price: every card and RAM figure matches the
+    undrafted estimate exactly, figure for figure."""
     empty = _hybrid_meta(n_layers=0, n_embd=0)
-    est = _estimate_27b(parallel=1, draft_meta_override=empty, depth=2)
-    assert sum(c.state for c in est.cards) == _PER_LAYER_STATE * 48 * 1
+    undrafted = _estimate_27b(parallel=1)
+    degenerate = _estimate_27b(parallel=1, draft_meta_override=empty)
+    assert degenerate.cards == undrafted.cards
+    assert degenerate.ram == undrafted.ram
 
 
 def _draft_meta(*, cached=True, windowed=False, tensors=None, **extra):
@@ -1895,7 +1942,6 @@ def _draft_part(*, ctx, settings_extra=None, cached=True, windowed=False, tensor
         ctx=ctx,
         ubatch=512,
         draft=True,
-        cells=1,
     )
 
 
@@ -1993,7 +2039,6 @@ def test_a_draft_caches_the_layers_it_carries_whatever_the_pattern_says():
         ctx=90112,
         ubatch=512,
         draft=True,
-        cells=1,
     )
     assert sum(part.kv) == 352 * MIB
 
@@ -2025,7 +2070,7 @@ def test_a_partial_tensor_table_does_not_shrink_a_main_models_layers():
         ctx=90112,
         ubatch=512,
         draft=False,
-        cells=1,
+        units=1,
     )
     # Layer 0 is the only attention layer (kv_layer_heads); the other 64
     # are recurrent-eligible and stay charged as state, not dropped.

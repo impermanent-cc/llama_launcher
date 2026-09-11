@@ -115,7 +115,7 @@ def recurrent_layer_mask(meta, kv_mask) -> tuple:
 
 
 def recurrent_state_bytes(meta) -> int:
-    """f32 bytes of one recurrent layer's state for one state cell: the
+    """f32 bytes of one recurrent layer's state for one state unit: the
     convolution state, (kernel - 1) x (inner + 2 x groups x state), plus the
     state matrix, state x inner. Zero when the header carries no ssm
     sizes."""
@@ -354,10 +354,9 @@ class LayerLayout:
 @dataclass(frozen=True)
 class CardEstimate:
     """Card side of an estimate. `state` is the recurrent state of the
-    layers the card holds, at one copy per state cell (the request slots,
-    plus a draft's speculative depth when one is present); the context
-    checkpoints of those layers live in host memory and are counted in
-    RamEstimate."""
+    layers the card holds, at one copy per state unit (the slot count
+    times one plus the speculative depth); the context checkpoints of
+    those layers live in host memory and are counted in RamEstimate."""
 
     weights: int
     kv: int
@@ -442,18 +441,28 @@ def slot_count(settings, engine) -> int:
     return 1 if engine == "ik_llama.cpp" else 4
 
 
-def state_cell_count(settings, engine, has_draft) -> int:
-    """Recurrent state cells the server allocates per layer: the request
-    slots of `slot_count`, plus the speculative sequences a draft model
-    asks for. The depth is `spec-draft-n-max`, a mainline-only row, and the
-    catalog default stands in when the setting is unset, zero, negative or
-    unparsable."""
-    cells = slot_count(settings, engine)
+# --spec-type values under which the engine keeps speculative sequences in
+# place of a rollback, so every request slot needs recurrent state for each
+# of them beside its own, whether the head speculating is a draft file or
+# the model's own multi-token-prediction head.
+ROLLBACK_SPEC_TYPES = ("draft-mtp", "draft-eagle3", "draft-dflash", "draft-dspark")
+
+
+def state_unit_count(settings, engine) -> int:
+    """Recurrent state units the server allocates per layer: one cell per
+    request slot of `slot_count`, each holding the slot's own state plus
+    one per speculative sequence under a rollback `spec-type`
+    (`ROLLBACK_SPEC_TYPES`). The depth is `spec-draft-n-max`, a
+    mainline-only row, and the catalog default stands in when the setting
+    is unset, zero, negative or unparsable."""
+    slots = slot_count(settings, engine)
     row = CATALOG["spec-draft-n-max"]
-    if not has_draft or not accepts(row, engine):
-        return cells
+    if str(settings.get("spec-type", "none")) not in ROLLBACK_SPEC_TYPES or not accepts(
+        row, engine
+    ):
+        return slots
     depth = positive_int(settings.get("spec-draft-n-max"))
-    return cells + (depth if depth else int(row.default))
+    return slots * (1 + (depth if depth else int(row.default)))
 
 
 def _ssm_inner(meta) -> int:
@@ -560,13 +569,14 @@ class _Part:
 
 
 def _model_part(
-    meta, weights_bytes, *, settings, engine, free, ctx, ubatch, draft, cells
+    meta, weights_bytes, *, settings, engine, free, ctx, ubatch, draft, units=0
 ):
     """Per-card weights, KV and recurrent state plus the same in RAM for one
-    model, with the checkpoints of every recurrent layer in RAM. `cells`
-    gives the recurrent state one copy per state cell. A draft holds a
+    model, with the checkpoints of every recurrent layer in RAM. `units`
+    gives the recurrent state one copy per state unit. A draft holds a
     cache only over the layers its own tensor table carries, at one
-    sequence, and no recurrent state."""
+    sequence, and charges no recurrent state of its own, so it never needs
+    `units`."""
     n_layers = int(meta.n_layers)
     ngl_key = "spec-draft-ngl" if draft else "n-gpu-layers"
     ngl_value = (
@@ -676,9 +686,9 @@ def _model_part(
         }
         mask = tuple(il in charged for il in range(n_layers))
     recurrent = recurrent_layer_mask(meta, attn)
-    rs_per_cell = recurrent_state_bytes(meta)
-    rs_cells = 0 if draft else rs_per_cell * cells
-    rs_slots = 0 if draft else rs_per_cell * slot_count(settings, engine)
+    rs_per_unit = recurrent_state_bytes(meta)
+    rs_units = 0 if draft else rs_per_unit * units
+    rs_slots = 0 if draft else rs_per_unit * slot_count(settings, engine)
     n_ckpt = _checkpoint_count(settings)
     ram_kv = ram_state = ram_ckpt = 0
     state = [0] * n_cards
@@ -693,9 +703,9 @@ def _model_part(
         elif recurrent[il]:
             ram_ckpt += rs_slots * n_ckpt
             if card is None or kv_in_ram:
-                ram_state += rs_cells
+                ram_state += rs_units
             else:
-                state[card] += rs_cells
+                state[card] += rs_units
     return _Part(
         weights,
         kv,
@@ -896,7 +906,7 @@ def estimate_memory(
     has_draft = bool(
         draft_meta is not None and draft_meta.n_layers and draft_meta.n_embd
     )
-    cells = state_cell_count(eff, engine, has_draft)
+    units = state_unit_count(eff, engine)
     part = _model_part(
         meta,
         weights_bytes,
@@ -906,7 +916,7 @@ def estimate_memory(
         ctx=ctx,
         ubatch=ubatch,
         draft=False,
-        cells=cells,
+        units=units,
     )
     weights, kv = part.weights, part.kv
     state = part.state
@@ -944,7 +954,6 @@ def estimate_memory(
             ctx=dctx or ctx,
             ubatch=ubatch,
             draft=True,
-            cells=cells,
         )
         dw, dkv = dpart.weights, dpart.kv
         draft_logits, _ = _charge_compute(

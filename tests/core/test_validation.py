@@ -1,3 +1,5 @@
+import pytest
+
 from llama_launcher.core.command_builder import build_command, raw_arg_warnings
 from llama_launcher.core.settings_catalog import CATALOG
 from llama_launcher.core.spec import Mount, Profile, RouterMember, RpcWorker, Runtime
@@ -92,18 +94,13 @@ def test_mtp_with_mmproj_warns():
     )
 
 
-def test_mtp_with_parallel_gt1_warns():
+@pytest.mark.parametrize("parallel", (1, 4))
+def test_mtp_text_only_has_no_mtp_warning(parallel):
+    """A text-only draft-mtp profile (mmproj unset) raises no MTP warning
+    at any slot count, since mainline llama.cpp serves speculative
+    decoding on every slot."""
     p = _mtp_profile()
-    p.settings["parallel"] = 4
-    warns = [i for i in validate(p) if i.level == "warning"]
-    assert any(
-        "mtp" in i.message.lower() and "parallel" in i.message.lower() for i in warns
-    )
-
-
-def test_mtp_single_slot_text_only_has_no_mtp_warning():
-    p = _mtp_profile()
-    p.settings["parallel"] = 1  # mmproj unset, single slot -> nothing to warn about
+    p.settings["parallel"] = parallel
     assert not any("mtp" in i.message.lower() for i in validate(p))
 
 
@@ -689,14 +686,14 @@ def test_member_without_port_setting_does_not_warn_about_ports():
 def test_router_ignores_leftover_single_server_warnings():
     """A router profile can carry the form's leftover draft model and member
     settings (kept so a Save in router mode is not destructive); the
-    single-server launch warnings (inert draft, MTP limits) must not fire on
-    a router launch -- the router itself loads no model."""
+    single-server launch warnings (inert draft, MTP and mmproj) must not
+    fire on a router launch; the router itself loads no model."""
     p = _router(
         draft_model="/models/d.gguf",
+        mmproj="/models/mm.gguf",
         settings={
             "port": 8080,
             "spec-type": "draft-mtp",
-            "parallel": 4,
             "ctx-size": 8192,
         },
     )
@@ -706,7 +703,8 @@ def test_router_ignores_leftover_single_server_warnings():
         api_key_present=True,
     )
     assert not any(
-        "draft" in m.lower() or "mtp" in m.lower() for m in _warnings(issues)
+        "draft" in m.lower() or "mtp" in m.lower() or "mmproj" in m.lower()
+        for m in _warnings(issues)
     )
 
 

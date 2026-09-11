@@ -179,11 +179,17 @@ not on the release page, so the two never drift.
   file carries, at one sequence and at f16 unless its own cache-type
   settings say otherwise, instead of a copy of the main model's cache;
   multi-token-prediction positions are charged neither a cache nor recurrent
-  state; and the state is charged once per state cell, the request slots
-  plus a loaded draft's speculative depth, with the checkpoints term left
-  per request slot. On a 27B hybrid with a draft this moves the estimate
-  onto the measured figures: the cache falls from twice the truth to exact,
-  and the context checkpoints from 9.5 GiB to 4.7.
+  state; and the state is charged once per state unit, one cell per request
+  slot holding the slot's own state plus one per speculative sequence under
+  a rollback spec-type (draft-mtp, draft-eagle3, draft-dflash or
+  draft-dspark), whether the head speculating is a draft file or the model's
+  own MTP head, with the checkpoints term left per request slot. On a 27B
+  hybrid with a draft this moves the estimate onto the measured figures: the
+  cache falls from twice the truth to exact, and the context checkpoints
+  from 9.5 GiB to 4.7; at two slots the state matches the logged 897.75 MiB.
+- Validation no longer warns that an MTP draft does not support
+  `--parallel` above 1; mainline llama.cpp serves speculative decoding on
+  every slot.
 
 ## [0.1.1] - 2026-09-03
 
