@@ -9,8 +9,7 @@ spec-type (SPEC 2.32), the fourth 2026-09-10 run is a calibration record
 that separates that rule from slots plus depth, and validation no longer
 warns that draft-mtp needs a single slot (SPEC 2.44). Next: the release
 commit on main that sets pyproject to 0.2.0 and dates the CHANGELOG section,
-then the v0.2.0 tag and the GitHub release, each on the owner's yes; the
-config.png and build.png re-shoot can land before or after it.
+then the v0.2.0 tag and the GitHub release, each on the owner's yes.
 
 ## Open items
 
@@ -191,10 +190,10 @@ config.png and build.png re-shoot can land before or after it.
 
 ## Pending owner smokes
 
-- [ ] Re-shoot assets/screenshots/config.png and build.png on the 5080 plus
-      A2000 box: both show group titles with the ampersand swallowed
-      ("Model _Context", "Features _networking") that now render as
-      ampersands.
+- [x] Re-shoot assets/screenshots/config.png and build.png on the 5080 plus
+      A2000 box, where the group titles had the ampersand swallowed. Done
+      2026-09-11 along with router.png: "Model & Context", "GPU & Memory"
+      and "CPU & ISA" render as ampersands.
 - [x] Run the 27B profile at `--parallel 2` with the MTP draft on. Done
       2026-09-10, the fourth run in
       DevDocs/llama_launcher/calibration-2026-09-10/verb4-27b-and-35b.md.
