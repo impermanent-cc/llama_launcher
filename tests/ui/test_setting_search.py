@@ -8,7 +8,7 @@ from llama_launcher.ui.widgets import setting_search as ss
 
 
 def _entry(*texts, visible=True, kind="setting"):
-    return ss.SearchEntry(texts, kind, texts[0], object(), lambda: visible)
+    return ss.SearchEntry(texts, kind, object(), lambda: visible)
 
 
 def test_match_positions_is_a_dash_insensitive_substring_in_order():

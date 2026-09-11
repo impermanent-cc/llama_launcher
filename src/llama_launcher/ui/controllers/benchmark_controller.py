@@ -394,7 +394,7 @@ class BenchmarkController:
         sizes_text = self.window.benchmark_panel.bench_sizes.text()
         sizes = core_sweep.parse_prompt_sizes(sizes_text)
         if sizes is None:
-            return "Prompt sizes must be whole numbers separated by commas."
+            return "Prompt sizes must be positive whole numbers separated by commas."
         if not sizes:
             return "Set at least one prompt size in the benchmark row first."
         knob = self._sweep_knob()

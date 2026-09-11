@@ -461,9 +461,9 @@ public.
 3.3 Qt runtime libraries used headless are listed in ci.yml and mirrored
 in the localci Containerfile; the two lists stay in sync.
 
-3.4 Tracked text is ASCII and free of em and en dashes except README.md,
-CHANGELOG.md and RPC.md until their cleanup cycle. UI glyphs in code are
-\u escapes.
+3.4 Tracked text is ASCII and free of em and en dashes except README.md
+and CHANGELOG.md until their cleanup cycle. UI glyphs in code are \u
+escapes.
 
 3.5 The placement regexes for `--cpu-moe`, `--n-cpu-moe`, `--n-cpu-ffn`
 and fit's all-experts pattern are pinned by a fixture to upstream's

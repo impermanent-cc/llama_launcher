@@ -458,6 +458,9 @@ def _messages(
     )
     out = []
     over = [c for c in cards if not c.fits]
+    differs = balanced is not None and (
+        tuple(balanced.layers_per_card) != tuple(balanced.start_layers_per_card)
+    )
     if ik_moe_layers is not None:
         out.append(Message(_ik_moe_note(ik_moe_layers), dialog=False))
         if over:
@@ -465,16 +468,10 @@ def _messages(
                 _shortfall_text(over) + " Even keeping every layer's "
                 "experts in RAM does not fit."
             )
-            differs = balanced is not None and (
-                tuple(balanced.layers_per_card) != tuple(balanced.start_layers_per_card)
-            )
             if differs and balanced.fits:
                 text += _balanced_text(balanced, eff, False)
             out.append(Message(text, dialog=True))
     elif over:
-        differs = balanced is not None and (
-            tuple(balanced.layers_per_card) != tuple(balanced.start_layers_per_card)
-        )
         if differs and balanced.fits:
             name_balanced = True
             found = None
@@ -605,7 +602,7 @@ def _kv_per_1k(est, meta, weights_bytes, **kwargs) -> tuple:
     more = estimate_memory(meta, weights_bytes, ctx=est.ctx + 1024, **kwargs)
     if more is None:
         return ()
-    cards = tuple(m.kv - c.kv for c, m in zip(est.cards, more.cards, strict=False))
+    cards = tuple(m.kv - c.kv for c, m in zip(est.cards, more.cards, strict=True))
     return (*cards, more.ram.kv - est.ram.kv)
 
 
@@ -850,6 +847,12 @@ def render_tooltip(report: FitReport) -> str:
     return "\n".join(lines)
 
 
+def _card_layers(lay, i: int) -> tuple:
+    """The layers card `i` holds under the layout: every GPU layer under a
+    row split, else the card's own range."""
+    return lay.gpu_layers if lay.row_split else lay.card_layers[i]
+
+
 def render_details(report: FitReport) -> list[str]:
     """The tuning figures behind the readout, one plain line each: the
     marginal KV cost of 1024 more tokens per device, each card's average
@@ -873,7 +876,7 @@ def render_details(report: FitReport) -> list[str]:
     else:
         suffix = ", row split" if lay.row_split else ""
         for i in range(len(lay.card_layers)):
-            held = lay.gpu_layers if lay.row_split else lay.card_layers[i]
+            held = _card_layers(lay, i)
             if not held:
                 lines.append(f"GPU{i}: no layers")
                 continue
@@ -950,16 +953,13 @@ def to_json(report: FitReport) -> dict:
     if lay is not None:
         out["n_layers"] = lay.n_layers
         out["output_device"] = "ram" if lay.output_device is None else lay.output_device
-        for card, held in zip(out["cards"], lay.card_layers, strict=False):
-            if lay.row_split:
-                held = lay.gpu_layers
+        for i, card in enumerate(out["cards"]):
+            held = _card_layers(lay, i)
             card["layers"] = list(held)
             if not lay.per_layer_known:
                 card["bytes_per_layer"] = None
             elif held:
-                card["bytes_per_layer"] = lay.card_layer_bytes[card["index"]] // len(
-                    held
-                )
+                card["bytes_per_layer"] = lay.card_layer_bytes[i] // len(held)
             else:
                 card["bytes_per_layer"] = 0
         out["ram"]["layers"] = list(lay.ram_layers)

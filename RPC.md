@@ -140,7 +140,7 @@ pooling, or fail subtly mid-load. Use these signals to tell the difference.
 - The RPC devices appear in the head's device list, e.g. `RPC[<host>:<port>]`
   alongside your local `CUDA0`.
 - The `load_tensors:` summary prints a **non-zero buffer size per RPC device**
-  (`RPC[…] model buffer size = … MiB`). This line is the authoritative record
+  (`RPC[...] model buffer size = ... MiB`). This line is the authoritative record
   of where each layer landed. If an RPC device shows ~0, no layers went to
   that worker.
 - The model finishes loading and `/health` returns `200` **without**
@@ -160,7 +160,8 @@ pooling, or fail subtly mid-load. Use these signals to tell the difference.
 ### Failure modes and how to recognize them
 
 1. **Wire-format mismatch (most common):** head and a worker on *different*
-   llama.cpp builds → connects, then malformed-response/garbage mid-load. Fix:
+   llama.cpp builds: the connection succeeds, then the load fails on
+   malformed or garbage responses. Fix:
    the **same image tag on every node** (see "One build, every node").
 2. **Worker OOM:** there is no per-worker `--mem` cap, so a worker exposes its
    full VRAM; if the split over-allocates, it OOM-kills mid-upload and the head

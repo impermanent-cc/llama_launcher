@@ -17,6 +17,16 @@ def test_form_engine_gated_both_ways(qtbot, tmp_path):
     assert "iqk-fa-all-quants" in p._widgets and "cpu-repack" not in p._widgets
 
 
+def test_group_titles_escape_the_ampersand(qtbot, tmp_path):
+    import re
+
+    p = _panel(qtbot, tmp_path)
+    titles = {box.title() for box in p._group_boxes.values()}
+    assert "Build type && misc" in titles
+    assert titles == {g.replace("&", "&&") for g in p._group_boxes}
+    assert not any(re.search(r"(?<!&)&(?!&)", t) for t in titles)
+
+
 def test_native_preview_contains_cmake_pair(qtbot, tmp_path):
     p = _panel(qtbot, tmp_path)
     p.target_combo.setCurrentIndex(p.target_combo.findData("native"))

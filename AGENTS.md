@@ -65,10 +65,10 @@ updated, then commit and push each behind explicit owner consent. main has
 branch protection against force-push and deletion only.
 
 Guard tests under tests/guard fail the suite on em or en dashes and
-non-ASCII text outside README.md, CHANGELOG.md and RPC.md, which are
-allowlisted until a documentation cycle cleans them. The doubled-hyphen
-check is off (CHECK_DOUBLE_HYPHEN) while the legacy ` -- ` separators in
-comments remain. UI glyphs in code are \u escapes.
+non-ASCII text outside README.md and CHANGELOG.md, which are allowlisted
+until a documentation cycle cleans them. The doubled-hyphen check is off
+(CHECK_DOUBLE_HYPHEN) while the legacy ` -- ` separators in comments
+remain. UI glyphs in code are \u escapes.
 
 `ruff check . && ruff format --check .` must be clean under the ruff
 configuration the repository carries. Do not narrow it.

@@ -1,3 +1,5 @@
+import re
+
 from llama_launcher.ui.panels.lora_panel import LoraPanel
 from llama_launcher.ui.panels.mounts_panel import MountsPanel
 
@@ -63,6 +65,8 @@ def test_new_flags_and_speculative_group_present(qtbot):
         assert key in w._configure_panel._widgets, key
     titles = {b.title() for b in w.findChildren(QGroupBox)}
     assert "Speculative Decoding" in titles
+    assert "Model && Context" in titles
+    assert not any(re.search(r"(?<!&)&(?!&)", t) for t in titles)
 
 
 def test_ik_engine_extends_spec_type_enum(qtbot):

@@ -132,6 +132,8 @@ def test_parse_prompt_sizes():
     assert sw.parse_prompt_sizes("128, 512,2048") == [128, 512, 2048]
     assert sw.parse_prompt_sizes("") == []
     assert sw.parse_prompt_sizes("128, x") is None
+    assert sw.parse_prompt_sizes("128, 0") is None
+    assert sw.parse_prompt_sizes("-5") is None
 
 
 def test_a_card_output_buffer_counts_into_that_cards_compute():

@@ -165,7 +165,7 @@ def parse_overrides(value) -> list:
     return out
 
 
-def _layer_of(name: str, n_layers: int):
+def layer_index(name: str, n_layers: int):
     """Block index, n_layers for the output layer, None for input tensors."""
     m = _BLK_RE.match(name)
     if m:
@@ -174,12 +174,6 @@ def _layer_of(name: str, n_layers: int):
     if name.startswith("output"):
         return n_layers
     return None
-
-
-def layer_index(name: str, n_layers: int):
-    """Public alias of `_layer_of` for callers outside this module: block
-    index, n_layers for the output layer, None for input tensors."""
-    return _layer_of(name, n_layers)
 
 
 def _place_walk(
@@ -227,7 +221,7 @@ def _place_walk(
     tensor_names = {t.name for t in tensors}
     tied_embeddings = "output.weight" not in tensor_names
     for t in tensors:
-        il = _layer_of(t.name, n_layers)
+        il = layer_index(t.name, n_layers)
         if il is None:
             input_cpu += t.nbytes
             if tied_embeddings and t.name == "token_embd.weight":
@@ -341,7 +335,7 @@ def _compute_layer_sums(
     tensor_names = {t.name for t in tensors}
     tied_embeddings = "output.weight" not in tensor_names
     for t in tensors:
-        il = _layer_of(t.name, n_layers)
+        il = layer_index(t.name, n_layers)
         if il is None:
             input_cpu += t.nbytes
             if tied_embeddings and t.name == "token_embd.weight":

@@ -30,9 +30,9 @@ settled, then to TASKS.md when a cycle picks them up.
   per flag: add with plumbing, or record as out of scope.
 - Periodic re-audit of both engines: common/arg.cpp against
   settings_catalog, root and ggml CMakeLists.txt against build_catalog.
-- Documentation cycle: README, CHANGELOG and RPC.md to ASCII and dash-free
-  so they leave the guard allowlist; reword the legacy ` -- ` comment
-  separators and turn the doubled-hyphen guard on.
+- Documentation cycle: README and CHANGELOG to ASCII and dash-free so they
+  leave the guard allowlist (RPC.md left it on 2026-09-10); reword the
+  legacy ` -- ` comment separators and turn the doubled-hyphen guard on.
 
 ## Later
 
