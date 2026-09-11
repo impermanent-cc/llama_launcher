@@ -321,16 +321,20 @@ per-layer widths, on a model whose header carries recurrent-state sizes;
 every block layer on a model with state sizes and no attention heads) adds
 its state in f32, the convolution state (kernel size minus one, times inner
 size plus twice the group count times state size) plus the state matrix
-(state size times inner size), once per state cell, to the card that holds
-the layer, or to RAM where KV would go. The state cell count is the request
-slot count plus the speculative sequence count, that being
-`spec-draft-n-max` when a draft model the estimate can price is loaded, the
-catalog default where that setting is unset or not a positive number, and
-zero where no such draft is loaded or the engine does not accept the
-setting. A checkpoints term, the `--ctx-checkpoints` setting (default 32)
-times the recurrent state of every recurrent layer per request slot, not per
-state cell, is charged to RAM, where the server keeps its checkpoints. Both
-appear in every readout total, the dialog and `--estimate --json` (card key
+(state size times inner size), once per state unit, to the card that holds
+the layer, or to RAM where KV would go. The unit count is the request slot
+count times one plus the speculative sequence count, that being
+`spec-draft-n-max` when `spec-type` is one of the rollback strategies the
+engine speculates in place with (draft-mtp, draft-eagle3, draft-dflash and
+draft-dspark), the catalog default where that setting is unset or not a
+positive number, and zero under any other strategy or where the engine does
+not accept the setting; whether a draft file is loaded does not enter, since
+a model's own MTP head speculates the same way; the server keeps one cell
+per slot and each cell holds the speculative sequences beside the slot's
+own. A checkpoints term, the `--ctx-checkpoints` setting (default 32) times
+the recurrent state of every recurrent layer per request slot, not per state
+unit, is charged to RAM, where the server keeps its checkpoints. Both appear
+in every readout total, the dialog and `--estimate --json` (card key
 `state`, RAM keys `state` and `checkpoints`), and the sweep's estimated
 figures of 2.31 include the state and exclude the checkpoints. A per-layer
 KV head-count array sizes each layer's cache by its own count.
@@ -448,6 +452,10 @@ header row keep their own alignment. A stored value that is not a number
 renders as its own text, and a missing one renders an empty cell. The stored
 benchmark file, the sweep table of 2.31 and the delta summary line keep the
 precision they already have.
+
+2.44 Validation raises no warning for a draft-mtp profile with `--parallel`
+above 1: mainline llama.cpp serves speculative decoding on every slot. The
+warning that draft-mtp ignores `--mmproj` stays.
 
 ## 3. Constraints
 

@@ -400,6 +400,7 @@ RECORDS = [
             "cache-type-v": "q8_0",
             "flash-attn": "on",
             "parallel": 1,
+            "spec-type": "draft-mtp",
             "spec-draft-n-max": 2,
             "verbosity": 4,
         },
@@ -506,6 +507,57 @@ RECORDS = [
                 "kv": 0,
                 "compute": int(197.13 * MIB),
                 "output": int(1.89 * MIB),
+            },
+        },
+    },
+    {
+        # Qwen3.8-27B UD-Q4_K_S, mainline b10818, two slots, MTP draft on at
+        # --spec-draft-n-max 2, tensor-split 43,23, KV q8_0: two slots at
+        # depth 2 charge 6 state units per layer, which a one-slot run
+        # cannot distinguish from 3. The state logs 897.75 MiB in total,
+        # 2 cells, 2 seqs, 2 rs_seq over the 48 recurrent layers of 64,
+        # that is 6 units per layer; per card 617.20 (33 layers) and
+        # 280.55 (15). Card 1's model buffer is the main model's 5883.07
+        # MiB plus the draft's 774.71 MiB; the draft's cache reads 352.00
+        # MiB at 45056 cells times 2/2 seqs, the same buffer as at one
+        # slot. The estimate carries one output buffer where this run
+        # logs two, one per model.
+        "name": "qwen3.8-27B q4_k_s mainline two slots mtp draft on",
+        "engine": "llama.cpp",
+        "meta": dict(_QWEN_27B),
+        "draft_meta": dict(_QWEN_27B, tensors=_QWEN_27B_DRAFT_TENSORS),
+        "pending": ("output",),
+        "settings": {
+            "ctx-size": 90112,
+            "tensor-split": "43,23",
+            "cache-type-k": "q8_0",
+            "cache-type-v": "q8_0",
+            "flash-attn": "on",
+            "parallel": 2,
+            "spec-type": "draft-mtp",
+            "spec-draft-n-max": 2,
+            "verbosity": 4,
+        },
+        "free_bytes_per_gpu": [int(14813 * MIB), int(11768 * MIB)],
+        "measured": {
+            "cards": [
+                {
+                    "model": int(8232.19 * MIB),
+                    "kv": int((1870.00 + 617.20) * MIB),
+                    "compute": int(649.13 * MIB),
+                },
+                {
+                    "model": int((5883.07 + 774.71) * MIB),
+                    # main cache 1122.00, draft cache 352.00, recurrent state 280.55
+                    "kv": int((1122.00 + 352.00 + 280.55) * MIB),
+                    "compute": int((649.13 + 378.06) * MIB),
+                },
+            ],
+            "ram": {
+                "model": int((521.00 + 521.00) * MIB),
+                "kv": 0,
+                "compute": int((197.13 + 226.07) * MIB),
+                "output": int(1.89 * MIB) + int(1.89 * MIB),
             },
         },
     },

@@ -2,36 +2,30 @@
 
 ## Current phase
 
-Idle: no cycle open. The last cycle, chore/smokes-readme-easy-wins, landed
-on 2026-09-10: the owner smokes the 2026-09-10 logs settled are ticked,
-README carries the CI badge and the layer-range and Details sentences,
-and the easy open items are cleared (one literal_ampersands helper behind
-the group titles and the metrics button, the placement alias, the balanced
-predicate, the strict draft-KV zip, a shared card-layers helper, the
-unread SearchEntry key, a positive prompt-size guard on vram.positive_int,
-the setting_widgets comment, RPC.md to ASCII and off the guard allowlist).
-Next: a fix cycle for the recurrent state cell rule the fourth 2026-09-10
-run settled (the first open item, slots x (depth + 1)), carrying that run
-as the fourth calibration record and the stale draft-mtp --parallel
-warning; then the release commit on main that sets pyproject to 0.2.0 and
-dates the CHANGELOG section, then the v0.2.0 tag and the GitHub release,
-each on the owner's yes.
+Idle: no cycle open. The last cycle, fix/state-cells-per-slot, landed on
+2026-09-10: recurrent state is charged per state unit, the request slot
+count times one plus the speculative sequence count under a rollback
+spec-type (SPEC 2.32), the fourth 2026-09-10 run is a calibration record
+that separates that rule from slots plus depth, and validation no longer
+warns that draft-mtp needs a single slot (SPEC 2.44). Next: the release
+commit on main that sets pyproject to 0.2.0 and dates the CHANGELOG section,
+then the v0.2.0 tag and the GitHub release, each on the owner's yes; the
+config.png and build.png re-shoot can land before or after it.
 
 ## Open items
 
-- [ ] The recurrent state cell rule is `slots x (depth + 1)`, not
-      `slots + depth`: the fourth 2026-09-10 run (27B, --parallel 2, MTP
-      draft on) logs 897.75 MiB of state, 48 layers times 6 units, with the
-      log's own accounting reading 2 cells at 2 seqs plus 2 rs_seq; per
-      card 617.20 MiB (33 layers) and 280.55 (15). vram.state_cell_count
-      returns 4 units there and the estimate reads 299.25 MiB low. SPEC
-      2.32 says "slots plus depth" and must change with it; the run is the
-      fourth calibration record once the rule lands. Next fix cycle.
-- [ ] validation warns that draft-mtp does not support --parallel above 1,
-      but mainline b10818 ran the 27B with two slots and the draft-mtp
-      implementation loaded ("speculative decoding context initialized",
-      2026-09-10). Find the upstream commit that lifted the restriction
-      and drop or version-gate the warning.
+- [ ] llama.cpp clamps the speculative sequence count to zero when the
+      target architecture is not in its rollback list (qwen35, qwen35moe,
+      qwen4exp, deepseek4, nemotron_h, nemotron_h_moe, lfm2, lfm2moe,
+      bailingmoe3, kimi_k3 as of b10818) and speculates through
+      checkpoints instead, so a Falcon-H1, Jamba or Mamba2-class hybrid
+      under a rollback spec-type is charged slots x depth state units it
+      never allocates. The estimate never consults meta.arch for this;
+      narrow today, since such heads barely exist for those archs.
+- [ ] The host buffer band has little headroom: the E2B cpu-only record
+      reads 2.468 times the measured figure against the 2.5 ceiling, the ik
+      fit record 2.428 and the two-slot drafted 27B record 2.289, so a
+      host-term change trips one of those three first.
 - [ ] The main window's minimum width is about 1032 px, from the top
       bar's Name and profile picker minimums (160 and 200 px) plus six
       buttons, so a 1024 px display no longer fits the window; the owner
@@ -136,7 +130,7 @@ each on the owner's yes.
       draft is priced a cache on every layer its file carries, recurrent
       ones included, and no measurement covers such a model. Over-charging
       is the safe direction for a fit check.
-- [ ] An ik_llama.cpp draft adds no state cells, since spec-draft-n-max is
+- [ ] An ik_llama.cpp draft adds no state units, since spec-draft-n-max is
       mainline-only while ik carries its own draft-params row.
 - [ ] The ik calibration record's card 0 KV lower bound clears by a few KiB
       only through the log-precision allowance; a second ik measurement
@@ -258,11 +252,12 @@ each on the owner's yes.
       exact on every card; KV reads 1.9x to 2.2x high and compute reads low
       on card 0, see the open items. Not yet added as records: the KV rule
       fails until the reader knows the sliding-window head size.
-- [ ] On the 27B dense profile, run a sweep whose "from" sits a few counts
+- [x] On the 27B dense profile, run a sweep whose "from" sits a few counts
       below the prefilled start so the first point is too small: confirm it
       records as failed with its log line in the tooltip and the sweep
-      continues; then confirm the winner is marked and Apply writes the
-      count into the profile. The prefilled-range run itself is done (below).
+      continues. Confirmed by the owner on 2026-09-10.
+- [ ] On that same sweep, confirm the winner is marked and Apply writes the
+      count into the profile.
 - [x] Open the launch dialog on KDE/Wayland with an over-budget context and
       confirm it shows the per-card breakdown, the --fit note and the
       suggested offload count. Confirmed by the owner on 2026-09-06.
@@ -323,20 +318,12 @@ each on the owner's yes.
 
 ## Done this cycle
 
-- Smokes: the --parallel 2 MTP run and the readout comparison are ticked
-  with their findings; the UI half of the readout smoke stands alone.
-- README: CI badge; the Quickstart names the layer ranges and the Details
-  section.
-- Group box titles on the Configure and Build tabs render a literal
-  ampersand ("Model && Context" as the Qt title).
-- A benchmark or sweep prompt size of 0 or below is refused.
-- placement.layer_index replaces the _layer_of pair; memory_fit computes
-  the balanced-differs predicate once, zips the draft KV delta strictly
-  and indexes bytes_per_layer positionally; SearchEntry drops its unread
-  key.
-- A lone ampersand in the Monitor tab's "Enable --metrics & relaunch"
-  button renders too; the three sites share ui.widgets.text.literal_ampersands.
-- The setting_widgets string-editor comment describes instead of
-  narrating; RPC.md is ASCII and off the guard allowlist in
-  tests/guard/conftest.py and ci.yml; AGENTS.md and ROADMAP.md say so.
-- The fourth 2026-09-10 run is filed in DevDocs with its findings.
+- Recurrent state is charged per state unit: one cell per request slot,
+  each holding the slot's own state plus one per speculative sequence when
+  a rollback spec-type is selected, draft file or in-file MTP head alike
+  (vram.state_unit_count; SPEC 2.32, VRAM.md, CHANGELOG).
+- The fourth 2026-09-10 run (27B, two slots, MTP draft on) is a
+  calibration record; its KV plus state matches the estimate exactly on
+  both cards and it fails under the old slots-plus-depth rule.
+- Validation no longer warns that draft-mtp needs a single slot (SPEC
+  2.44); the mmproj warning stays.
