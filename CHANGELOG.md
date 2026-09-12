@@ -10,6 +10,8 @@ not on the release page, so the two never drift.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-09-12
+
 Mainline llama.cpp removed `--mlock`, `--no-mmap` and `--direct-io` from its
 argument parser at build 10902, so a profile carrying either of the first two
 aborts the launch against a current image. Both settings move to
@@ -322,7 +324,8 @@ delete and a use-in-profile action.
 Docker and podman paths, single-server plus router modes, and the embedding
 and reranking (RAG) path validated live. Known gap: AMD/ROCm GPUs untested.
 
-[Unreleased]: https://github.com/impermanent-cc/llama_launcher/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/impermanent-cc/llama_launcher/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/impermanent-cc/llama_launcher/releases/tag/v0.2.1
 [0.2.0]: https://github.com/impermanent-cc/llama_launcher/releases/tag/v0.2.0
 [0.1.1]: https://github.com/impermanent-cc/llama_launcher/releases/tag/v0.1.1
 [0.1.0]: https://github.com/impermanent-cc/llama_launcher/releases/tag/v0.1.0

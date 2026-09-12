@@ -2,7 +2,8 @@
 
 ## Current phase
 
-Idle: no cycle open. fix/flag-availability-b10902 landed on 2026-09-12,
+Idle: no cycle open. v0.2.1 was cut on 2026-09-12 from
+fix/flag-availability-b10902, which landed the same day,
 from an audit of ghcr.io/ggml-org/llama.cpp:server at build 10902 against the
 catalog: SPEC 2.45, 2.46 and 2.47 are new, 2.12, 2.20 and 2.26 amended, and
 --log-jsonl is recorded out of scope. Next: whatever the owner picks from
