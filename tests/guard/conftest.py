@@ -67,6 +67,8 @@ def tracked_files() -> list[Path]:
         capture_output=True,
         text=True,
     ).stdout
+    # git ls-files reports the index, so a tracked file deleted in the
+    # working tree has no bytes to read; skip it rather than raising.
     return [
         REPO_ROOT / name
         for name in out.split("\0")
@@ -74,6 +76,7 @@ def tracked_files() -> list[Path]:
         and Path(name).suffix.lower() not in BINARY_SUFFIXES
         and Path(name).name not in SKIP_NAMES
         and not is_allowlisted(name)
+        and (REPO_ROOT / name).exists()
     ]
 
 

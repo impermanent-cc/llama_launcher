@@ -398,10 +398,26 @@ class BenchmarkController:
         if not sizes:
             return "Set at least one prompt size in the benchmark row first."
         knob = self._sweep_knob()
-        if knob in command_builder.raw_arg_values(p.raw_args):
+        raw_values = command_builder.raw_arg_values(p.raw_args)
+        if knob in raw_values:
             return (
                 f"Remove --{knob} from the raw arguments first: it overrides "
                 "the swept count."
+            )
+        hidden = []
+        if raw_values.get("log-disable"):
+            hidden.append("--log-disable")
+        if str(raw_values.get("log-colors", "")).strip().lower() in (
+            "on",
+            "1",
+            "enabled",
+            "true",
+        ):
+            hidden.append("--log-colors")
+        if hidden:
+            return (
+                f"Remove {' and '.join(hidden)} from the raw arguments first: "
+                "the sweep reads its memory figures from the load-time log."
             )
         sweep_name = headless._container_name(sweep_service.sweep_profile(p, 0, knob))
         if runtime.container_state(sweep_name, p.runtime.binary) == "running":

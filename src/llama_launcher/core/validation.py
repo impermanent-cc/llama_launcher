@@ -5,13 +5,14 @@ from dataclasses import dataclass
 from .command_builder import (
     dangerous_run_args,
     is_sensitive_host_path,
+    raw_arg_values,
     raw_arg_warnings,
     raw_flags,
     run_args_expose,
     setting_emits,
 )
 from .router_preset import convert_raw_args
-from .settings_catalog import CATALOG
+from .settings_catalog import CATALOG, accepts
 from .spec import DEFAULT_PORT, Profile, member_model_id, profile_port
 from .vram import effective_ctx_size
 
@@ -348,6 +349,48 @@ def validate(
                     "A draft model is selected but spec-type is 'none', so the draft "
                     "model is loaded and never used. Set spec-type (e.g. draft-simple) "
                     "to enable speculative decoding, or clear the draft model.",
+                )
+            )
+
+        # --mlock/--no-mmap on an engine that no longer accepts them (mainline
+        # llama.cpp at build 10902) arrive by two routes with opposite
+        # consequences: a settings value never reaches argv, while the same
+        # spelling in raw_args does and the engine rejects it at argument
+        # parsing. A flag carried by both routes only ever reaches argv
+        # through raw_args (the settings side is gated off before it can
+        # emit), so the raw wording is the one that applies there.
+        raw_legacy_values = raw_arg_values(profile.raw_args)
+        settings_legacy = []
+        raw_legacy = []
+        for key, flag in (("mlock", "--mlock"), ("no-mmap", "--no-mmap")):
+            if accepts(CATALOG[key], profile.runtime.engine):
+                continue
+            if raw_legacy_values.get(key):
+                raw_legacy.append(flag)
+            elif profile.settings.get(key):
+                settings_legacy.append(flag)
+        if settings_legacy:
+            verb, pronoun = (
+                ("is", "it") if len(settings_legacy) == 1 else ("are", "them")
+            )
+            issues.append(
+                Issue(
+                    "warning",
+                    f"{' and '.join(settings_legacy)} {verb} not sent: mainline "
+                    f"removed {pronoun} at build 10902, so the launcher no longer "
+                    f"sends {pronoun} on any mainline image. The launch runs "
+                    f"without {pronoun}. Use --load-mode for the same behaviour.",
+                )
+            )
+        if raw_legacy:
+            verb, pronoun = ("is", "it") if len(raw_legacy) == 1 else ("are", "them")
+            issues.append(
+                Issue(
+                    "warning",
+                    f"{' and '.join(raw_legacy)} {verb} set in the raw args and "
+                    f"{verb} sent: a mainline build from 10902 on rejects "
+                    f"{pronoun} at argument parsing, so the launch fails on an "
+                    "image that new.",
                 )
             )
 

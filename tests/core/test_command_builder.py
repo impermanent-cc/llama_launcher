@@ -170,3 +170,23 @@ def test_setting_emits_follows_the_argv_rule():
     ik_only = next(k for k, s in CATALOG.items() if s.engine == "ik_llama.cpp")
     q = Profile(name="y", settings={ik_only: CATALOG[ik_only].default or 1})
     assert not setting_emits(q, ik_only)  # engine gate
+
+
+def test_mlock_never_reaches_a_mainline_launch_from_a_profile_json():
+    """A saved profile can carry any key; the engine gate, not the form, is
+    what keeps a flag mainline rejects out of argv."""
+    p = Profile(
+        name="s",
+        image="img",
+        runtime=Runtime(bind_host="127.0.0.1", engine="llama.cpp"),
+        mode="server",
+        mounts=[Mount(host="/h", container="/models", role="model")],
+        model="/models/m.gguf",
+        settings={"port": 8080, "mlock": True, "no-mmap": True},
+    )
+    argv = build_command(p)
+    assert "--mlock" not in argv and "--no-mmap" not in argv
+
+    p.runtime = Runtime(bind_host="127.0.0.1", engine="ik_llama.cpp")
+    argv = build_command(p)
+    assert "--mlock" in argv and "--no-mmap" in argv

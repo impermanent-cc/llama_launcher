@@ -897,3 +897,111 @@ def test_negation_pair_enum_side_at_its_default_is_idle_under_the_shared_rule():
         settings={enum_key: CATALOG[enum_key].default},
     )
     assert not _is_active(p, enum_key)
+
+
+def test_legacy_lock_flag_warns_on_mainline():
+    """The launch succeeds without the flag, so this warns rather than
+    blocking."""
+    p = _ok_profile()
+    p.settings["mlock"] = True
+    hits = [i for i in validate(p) if "--mlock" in i.message]
+    assert len(hits) == 1
+    assert hits[0].level == "warning"
+    assert hits[0].message == (
+        "--mlock is not sent: mainline removed it at build 10902, so the "
+        "launcher no longer sends it on any mainline image. The launch runs "
+        "without it. Use --load-mode for the same behaviour."
+    )
+
+
+def test_legacy_pair_warns_once_not_twice():
+    p = _ok_profile()
+    p.settings["mlock"] = True
+    p.settings["no-mmap"] = True
+    hits = [i for i in validate(p) if "--mlock" in i.message]
+    assert len(hits) == 1
+    assert "--no-mmap" in hits[0].message
+    assert hits[0].message == (
+        "--mlock and --no-mmap are not sent: mainline removed them at build "
+        "10902, so the launcher no longer sends them on any mainline image. "
+        "The launch runs without them. Use --load-mode for the same "
+        "behaviour."
+    )
+
+
+def test_legacy_lock_flag_does_not_warn_on_ik():
+    p = _ok_profile()
+    p.runtime = Runtime(engine="ik_llama.cpp")
+    p.settings["mlock"] = True
+    assert not [i for i in validate(p) if "--mlock" in i.message]
+
+
+def test_no_legacy_warning_without_the_key():
+    assert not [i for i in validate(_ok_profile()) if "--mlock" in i.message]
+
+
+def test_legacy_lock_flag_in_raw_args_warns_it_reaches_the_launch():
+    """--mlock spelled in raw_args reaches argv (unlike the settings route,
+    which the engine gate suppresses before it can emit). The warning names
+    only the build that rejects it, since an older mainline image still
+    accepts the flag and the launcher cannot know which image is configured."""
+    p = _ok_profile()
+    p.raw_args = "--mlock"
+    hits = [i for i in validate(p) if "--mlock" in i.message]
+    assert len(hits) == 1
+    assert hits[0].level == "warning"
+    assert hits[0].message == (
+        "--mlock is set in the raw args and is sent: a mainline build from "
+        "10902 on rejects it at argument parsing, so the launch fails on an "
+        "image that new."
+    )
+
+
+def test_legacy_nommap_flag_in_raw_args_warns_it_reaches_the_launch():
+    p = _ok_profile()
+    p.raw_args = "--no-mmap"
+    hits = [i for i in validate(p) if "--no-mmap" in i.message]
+    assert len(hits) == 1
+    assert hits[0].message == (
+        "--no-mmap is set in the raw args and is sent: a mainline build "
+        "from 10902 on rejects it at argument parsing, so the launch fails "
+        "on an image that new."
+    )
+
+
+def test_legacy_pair_in_raw_args_warns_once_not_twice():
+    p = _ok_profile()
+    p.raw_args = "--mlock --no-mmap"
+    hits = [i for i in validate(p) if "--mlock" in i.message]
+    assert len(hits) == 1
+    assert "--no-mmap" in hits[0].message
+    assert hits[0].message == (
+        "--mlock and --no-mmap are set in the raw args and are sent: a "
+        "mainline build from 10902 on rejects them at argument parsing, so "
+        "the launch fails on an image that new."
+    )
+
+
+def test_legacy_flag_in_raw_args_does_not_warn_on_ik():
+    p = _ok_profile()
+    p.runtime = Runtime(engine="ik_llama.cpp")
+    p.raw_args = "--mlock --no-mmap"
+    assert not [i for i in validate(p) if "--mlock" in i.message]
+    assert not [i for i in validate(p) if "--no-mmap" in i.message]
+
+
+def test_legacy_flag_by_both_routes_warns_only_the_raw_route():
+    """A profile carrying --mlock in both settings and raw_args only ever
+    sends it via raw_args: the settings route is gated off before it can
+    emit anything, so only the raw-route warning (the one matching what
+    actually reaches argv) fires, not the settings-route one."""
+    p = _ok_profile()
+    p.settings["mlock"] = True
+    p.raw_args = "--mlock"
+    hits = [i for i in validate(p) if "--mlock" in i.message]
+    assert len(hits) == 1
+    assert hits[0].message == (
+        "--mlock is set in the raw args and is sent: a mainline build from "
+        "10902 on rejects it at argument parsing, so the launch fails on an "
+        "image that new."
+    )

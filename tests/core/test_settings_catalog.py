@@ -35,7 +35,8 @@ def test_known_settings_present_with_correct_defaults():
 
 def test_defrag_thold_is_never_offered_on_mainline():
     """--defrag-thold is DEPRECATED in mainline's help, and this catalog does not
-    offer flags upstream has deprecated (same rule that keeps out --direct-io).
+    offer flags upstream has deprecated (same rule that keeps LLAMA_CURL off
+    the mainline build catalog).
 
     ik_llama.cpp carries the flag undeprecated and still honours it, so the
     catalog exposes it there and only there; a mainline user is never shown it.
@@ -45,6 +46,15 @@ def test_defrag_thold_is_never_offered_on_mainline():
     assert "defrag-thold" not in for_engine(member_catalog(), "llama.cpp")
     assert CATALOG["defrag-thold"].engine == "ik_llama.cpp"
     assert CATALOG["defrag-thold"].deprecated is False
+
+
+def test_legacy_load_flags_reach_ik_only():
+    """Mainline llama.cpp rejects --mlock and --no-mmap from build 10902, so
+    neither reaches a mainline launch; ik still accepts both."""
+    for key in ("mlock", "no-mmap"):
+        assert CATALOG[key].engine == "ik_llama.cpp"
+        assert key not in for_engine(CATALOG, "llama.cpp")
+        assert key in for_engine(CATALOG, "ik_llama.cpp")
 
 
 def test_enum_defaults_are_within_enum():

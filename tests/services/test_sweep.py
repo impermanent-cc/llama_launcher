@@ -109,6 +109,65 @@ def test_sweep_profile_leaves_verbosity_unset_for_ik_llama_cpp():
     assert q.settings.get("verbosity") is None
 
 
+def test_sweep_profile_clears_log_settings_that_hide_the_buffer_lines():
+    """--log-disable prints nothing and --log-colors on wraps every line in
+    escapes, either of which leaves the sweep with no measurement."""
+    p = _profile()
+    p.settings["log-disable"] = True
+    p.settings["log-colors"] = "on"
+    q = svc.sweep_profile(p, 6, "n-cpu-ffn")
+    assert "log-disable" not in q.settings
+    assert "log-colors" not in q.settings
+    assert p.settings["log-disable"] is True
+
+
+def test_sweep_profile_negates_a_raw_log_jsonl():
+    """A raw --log-jsonl gets --no-log-jsonl appended on the copy, leaving
+    the caller's raw_args untouched."""
+    p = _profile()
+    p.raw_args = "--log-jsonl"
+    q = svc.sweep_profile(p, 6, "n-cpu-ffn")
+    assert q.raw_args.split() == ["--log-jsonl", "--no-log-jsonl"]
+    assert p.raw_args == "--log-jsonl"
+
+
+def test_sweep_profile_adds_no_negation_without_log_jsonl():
+    """--no-log-jsonl exists only from b10902, so a build that never saw
+    --log-jsonl would reject it and fail the whole sweep."""
+    p = _profile()
+    p.raw_args = "--foo bar"
+    q = svc.sweep_profile(p, 6, "n-cpu-ffn")
+    assert "--no-log-jsonl" not in q.raw_args
+
+
+def test_sweep_profile_adds_no_negation_when_already_present():
+    """A profile that already carries both flags gets nothing appended,
+    since the later token already wins."""
+    p = _profile()
+    p.raw_args = "--log-jsonl --no-log-jsonl"
+    q = svc.sweep_profile(p, 6, "n-cpu-ffn")
+    assert q.raw_args.split() == ["--log-jsonl", "--no-log-jsonl"]
+
+
+def test_sweep_profile_is_idempotent_on_its_own_output():
+    """Applying sweep_profile to its own result adds no further negation,
+    so chaining it never accumulates --no-log-jsonl tokens."""
+    p = _profile()
+    p.raw_args = "--log-jsonl"
+    q1 = svc.sweep_profile(p, 6, "n-cpu-ffn")
+    q2 = svc.sweep_profile(q1, 6, "n-cpu-ffn")
+    assert q2.raw_args.split() == ["--log-jsonl", "--no-log-jsonl"]
+
+
+def test_sweep_profile_leaves_log_file_alone():
+    """--log-file still writes every line to stderr, so it does not hide the
+    buffer lines and the profile's choice stands."""
+    p = _profile()
+    p.settings["log-file"] = "/tmp/server.log"
+    q = svc.sweep_profile(p, 6, "n-cpu-ffn")
+    assert q.settings["log-file"] == "/tmp/server.log"
+
+
 def test_run_sweep_records_every_point_and_stops_each_container():
     calls, probes = _probes()
     seen = []

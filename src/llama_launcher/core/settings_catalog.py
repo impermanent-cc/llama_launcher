@@ -304,10 +304,11 @@ _ALL = [
         "--no-mmap/--mlock). auto (the upstream default) memory-maps unless a "
         "device does not support it; mmap forces memory-mapping; none loads "
         "fully into RAM (slower, more RAM); mlock/mmap+mlock also lock it in "
-        "RAM so it's never swapped; dio uses DirectIO if available. Set to "
-        "anything other than auto and the legacy no-mmap/mlock flags below are "
-        "ignored. Needs an image new enough to know --load-mode; the auto "
-        "value itself needs images from 2026-08-11 or later.",
+        "RAM so it's never swapped; dio uses DirectIO if available. Mainline "
+        "llama.cpp no longer accepts --no-mmap or --mlock, so this flag is "
+        "the only route to those behaviours there. Needs an image new enough "
+        "to know --load-mode; the auto value itself needs images from "
+        "2026-08-11 or later.",
     ),
     # Upstream's flag is --lazy-mode. The key stays "tensor-read-lazy" because
     # saved profiles are written with it and the form labels rows by flag.
@@ -331,10 +332,12 @@ _ALL = [
         False,
         "GPU & Memory",
         (),
+        engine="ik_llama.cpp",
         deprecated=True,
-        tooltip="Legacy (deprecated upstream in favor of --load-mode, but works on "
-        "all image versions). Disable memory-mapping of the model file, loading "
-        "it fully into RAM instead. Ignored when load-mode is set.",
+        tooltip="ik_llama.cpp only. Disable memory-mapping of the model file, "
+        "loading it fully into RAM instead. Mainline llama.cpp removed this "
+        "flag at build 10902; use load-mode 'none' there. Ignored when "
+        "load-mode is set.",
     ),
     Setting(
         "mlock",
@@ -343,11 +346,12 @@ _ALL = [
         False,
         "GPU & Memory",
         (),
+        engine="ik_llama.cpp",
         deprecated=True,
-        tooltip="Legacy (deprecated upstream in favor of --load-mode, but works on all "
-        "image versions). Lock the model in RAM so the OS never swaps it out. "
-        "Needs enough RAM and the privilege to lock memory. Ignored when "
-        "load-mode is set.",
+        tooltip="ik_llama.cpp only. Lock the model in RAM so the OS never swaps "
+        "it out. Needs enough RAM and the privilege to lock memory. Mainline "
+        "llama.cpp removed this flag at build 10902; use load-mode "
+        "'mmap+mlock' there. Ignored when load-mode is set.",
     ),
     Setting(
         "split-mode",
@@ -424,7 +428,7 @@ _ALL = [
         ("-mmdev",),
         tooltip="Which device runs the multimodal (vision/audio) projector, e.g. "
         "'CUDA0'. 'none' keeps it on the CPU (like --no-mmproj-offload); empty "
-        "lets llama.cpp choose (auto). Run llama-server with --list-devices to "
+        "follows --device. Run llama-server with --list-devices to "
         "see the names. Newer llama.cpp only.",
     ),
     Setting(
@@ -3293,13 +3297,14 @@ _ALL = [
         "well. Off by default; turning it on can stop runaway blank lines.",
     ),
     # ------------------------------------------------------------------
-    # Flags both engines accept (probed against llama.cpp:server-b10711 AND
+    # Flags both engines accept (probed against llama.cpp:server-b10902 AND
     # ik-llama-cpp:cu12-server), hence engine="any".
     # ------------------------------------------------------------------
     # ik ONLY, on purpose. Mainline marks --defrag-thold DEPRECATED in its help,
     # and this catalog does not offer flags upstream has deprecated (the same
-    # rule that keeps out --direct-io). ik carries it undeprecated and still
-    # honours it, so ik users get it and mainline users do not.
+    # rule that keeps LLAMA_CURL off the mainline build catalog). ik carries
+    # it undeprecated and still honours it, so ik users get it and mainline
+    # users do not.
     Setting(
         "defrag-thold",
         "--defrag-thold",

@@ -1,6 +1,6 @@
-# Flags accepted by llama-server, captured from build b10711:
+# Flags accepted by llama-server, captured from build b10902:
 #   podman run --rm --entrypoint /app/llama-server \
-#     ghcr.io/ggml-org/llama.cpp:server-b10711 --help
+#     ghcr.io/ggml-org/llama.cpp:server-b10902 --help
 # Regenerate with tests/fixtures/regen_flags.sh when moving to a newer build.
 --adaptive-decay
 --adaptive-target
@@ -53,7 +53,6 @@
 --defrag-thold
 --device
 --device-draft
---direct-io
 --docker-repo
 --draft
 --draft-max
@@ -113,6 +112,7 @@
 --log-colors
 --log-disable
 --log-file
+--log-jsonl
 --log-prefix
 --log-prompts-dir
 --log-timestamps
@@ -133,8 +133,6 @@
 --mirostat
 --mirostat-ent
 --mirostat-lr
---mlock
---mmap
 --mmproj
 --mmproj-auto
 --mmproj-device
@@ -160,15 +158,14 @@
 --no-cont-batching
 --no-context-shift
 --no-cors-credentials
---no-direct-io
 --no-escape
 --no-host
 --no-jinja
 --no-kv-offload
 --no-kv-unified
+--no-log-jsonl
 --no-log-prefix
 --no-log-timestamps
---no-mmap
 --no-mmproj
 --no-mmproj-auto
 --no-mmproj-offload
@@ -358,7 +355,6 @@
 -ctxcp
 -dev
 -devd
--dio
 -dr
 -dt
 -e
@@ -395,7 +391,6 @@
 -ncffn
 -ncmoe
 -ncmoed
--ndio
 -ngl
 -ngld
 -nkvo

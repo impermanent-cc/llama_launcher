@@ -940,6 +940,60 @@ def test_load_mode_disables_legacy_mmap_widgets(win):
     assert win._configure_panel._widgets["mlock"].isEnabled() is False
 
 
+def test_load_mode_never_disables_legacy_mmap_widgets_on_ik(win):
+    # --load-mode is mainline-only and never reaches an ik launch, so a
+    # non-default load-mode value carried in an ik profile's settings must
+    # leave --no-mmap/--mlock enabled: those are the only two of the pair
+    # that actually work on ik.
+    ik_profile = Profile(
+        name="ik",
+        image="img",
+        runtime=Runtime(engine="ik_llama.cpp"),
+        model="/models/x.gguf",
+        settings={"load-mode": "none", "no-mmap": True, "mlock": True},
+    )
+    win._configure_panel.load_profile(ik_profile)
+    assert win._configure_panel._widgets["no-mmap"].isEnabled() is True
+    assert win._configure_panel._widgets["mlock"].isEnabled() is True
+
+    # Pin the rule rather than just this one engine: the same non-default
+    # load-mode on a mainline profile still greys the pair out.
+    mainline_profile = Profile(
+        name="ml",
+        image="img",
+        runtime=Runtime(engine="llama.cpp"),
+        model="/models/x.gguf",
+        settings={"load-mode": "none"},
+    )
+    win._configure_panel.load_profile(mainline_profile)
+    assert win._configure_panel._widgets["no-mmap"].isEnabled() is False
+    assert win._configure_panel._widgets["mlock"].isEnabled() is False
+
+
+def test_switching_engine_combo_resyncs_legacy_mmap_widgets(win):
+    # A non-default load-mode set while on llama.cpp disables and hides the
+    # legacy pair. Picking ik_llama.cpp from the engine combo -- not by
+    # reloading a profile -- must re-enable them immediately: ik never reads
+    # --load-mode, so --mlock/--no-mmap are the only load flags it accepts.
+    panel = win._configure_panel
+    panel.mode_combo.setCurrentIndex(panel.mode_combo.findData("server"))
+    panel.engine_combo.setCurrentIndex(panel.engine_combo.findData("llama.cpp"))
+    panel._widgets["load-mode"].set_value("none")
+    panel._widgets["load-mode"].changed.emit()
+    assert panel._widgets["no-mmap"].isEnabled() is False
+    assert panel._widgets["mlock"].isEnabled() is False
+
+    panel.engine_combo.setCurrentIndex(panel.engine_combo.findData("ik_llama.cpp"))
+    assert panel._widgets["no-mmap"].isEnabled() is True
+    assert panel._widgets["mlock"].isEnabled() is True
+    row_no_mmap = panel._setting_rows["no-mmap"]
+    row_mlock = panel._setting_rows["mlock"]
+    assert row_no_mmap[0].isRowVisible(
+        row_no_mmap[0].getWidgetPosition(row_no_mmap[1])[0]
+    )
+    assert row_mlock[0].isRowVisible(row_mlock[0].getWidgetPosition(row_mlock[1])[0])
+
+
 def test_benchmark_has_its_own_tab_and_config_strip_hidden_off_configure(win):
     titles = [win.tabs.tabText(i) for i in range(win.tabs.count())]
     assert titles == ["Configure", "Monitor", "Benchmark", "Build"]

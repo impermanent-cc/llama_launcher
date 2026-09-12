@@ -28,8 +28,9 @@ settled, then to TASKS.md when a cycle picks them up.
   for neither: the control-vector family (repeatable, one takes two tokens,
   needs panel plumbing like LoRA) and --spec-replace (two tokens). Decide
   per flag: add with plumbing, or record as out of scope.
-- Periodic re-audit of both engines: common/arg.cpp against
-  settings_catalog, root and ggml CMakeLists.txt against build_catalog.
+- Periodic re-audit of both engines: regenerate the flag fixtures (the
+  suite then names every flag that appeared or vanished) and check root and
+  ggml CMakeLists.txt against build_catalog, which has no fixture.
 - Documentation cycle: README and CHANGELOG to ASCII and dash-free so they
   leave the guard allowlist (RPC.md left it on 2026-09-10); reword the
   legacy ` -- ` comment separators and turn the doubled-hyphen guard on.

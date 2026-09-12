@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from enum import StrEnum
 
 from .gguf import GgufMeta
-from .settings_catalog import CATALOG
+from .settings_catalog import CATALOG, accepts
 from .vram import effective_ctx_size, positive_int
 
 EMBEDDING_ARCHS = frozenset(
@@ -108,7 +108,9 @@ def _rel_core(caps):
 def _rel_offload(caps):
     """The offload knobs' (n-cpu-moe, cpu-moe, override-tensor, n-cpu-ffn)
     tiers by expert presence, nothing on an embedding model: an embedding
-    model exposes all four knobs but recommends none of them."""
+    model exposes all four knobs but recommends none of them.
+    --override-tensor is absent from the dense map because it applies to
+    every model, so a dense profile offers it unmarked."""
     if caps.is_embedding:
         return {}
     if caps.is_moe:
@@ -121,7 +123,6 @@ def _rel_offload(caps):
     return {
         "n-cpu-moe": Tier.NA,
         "cpu-moe": Tier.NA,
-        "override-tensor": Tier.NA,
         "n-cpu-ffn": Tier.RECOMMENDED,
     }
 
@@ -321,7 +322,43 @@ def _sug_embedding(caps, settings, mmproj_set, draft_set, engine="llama.cpp"):
     return []
 
 
-SUGGESTION_DETECTORS = [_sug_mtp, _sug_vision, _sug_ctx, _sug_embedding]
+_LEGACY_LOAD_MODE = {
+    (True, False): "mmap+mlock",
+    (False, True): "none",
+    (True, True): "mlock",
+}
+
+
+def _sug_legacy_load(caps, settings, mmproj_set, draft_set, engine="llama.cpp"):
+    """--load-mode for a profile still carrying --mlock or --no-mmap on an
+    engine that no longer accepts them. --mlock alone means mmap plus a lock,
+    --no-mmap alone means a full read into RAM, and the pair means both."""
+    if accepts(CATALOG["mlock"], engine):
+        return []
+    lock = bool(settings.get("mlock"))
+    no_mmap = bool(settings.get("no-mmap"))
+    mode = _LEGACY_LOAD_MODE.get((lock, no_mmap))
+    if mode is None:
+        return []
+    flags = " and ".join(
+        f for f, on in (("--mlock", lock), ("--no-mmap", no_mmap)) if on
+    )
+    return [
+        Suggestion(
+            f"{flags} removed upstream \u2192 load-mode {mode}",
+            {"load-mode": mode, "mlock": False, "no-mmap": False},
+            {},
+        )
+    ]
+
+
+SUGGESTION_DETECTORS = [
+    _sug_mtp,
+    _sug_vision,
+    _sug_ctx,
+    _sug_embedding,
+    _sug_legacy_load,
+]
 
 
 def suggestions(

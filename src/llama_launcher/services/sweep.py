@@ -9,6 +9,7 @@ import subprocess
 import time
 
 from llama_launcher.core import sweep as core_sweep
+from llama_launcher.core.command_builder import raw_flags
 from llama_launcher.core.spec import profile_port
 from llama_launcher.core.validation import dial_host
 from llama_launcher.services import benchmark, headless, runtime
@@ -21,7 +22,12 @@ def sweep_profile(profile, count: int, knob: str):
     laid over the knob. On mainline llama.cpp, verbosity is raised to the
     level that prints load-time buffer-size lines, unless the profile
     already asks for more; ik_llama.cpp prints those lines regardless, so
-    its verbosity is left alone."""
+    its verbosity is left alone. The copy also drops the log settings that
+    hide those lines (log-disable, log-colors) and negates a raw
+    --log-jsonl, whose negation only exists on a build that knows the pair.
+    Applying this again to the result adds nothing more, since the tokens
+    are checked, not just appended. --log-file keeps writing to stderr, so
+    it is left as the profile sets it."""
     q = copy.deepcopy(profile)
     q.name = f"{profile.name} sweep"
     q.settings[knob] = int(count)
@@ -29,6 +35,13 @@ def sweep_profile(profile, count: int, knob: str):
         current = q.settings.get("verbosity")
         if current is None or int(current) < _MIN_SWEEP_VERBOSITY:
             q.settings["verbosity"] = _MIN_SWEEP_VERBOSITY
+    for key in ("log-disable", "log-colors"):
+        q.settings.pop(key, None)
+    flags = raw_flags(q.raw_args)
+    # A flag appended here must also appear in _STRUCTURAL_ALIASES in
+    # command_builder.py so the flag audit accounts for it.
+    if "--log-jsonl" in flags and "--no-log-jsonl" not in flags:
+        q.raw_args = f"{q.raw_args} --no-log-jsonl"
     return q
 
 
