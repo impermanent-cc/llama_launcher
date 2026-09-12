@@ -2,15 +2,132 @@
 
 ## Current phase
 
-Idle: no cycle open. v0.2.0 was cut on 2026-09-11: the release commit on
-main sets pyproject and uv.lock to 0.2.0, dates the CHANGELOG section and
-opens an empty Unreleased section, and the v0.2.0 tag and GitHub release
-follow it. Next: whatever the owner picks from ROADMAP.md "Next"; the
-Gemma tied output tensor and the balanced split in the sweep are the two
-estimate items that measured runs already motivate.
+Idle: no cycle open. fix/flag-availability-b10902 landed on 2026-09-12,
+from an audit of ghcr.io/ggml-org/llama.cpp:server at build 10902 against the
+catalog: SPEC 2.45, 2.46 and 2.47 are new, 2.12, 2.20 and 2.26 amended, and
+--log-jsonl is recorded out of scope. Next: whatever the owner picks from
+ROADMAP.md "Next"; the Gemma tied output tensor and the balanced split in the
+sweep remain the two estimate items that measured runs already motivate, and
+the open items below carry three follow-ups this cycle deliberately left,
+the live-launch log warnings, the SPEC 2.46 load-mode refinement and the raw
+verbosity route into the sweep.
 
 ## Open items
 
+- [ ] Engine-gating the load-mode suppression leaves it with no observable
+      positive case on either engine: mainline carries --load-mode but no
+      longer catalogues the legacy pair, and ik carries the pair but never
+      receives --load-mode, so only the negative branch is testable. Three
+      sites hold the now-inert mechanism
+      (command_builder._load_mode_suppression, router_preset,
+      configure_panel._sync_load_mode_legacy). Keeping the gate
+      is right while the tags can move again; removing the mechanism is a
+      separate cleanup.
+- [ ] Two comments in settings_catalog.py name test artefacts, which the house
+      rule bans: one cites tests/fixtures/regen_ik_flags.sh and one names
+      test_catalog_upstream_flags. Both predate the b10902 cycle and were left
+      alone rather than growing that branch at its finish gate.
+- [ ] Raw verbosity defeats the sweep the same silent way SPEC 2.26's refusal
+      now blocks for --log-disable and --log-colors: services/sweep.py forces
+      verbosity 4 because the buffer lines do not print below it, but a raw
+      --verbosity 0, -lv 0 or --log-verbosity 0 wins as the later token, so
+      the sweep names a winner on zero memory figures. Harder than the
+      log-colors clause was: the test is "raw verbosity below 4" rather than
+      a membership check, and --log-verbosity is uncatalogued so
+      raw_arg_values returns nothing for it and the refusal needs token-level
+      parsing. Needs a SPEC 2.26 sentence. Owner deferred it on 2026-09-12.
+- [ ] tests/services/test_native.py's _await_exec returns silently when its
+      5 second budget expires, so a starved execve leaves the test asserting
+      against a pre-exec process and
+      test_proc_state_survives_a_comm_containing_spaces_and_parens fails on
+      its own "comm did not actually embed a paren" guard. Seen once under
+      three concurrent suites on 2026-09-12, then five clean runs in
+      isolation; native.py is untouched by that cycle. Raising a timeout
+      error instead of returning would make the flake self-describing.
+- [ ] The unexposed-flag list has no committed generator: the script that
+      produces it lives in the cycle plan under docs/, which is untracked and
+      deleted at the finish gate. Adding one line by hand is fine, a build
+      that moves thirty flags is not. Land the snippet as
+      tests/fixtures/regen_unexposed.py and cite it from regen_flags.sh.
+- [ ] Nothing checks catalogued aliases against the capture: the covered set
+      minus the capture is empty today, so a bogus alias would silently
+      absorb a real new flag and keep the audit green. One assert locks it.
+- [ ] After regen_flags.sh writes a capture for a new build, a forgotten
+      FIXTURE edit in test_catalog_upstream_flags.py leaves the whole audit
+      green against the old build. Asserting exactly one
+      llama_server_flags_*.txt exists would catch it.
+- [ ] unexposed_flags_mainline.txt is byte-stable under LC_ALL=C sort but
+      nothing enforces it, so a regeneration under a UTF-8 collation would
+      produce a spurious reordering diff. regen_flags.sh pins LC_ALL for the
+      capture; the list has no equivalent guard.
+- [ ] A headless `--launch` never shows a validation warning: the preflight in
+      app.py:52-64 keeps only `i.level == "error"` and drops the rest, so the
+      SPEC 2.46 legacy-flag notice reaches `--dry-run`, which prints every
+      issue, and the GUI, which prompts, but not a scripted launch. Every
+      warning the validator raises is invisible on that path, not just this
+      one.
+- [ ] The SPEC 2.46 suggestion ignores the load-mode already set: a profile
+      with `{"mlock": True, "load-mode": "dio"}` is offered `mmap+mlock`, so
+      one click replaces an explicit choice, and the warning advises
+      --load-mode where it is already set and the legacy key was already
+      inert through _load_mode_suppression. Clearing the legacy keys and
+      leaving a non-default load-mode alone is the behaviour that reads
+      right; 2.46 as written says otherwise, so this is a spec refinement.
+- [ ] configure_panel.py:927 `_on_engine_changed` hides the mlock row without
+      calling apply_model_caps(), so flipping the engine to llama.cpp in the
+      form leaves the value set with no dot until the next caps refresh or a
+      profile reload. Pre-existing; the engine-gated suggestion of 2.46 is
+      what makes it reachable.
+- [ ] capabilities._sug_legacy_load gates on accepts(CATALOG["mlock"]) alone
+      while validation checks each key against its own tag, so if the two
+      settings' engine tags ever diverge the suggestion would clear a
+      still-live --no-mmap. Both should read per key.
+- [ ] Retagging a setting's engine can make an assertion pass for a new
+      reason without failing, and only mutation finds it. The b10902 retag of
+      --mlock and --no-mmap left three such assertions, two of them fixed in
+      place and one reduced, plus two that remain doubly satisfied:
+      test_command_builder.py's test_setting_emits_follows_the_argv_rule and
+      test_validation.py's
+      test_is_active_matches_the_emit_rule_and_treats_zero_counts_as_idle both
+      use mlock on a mainline profile as their "present but not emitted"
+      example, which the engine gate now satisfies rather than load-mode
+      suppression. Each still pins its own subject, so this is clarity rather
+      than lost coverage; an ik profile is the only way to illustrate
+      suppression now.
+- [ ] validation.py:361 makes the same class of claim the 2.20 fix removed: on
+      an ik profile with run-time-repack set and no load-mode, it appends "Your
+      load-mode is mmap, which it overrides" because the read defaults to
+      "mmap" while the catalog default is "auto", and the whole branch is
+      ik-only, where --load-mode never reaches the launch. Both halves are
+      wrong: the value and the relevance.
+- [ ] tests/core/test_describe_relevance.py's override-tensor tests assert
+      the representation rather than the behaviour: absence from the
+      relevance map, not the hidden dot. ConfigurePanel._dot_state_for is a
+      staticmethod and needs no QApplication, so asserting ("none", "") would
+      survive a change to how a neutral tier is represented. The dense
+      absence test also passes vacuously against a dense branch returning {},
+      proved by mutation; the file kills that mutant through its neighbours,
+      the test alone does not. One positive anchor in the same test would
+      make it self-anchoring, and the third new test lacks the docstring its
+      neighbours carry.
+- [ ] The monitor and the MTP stats parse the log of a normal launch, so
+      --log-disable, --log-colors on, or a raw --log-jsonl silently empties
+      them; only the sweep protects itself (SPEC 2.26). A validation warning
+      covering the live-launch surface as a whole is its own cycle with its
+      own SPEC item.
+- [ ] --mmproj-device is not modelled: the estimate charges the projector to
+      --main-gpu whatever the flag says, and b10902 changed the upstream
+      default from auto to following --device. Needs a vision model measured
+      on the owner's box; there is no mmproj calibration record.
+- [ ] The estimate does not follow an --override-tensor target card:
+      parse_overrides records CPU or card, not which card, so the output
+      layer stays charged to the last card in the split even when
+      'output\.weight=CUDA0' moves it. The readout's layer ranges and the
+      logits term follow the split, not the override.
+- [ ] --device reordering is not modelled either way: --tensor-split indexes
+      the device list, so --device CUDA1,CUDA0 with -ts 20,46 gives CUDA0 the
+      larger share and the output layer, while the estimate reads the split
+      positionally against physical cards and mirrors the result.
 - [ ] llama.cpp clamps the speculative sequence count to zero when the
       target architecture is not in its rollback list (qwen35, qwen35moe,
       qwen4exp, deepseek4, nemotron_h, nemotron_h_moe, lfm2, lfm2moe,
@@ -188,6 +305,28 @@ estimate items that measured runs already motivate.
 
 ## Pending owner smokes
 
+- [ ] On the 5080 plus A2000 box against a b10902 image, launch a real
+      profile and confirm the server reaches ready with no unknown-argument
+      line in the log. This cycle is catalog work, so it is verified by
+      running, not by the suite.
+- [ ] On a dense model, confirm the --override-tensor row shows no dot and
+      accepts a value, then launch with `-ot 'output\.weight=CUDA0'` and read
+      the per-card buffer lines at verbosity 4 to confirm the output tensor
+      moved to card 0. The estimate will still charge it to the last card in
+      the split; that gap is an open item above.
+- [ ] Load a profile that still carries mlock, confirm the settings-route
+      warning appears and that clicking the load-mode suggestion clears both
+      the key and the warning in one go.
+- [ ] Put `--mlock` in a profile's raw args on a b10902 image and confirm the
+      raw-route warning appears and says the launch fails on an image that
+      new, then confirm it does fail if launched.
+- [ ] Run an offload sweep and confirm it still records memory figures per
+      point, and that a profile with `--log-disable` in its raw args is
+      refused rather than sweeping to a winner with zeroes.
+- [x] Screenshots: checked, no re-shoot needed. The two rows this cycle
+      removes from a mainline form sit immediately below config.png's
+      captured fold, which ends at --lazy-mode, so the captured surface is
+      unchanged.
 - [x] Re-shoot assets/screenshots/config.png and build.png on the 5080 plus
       A2000 box, where the group titles had the ampersand swallowed. Done
       2026-09-11 along with router.png: "Model & Context", "GPU & Memory"
@@ -315,12 +454,24 @@ estimate items that measured runs already motivate.
 
 ## Done this cycle
 
-- Recurrent state is charged per state unit: one cell per request slot,
-  each holding the slot's own state plus one per speculative sequence when
-  a rollback spec-type is selected, draft file or in-file MTP head alike
-  (vram.state_unit_count; SPEC 2.32, VRAM.md, CHANGELOG).
-- The fourth 2026-09-10 run (27B, two slots, MTP draft on) is a
-  calibration record; its KV plus state matches the estimate exactly on
-  both cards and it fails under the old slots-plus-depth rule.
-- Validation no longer warns that draft-mtp needs a single slot (SPEC
-  2.44); the mmproj warning stays.
+- `--mlock` and `--no-mmap` are ik-only: mainline rejects both from build
+  10902, and the engine gate keeps them out of the form and out of argv on
+  every path (SPEC 2.45).
+- A profile still carrying either warns, with the wording matching the route,
+  since a settings value is dropped while a raw spelling reaches the launch
+  and fails; a settings value also offers the matching `--load-mode`
+  (SPEC 2.46).
+- `--override-tensor` is unmarked on a dense model rather than "not
+  applicable", and stays a tuning knob on a MoE one (SPEC 2.12).
+- The RAM shortfall wording treats a legacy `--mlock` as a lock only where
+  the engine accepts it (SPEC 2.20).
+- The load-mode suppression is engine-gated at all three sites, so an ik
+  profile with a leftover load-mode keeps the pair and its checkboxes,
+  including after an in-place engine switch.
+- The sweep carries the log format its parser reads and refuses raw args that
+  hide it (SPEC 2.26).
+- The mainline flag fixture tracks b10902 and gains a committed list of the
+  155 flags the launcher does not use there, so regenerating the capture is
+  the audit and a new upstream flag fails the suite naming itself (SPEC 2.47).
+- `--direct-io` references are gone; the `--mmproj-device` tooltip matches
+  b10902's "follows --device" default.

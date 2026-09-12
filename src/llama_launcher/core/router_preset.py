@@ -103,11 +103,14 @@ def _setting_pairs(profile: Profile, catalog: dict) -> list[tuple[str, str]]:
     out: list[tuple[str, str]] = []
     engine = profile.runtime.engine
     # Parity with command_builder: suppress the legacy pair only when load-mode
-    # will actually emit (a value at its default is skipped as an enum sentinel).
-    _lm_default = CATALOG["load-mode"].default
+    # will actually emit (a value at its default is skipped as an enum sentinel)
+    # on an engine that accepts --load-mode in the first place.
+    _lm_setting = CATALOG["load-mode"]
     suppress = (
         {"no-mmap", "mlock"}
-        if profile.settings.get("load-mode", _lm_default) != _lm_default
+        if accepts(_lm_setting, engine)
+        and profile.settings.get("load-mode", _lm_setting.default)
+        != _lm_setting.default
         else set()
     )
     for key, setting in catalog.items():

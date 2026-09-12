@@ -7,7 +7,7 @@ ik_llama.cpp launch).
 
 Two engines, two fixtures, and they are NOT gathered the same way:
 
-* mainline (`llama_server_flags_b10711.txt`) is a straight `--help` dump.
+* mainline (`llama_server_flags_b10902.txt`) is a straight `--help` dump.
 * ik (`ik_llama_server_flags_cu12.txt`) is `--help` PLUS flags confirmed by
   executing them, because ik's help under-reports its own parser.
 
@@ -21,6 +21,7 @@ import pathlib
 
 import pytest
 
+from llama_launcher.core.command_builder import _STRUCTURAL_ALIASES
 from llama_launcher.core.settings_catalog import (
     CATALOG,
     MAINLINE_ONLY_FLAGS,
@@ -30,7 +31,7 @@ from llama_launcher.core.settings_catalog import (
 FIXTURE = (
     pathlib.Path(__file__).resolve().parents[1]
     / "fixtures"
-    / "llama_server_flags_b10711.txt"
+    / "llama_server_flags_b10902.txt"
 )
 
 # The parametrised cases below select with for_engine(), the exact predicate
@@ -167,3 +168,77 @@ def test_retag_actually_took_effect():
     # dropped, every test above would still pass while ik launches broke.
     tagged = {s.flag for s in CATALOG.values() if s.engine == "llama.cpp"}
     assert tagged == set(MAINLINE_ONLY_FLAGS)
+
+
+UNEXPOSED_FIXTURE = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "unexposed_flags_mainline.txt"
+)
+
+
+@functools.cache
+def _unexposed_flags() -> frozenset[str]:
+    return frozenset(
+        ln.strip()
+        for ln in UNEXPOSED_FIXTURE.read_text().splitlines()
+        if ln.strip() and not ln.startswith("#")
+    )
+
+
+def _catalog_covered_flags() -> frozenset[str]:
+    # Aliases count: a flag the catalog reaches under any spelling is
+    # accounted for, even though only the primary flag is emitted.
+    out = set()
+    for s in for_engine(CATALOG, "llama.cpp").values():
+        out.add(s.flag)
+        out.update(s.aliases or ())
+    # These reach argv directly from _owned_server_pairs rather than through
+    # a catalogued Setting, so they are exposed even though no Setting names
+    # them.
+    out.update(_STRUCTURAL_ALIASES)
+    return frozenset(out)
+
+
+def test_every_accepted_flag_is_catalogued_or_recorded_as_unexposed():
+    """The audit's other direction: a flag the build accepts that nothing
+    accounts for is a new upstream flag nobody has decided about."""
+    unaccounted = sorted(
+        _upstream_flags() - _catalog_covered_flags() - _unexposed_flags()
+    )
+    assert unaccounted == [], (
+        f"llama-server accepts these and the catalog neither exposes nor "
+        f"records them: {unaccounted}. Add a Setting, register it in "
+        f"_STRUCTURAL_ALIASES if the launcher emits it directly, or add each "
+        f"to {UNEXPOSED_FIXTURE.name} to record it as deliberately unexposed."
+    )
+
+
+def test_unexposed_list_carries_nothing_the_build_rejects():
+    """A stale entry hides a removal: if upstream drops a flag, the line here
+    has to go too."""
+    stale = sorted(_unexposed_flags() - _upstream_flags())
+    assert stale == [], (
+        f"{UNEXPOSED_FIXTURE.name} lists flags this build does not accept: {stale}"
+    )
+
+
+def test_unexposed_list_and_the_catalog_do_not_overlap():
+    """A flag cannot be both exposed and deliberately unexposed; an overlap
+    means a Setting was added and the list not trimmed."""
+    both = sorted(_unexposed_flags() & _catalog_covered_flags())
+    assert both == [], f"listed as unexposed but catalogued: {both}"
+
+
+def test_structural_aliases_are_accepted_by_the_build():
+    """The launcher emits or folds these directly rather than through a
+    Setting, so a rename upstream breaks every launch while the catalogue
+    tests stay green."""
+    missing = sorted(f for f in _STRUCTURAL_ALIASES if f not in _upstream_flags())
+    assert missing == [], (
+        f"llama-server does not accept {missing}, which the launcher emits "
+        "or folds directly. Update the spelling where it is emitted or "
+        "folded, in command_builder._owned_server_pairs, "
+        "command_builder._STRUCTURAL_ALIASES, or services.sweep.sweep_profile, "
+        "not the fixture."
+    )

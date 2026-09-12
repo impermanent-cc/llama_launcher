@@ -2,7 +2,7 @@ from llama_launcher.core.router_preset import (
     convert_raw_args,
     render_preset,
 )
-from llama_launcher.core.spec import LoraRef, Profile, RouterMember
+from llama_launcher.core.spec import LoraRef, Profile, RouterMember, Runtime
 
 
 def _member(name="Qwen", **kw):
@@ -183,8 +183,6 @@ def test_preset_omits_engine_gated_flag_for_mainline_member():
     # An ik_llama.cpp-only flag on a llama.cpp member must not reach a mainline
     # router's preset (the child llama-server would reject it) -- parity with
     # command_builder._owned_server_pairs.
-    from llama_launcher.core.spec import Runtime
-
     p = Profile(
         name="Q",
         model="/m.gguf",
@@ -202,8 +200,6 @@ def test_preset_omits_enum_value_equal_to_default():
 
 
 def test_preset_translates_spec_type_for_ik():
-    from llama_launcher.core.spec import Runtime
-
     p = Profile(
         name="Q",
         model="/m.gguf",
@@ -214,8 +210,6 @@ def test_preset_translates_spec_type_for_ik():
 
 
 def test_preset_drops_suffix_spec_type_on_mainline():
-    from llama_launcher.core.spec import Runtime
-
     p = Profile(
         name="Q",
         model="/m.gguf",
@@ -225,15 +219,20 @@ def test_preset_drops_suffix_spec_type_on_mainline():
     assert "spec-type" not in render_preset([(_member(), p)]).text
 
 
-def test_preset_load_mode_at_default_does_not_suppress_legacy():
-    # Parity with command_builder: a leftover load-mode equal to its default
-    # emits nothing, so it must not eat the legacy no-mmap/mlock either.
-    p = Profile(
-        name="Q", model="/m.gguf", settings={"load-mode": "auto", "no-mmap": True}
-    )
-    text = render_preset([(_member(), p)]).text
-    assert "load-mode" not in text
-    assert "no-mmap = true" in text
+def test_preset_never_suppresses_legacy_on_ik_at_any_load_mode_value():
+    # --load-mode is mainline-only and never reaches an ik member's preset,
+    # so no load-mode value, default or not, can suppress the legacy
+    # no-mmap/mlock pair there: nothing else would carry the intent.
+    for load_mode in ("auto", "mmap"):
+        p = Profile(
+            name="Q",
+            model="/m.gguf",
+            settings={"load-mode": load_mode, "no-mmap": True},
+            runtime=Runtime(engine="ik_llama.cpp"),
+        )
+        text = render_preset([(_member(), p)]).text
+        assert "load-mode" not in text
+        assert "no-mmap = true" in text
 
 
 def test_preset_omits_blank_string_value():

@@ -555,7 +555,9 @@ def _messages(
             if accepts(CATALOG["load-mode"], engine)
             else "auto"
         )
-        locked = load_mode in ("none", "mlock", "mmap+mlock") or bool(eff.get("mlock"))
+        locked = load_mode in ("none", "mlock", "mmap+mlock") or (
+            accepts(CATALOG["mlock"], engine) and bool(eff.get("mlock"))
+        )
         tail = (
             "the launch will fail."
             if locked

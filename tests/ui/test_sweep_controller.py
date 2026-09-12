@@ -472,6 +472,46 @@ def test_sweep_refused_when_raw_args_carry_the_knob(win, monkeypatch):
     assert "raw arguments" in win._benchmark._sweep_start_refusal(p)
 
 
+def test_sweep_refused_when_raw_args_hide_the_measured_lines(win, monkeypatch):
+    """Raw arguments that suppress or reformat the load-time log refuse the
+    start: the sweep would name a winner with no memory figures behind it."""
+    monkeypatch.setattr(runtime, "container_state", lambda *a, **k: "absent")
+
+    for raw in (
+        "--log-disable",
+        "--log-colors on",
+        "--log-colors=on",
+        "--log-colors 1",
+        "--log-colors enabled",
+        "--log-colors true",
+    ):
+        p = _prepared(win, moe=True)
+        p.raw_args = raw
+        reason = win._benchmark._sweep_start_refusal(p)
+        assert "raw arguments" in reason
+        assert raw.split()[0].split("=")[0] in reason
+        p.raw_args = ""
+        assert win._benchmark._sweep_start_refusal(p) == ""
+
+
+def test_sweep_allows_raw_log_flags_that_do_not_hide_the_lines(win, monkeypatch):
+    """--log-colors off and auto leave the lines readable, --log-file still
+    writes them to stderr, and a raw --log-jsonl is negated by the sweep's own
+    copy, so none of them refuse."""
+    monkeypatch.setattr(runtime, "container_state", lambda *a, **k: "absent")
+
+    for raw in (
+        "--log-colors off",
+        "--log-colors auto",
+        "--log-colors 0",
+        "--log-file /tmp/x.log",
+        "--log-jsonl",
+    ):
+        p = _prepared(win, moe=True)
+        p.raw_args = raw
+        assert win._benchmark._sweep_start_refusal(p) == "", raw
+
+
 def test_sweep_with_the_knob_in_raw_args_never_runs(win, monkeypatch):
     monkeypatch.setattr(runtime, "container_state", lambda *a, **k: "absent")
     p = _prepared(win)

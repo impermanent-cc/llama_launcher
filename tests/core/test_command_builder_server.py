@@ -92,7 +92,6 @@ def test_changed_settings_rendered():
     ]:
         assert frag in text, frag
     # bool flags are bare
-    assert "--no-mmap" in argv
     assert "--jinja" in argv
 
 
@@ -353,38 +352,6 @@ def test_load_mode_emitted():
     assert argv[argv.index("--load-mode") + 1] == "mmap+mlock"
 
 
-def test_load_mode_suppresses_legacy_mmap_mlock():
-    # When load-mode is set, the deprecated --no-mmap/--mlock must not also emit
-    # (llama.cpp warns and honours only the last of the two).
-    argv = build_command(_srv(**{"load-mode": "none", "no-mmap": True, "mlock": True}))
-    assert "--load-mode" in argv
-    assert "--no-mmap" not in argv
-    assert "--mlock" not in argv
-
-
-def test_legacy_mmap_mlock_still_emit_without_load_mode():
-    argv = build_command(_srv(**{"no-mmap": True, "mlock": True}))
-    assert "--no-mmap" in argv
-    assert "--mlock" in argv
-    assert "--load-mode" not in argv
-
-
-def test_load_mode_mmap_emits_and_suppresses_legacy():
-    # The default is "auto", so an explicit mmap choice is non-default:
-    # it must emit and still win over the legacy pair.
-    argv = build_command(_srv(**{"load-mode": "mmap", "no-mmap": True}))
-    assert argv[argv.index("--load-mode") + 1] == "mmap"
-    assert "--no-mmap" not in argv
-
-
-def test_load_mode_at_default_does_not_suppress_legacy():
-    # A JSON leftover load-mode equal to its default emits nothing, so it must
-    # not eat the legacy flags either (nothing would carry the intent at all).
-    argv = build_command(_srv(**{"load-mode": "auto", "no-mmap": True}))
-    assert "--load-mode" not in argv
-    assert "--no-mmap" in argv
-
-
 def _ik_profile(engine):
     return Profile(
         name="p",
@@ -416,6 +383,30 @@ def _ik_srv(**settings):
         model="/models/x.gguf",
         settings={"port": 8080, **settings},
     )
+
+
+def test_legacy_mmap_mlock_still_emit_without_load_mode():
+    argv = build_command(_ik_srv(**{"no-mmap": True, "mlock": True}))
+    assert "--no-mmap" in argv
+    assert "--mlock" in argv
+    assert "--load-mode" not in argv
+
+
+def test_load_mode_mmap_does_not_suppress_legacy_on_ik():
+    # --load-mode is mainline-only and never reaches an ik launch, so a
+    # non-default load-mode value carried over in the profile's settings
+    # must not drop the legacy pair: nothing else would carry the intent.
+    argv = build_command(_ik_srv(**{"load-mode": "mmap", "no-mmap": True}))
+    assert "--load-mode" not in argv
+    assert "--no-mmap" in argv
+
+
+def test_load_mode_at_default_does_not_suppress_legacy():
+    # A JSON leftover load-mode equal to its default emits nothing, so it must
+    # not eat the legacy flags either (nothing would carry the intent at all).
+    argv = build_command(_ik_srv(**{"load-mode": "auto", "no-mmap": True}))
+    assert "--load-mode" not in argv
+    assert "--no-mmap" in argv
 
 
 def test_spec_type_translated_for_ik_engine():

@@ -1280,3 +1280,28 @@ def test_fit_report_omits_kv_per_1k_without_details(monkeypatch):
     calls.clear()
     _report(with_details=True)
     assert len(calls) == 2
+
+
+def _ram_message(**kw):
+    r = _report(ram=1, **kw)
+    return next(x.text for x in r.messages if x.text.startswith("RAM:"))
+
+
+def test_stale_mlock_does_not_claim_a_failed_launch_on_mainline():
+    """Mainline drops --mlock from argv at b10902, so a profile still carrying
+    the key pages under a RAM shortfall rather than failing."""
+    msg = _ram_message(engine="llama.cpp", **{"n-gpu-layers": 0, "mlock": True})
+    assert "page weights in and out" in msg
+    assert "the launch will fail" not in msg
+
+
+def test_mlock_still_claims_a_failed_launch_on_ik():
+    msg = _ram_message(engine="ik_llama.cpp", **{"n-gpu-layers": 0, "mlock": True})
+    assert "the launch will fail" in msg
+
+
+def test_load_mode_mlock_still_claims_a_failed_launch_on_mainline():
+    """Only the legacy flag is engine-gated; --load-mode is what mainline
+    users set instead, and it still locks."""
+    msg = _ram_message(engine="llama.cpp", **{"n-gpu-layers": 0, "load-mode": "mlock"})
+    assert "the launch will fail" in msg

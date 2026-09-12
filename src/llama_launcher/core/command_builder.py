@@ -196,6 +196,8 @@ CONTAINER_KEY_PATH = f"{CONTAINER_ROUTER_DIR}/api-key"
 
 # Structural launcher flags that are not catalog settings but that raw_args
 # might collide with. Maps each spelling to its canonical (long) form.
+# Every flag the launcher emits or folds without a catalogued Setting belongs
+# in this dict, or the flag audit misses it.
 _STRUCTURAL_ALIASES = {
     "-m": "--model",
     "--model": "--model",
@@ -209,6 +211,9 @@ _STRUCTURAL_ALIASES = {
     "--port": "--port",
     "--models-preset": "--models-preset",
     "--api-key-file": "--api-key-file",
+    "--lora": "--lora",
+    "--lora-scaled": "--lora-scaled",
+    "--no-log-jsonl": "--no-log-jsonl",
 }
 
 
@@ -235,7 +240,7 @@ def _draft_model_flag(engine: str) -> str:
     Mainline's flag is --spec-draft-model, with -md/--model-draft as aliases;
     ik_llama.cpp accepts only -md/--model-draft and rejects --spec-draft-model
     ("unknown argument"). Probed against ik-llama-cpp:cu12-server and
-    llama.cpp:server-b10711.
+    llama.cpp:server-b10902.
     """
     return "--model-draft" if engine == "ik_llama.cpp" else "--spec-draft-model"
 
@@ -454,10 +459,17 @@ def _load_mode_suppression(profile: Profile, catalog: dict) -> set:
     --load-mode supersedes the legacy --no-mmap/--mlock flags upstream;
     mixing them makes llama.cpp warn and only honour the last, so the two
     keys are dropped whenever load-mode is set to a non-default value.
+    Only the engines that actually receive --load-mode can trigger this;
+    an engine that does not accept --load-mode never has it reach argv, so
+    it must not lose the legacy pair on its account.
     Enforced here, not just in the UI, so the CLI/headless path (which
     skips the form) stays consistent too."""
     lm = catalog.get("load-mode")
-    if lm is not None and profile.settings.get("load-mode", lm.default) != lm.default:
+    if (
+        lm is not None
+        and accepts(lm, profile.runtime.engine)
+        and profile.settings.get("load-mode", lm.default) != lm.default
+    ):
         return {"no-mmap", "mlock"}
     return set()
 
@@ -504,6 +516,8 @@ def _owned_server_pairs(profile: Profile, catalog: dict, host: str = "0.0.0.0") 
         pairs.append(("-m", profile.model))
     if profile.mmproj:
         pairs.append(("--mmproj", profile.mmproj))
+    # A flag appended here must also appear in _STRUCTURAL_ALIASES so the
+    # flag audit accounts for it.
     for lora in profile.loras:
         if lora.scale is None or lora.scale == 1.0:
             pairs.append(("--lora", lora.path))

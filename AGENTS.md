@@ -54,6 +54,7 @@ RPC pooling across machines.
 | Run | `.venv/bin/llama-launcher` |
 | Dry run a profile | `.venv/bin/python -m llama_launcher.app --dry-run --profile NAME` |
 | Local CI | `localci llama-launcher` (mirrored Qt image; keep its apt list in sync with ci.yml) |
+| Flag audit | `./tests/fixtures/regen_flags.sh <build>` then update the test's FIXTURE path |
 | Release notes | `scripts/release-notes.sh <version>` |
 
 ## Gates

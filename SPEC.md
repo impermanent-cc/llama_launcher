@@ -76,7 +76,9 @@ inapplicable on a dense one, which has no experts for it to move;
 one, whose non-expert layers still carry dense FFN weights. A model the
 capabilities mark as an embedding model (an embedding architecture or a
 header pooling type) gets no recommendation on either knob; both stay
-usable.
+usable. `--override-tensor` places any tensor on any device, so no model
+makes it inapplicable: it is a tuning knob on a MoE model and carries no
+recommendation on a dense one, where it stays usable and unmarked.
 
 2.13 Every catalogued flag that centralizes memory on the head
 (`--cpu-moe`, `--n-cpu-moe`, `--n-cpu-ffn`, `--no-kv-offload`,
@@ -190,8 +192,8 @@ compute, overhead) with that card's free VRAM, and the RAM total
 (weights, KV, host buffers) with the available memory of the launch node,
 local or over ssh. A card shortfall names the card and the missing amount.
 A RAM shortfall is a warning and never a refusal; under load-mode `none`
-or `mlock` its wording states the launch fails, otherwise that the server
-pages.
+or `mlock`, or a legacy `--mlock` on an engine that accepts it, its wording
+states the launch fails, otherwise that the server pages.
 
 2.21 A card shortfall message names the smallest `--n-cpu-moe` value (MoE
 model) or `--n-cpu-ffn` value (dense model) at which every card fits,
@@ -265,10 +267,18 @@ from the container log, runs the benchmark with the panel's current prompt
 sizes, n-predict, warmup and repeats, stops and removes the container, and
 proceeds to the next count; on mainline llama.cpp the launch carries log
 verbosity 4 when the profile's is lower, on other engines the profile's
-own. It refuses, with a one-line message in the panel, a native, RPC, router or remote-node profile, a profile with no
+own. The sweep's own copy also clears `--log-disable` and `--log-colors`,
+and appends `--no-log-jsonl` to the raw arguments only where they already
+carry `--log-jsonl` and not its negation, the later token winning; a build
+that does not know `--log-jsonl` rejects its negation, so the sweep never
+adds it unprompted and never adds a second one.
+`--log-file` is left as the profile sets it, since it does not suppress the
+console log. It refuses, with a one-line message in the panel, a native, RPC, router or remote-node profile, a profile with no
 model, an engine that does not accept the sweep's knob, raw arguments that
-carry the knob's flag, an empty prompt-sizes field, and a start while the
-profile's own instance, a previous sweep container, a benchmark or another
+carry the knob's flag, or carry `--log-disable` or a `--log-colors` value
+upstream reads as on (`on`, `1`, `enabled`, `true`), which hide the very
+lines the sweep measures, an empty prompt-sizes field, and a start while
+the profile's own instance, a previous sweep container, a benchmark or another
 sweep is running. A cancelled sweep is shown but not stored; the stored
 sweep of the loaded profile is shown when the profile loads.
 
@@ -457,6 +467,31 @@ precision they already have.
 above 1: mainline llama.cpp serves speculative decoding on every slot. The
 warning that draft-mtp ignores `--mmproj` stays.
 
+2.45 `--mlock` and `--no-mmap` are offered on ik_llama.cpp only. Mainline
+llama.cpp rejects both from build 10902, so neither reaches a mainline
+launch from the form, a profile JSON or the headless path; `--load-mode` is
+the mainline route to the same behaviour.
+
+2.46 A profile carrying `--mlock` or `--no-mmap` on a llama.cpp engine
+raises a validation warning, never an error, since an older mainline image
+still accepts both. The two routes carry opposite consequences and the
+warning says which applies: a settings value is not sent and the launch
+runs without it, while the same spelling in the raw arguments does reach
+the launch, which a build from 10902 on rejects at argument parsing. A
+settings value also offers a suggestion that clears the legacy key and sets
+`--load-mode`: `mmap+mlock` for `--mlock` alone, `none` for `--no-mmap`
+alone, `mlock` for both.
+
+2.47 The mainline flag fixture tracks the build the project targets, and
+every flag it carries either reaches a mainline launch, catalogued for
+llama.cpp or emitted directly as one of the launcher's structural flags,
+or is listed in `tests/fixtures/unexposed_flags_mainline.txt`, the flags the
+launcher does not use on purpose; a flag on neither list fails the suite and
+names itself. Regenerating that fixture is the flag audit, and it reports
+three directions: a catalogued flag the build no longer accepts, a directly
+emitted flag it no longer accepts, and a newly accepted flag nothing accounts
+for. The ik capture keeps the catalogued direction alone.
+
 ## 3. Constraints
 
 3.1 Python 3.12 and 3.13 are the tested floor and ceiling; the code needs
@@ -520,6 +555,9 @@ walk for it.
   node: ROADMAP Later.
 - Remembering the Details section of 2.41 open or closed across runs;
   it starts collapsed.
+- `--log-jsonl` (llama.cpp build 10902 and later): one JSON object per
+  line defeats the line-anchored load-time and MTP regexes read from the
+  log of every launch the launcher owns.
 - Synthetic speculative acceptance flags (--spec-synth-len,
   --spec-synth-rates): upstream marks them benchmarking only and they
   falsify acceptance, so a profile carrying them serves nonsense.

@@ -2,10 +2,13 @@
 # Recapture the upstream llama-server flag list used by
 # tests/core/test_catalog_upstream_flags.py.
 #
-#   ./tests/fixtures/regen_flags.sh b10711
+#   ./tests/fixtures/regen_flags.sh b10902
 #
 # Pulls the small CPU-only server image for that build, so it costs about
-# 860 MB rather than the multi-GB `full` image.
+# 860 MB rather than the multi-GB `full` image. After a regeneration, update
+# the FIXTURE path in the test and run the suite: a catalogued flag the new
+# build rejects and an accepted flag that is neither catalogued nor in
+# unexposed_flags_mainline.txt both fail, and each has to be decided.
 set -euo pipefail
 
 # Byte-stable sorting: the default locale collates punctuation differently, so
@@ -13,7 +16,7 @@ set -euo pipefail
 # identical flag set. Pin the collation so a real fixture diff always means the
 # engine changed.
 export LC_ALL=C
-BUILD="${1:?usage: regen_flags.sh <build, e.g. b10711>}"
+BUILD="${1:?usage: regen_flags.sh <build, e.g. b10902>}"
 IMAGE="ghcr.io/ggml-org/llama.cpp:server-${BUILD}"
 OUT="$(cd "$(dirname "$0")" && pwd)/llama_server_flags_${BUILD}.txt"
 

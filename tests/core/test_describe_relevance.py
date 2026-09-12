@@ -81,3 +81,29 @@ def test_n_cpu_ffn_is_a_tuning_knob_on_a_moe_model():
     assert tier == Tier.TUNE
     assert "n-cpu-moe" in reason
     assert describe_relevance(caps)["n-cpu-moe"][0] == Tier.RECOMMENDED
+
+
+def test_override_tensor_is_unmarked_on_a_dense_model():
+    """A dense model offers --override-tensor with no recommendation and no
+    "not applicable" claim: the engine takes it on any model."""
+    caps = derive_caps(GgufMeta(), [])
+    assert "override-tensor" not in relevance(caps)
+    assert "override-tensor" not in describe_relevance(caps)
+
+
+def test_override_tensor_stays_a_tuning_knob_on_a_moe_model():
+    caps = derive_caps(GgufMeta(expert_count=256), [])
+    tier, reason = describe_relevance(caps)["override-tensor"]
+    assert tier == Tier.TUNE
+    assert "expert" in reason.lower()
+
+
+def test_dense_model_still_marks_the_expert_only_knobs_inapplicable():
+    """--n-cpu-moe and --cpu-moe have no experts to move on a dense model,
+    which is what separates them from --override-tensor."""
+    caps = derive_caps(GgufMeta(), [])
+    described = describe_relevance(caps)
+    for key in ("n-cpu-moe", "cpu-moe"):
+        tier, reason = described[key]
+        assert tier == Tier.NA
+        assert "not a MoE model" in reason

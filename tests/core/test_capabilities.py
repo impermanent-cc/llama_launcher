@@ -189,3 +189,44 @@ def test_an_embedding_model_gets_no_offload_recommendation():
 def test_offload_relevance_helper_is_named_for_what_it_returns():
     assert hasattr(capabilities, "_rel_offload")
     assert not hasattr(capabilities, "_rel_moe")
+
+
+def _dense_caps():
+    return derive_caps(GgufMeta(), [])
+
+
+def test_legacy_lock_flag_suggests_the_load_mode_that_replaces_it():
+    """Mainline dropped --mlock at b10902, so a profile carrying it is offered
+    the load-mode value with the same meaning."""
+    sg = suggestions(_dense_caps(), {"mlock": True}, False, False)
+    assert len(sg) == 1
+    assert sg[0].settings == {
+        "load-mode": "mmap+mlock",
+        "mlock": False,
+        "no-mmap": False,
+    }
+
+
+def test_legacy_no_mmap_alone_maps_to_load_mode_none():
+    sg = suggestions(_dense_caps(), {"no-mmap": True}, False, False)
+    assert sg[0].settings["load-mode"] == "none"
+
+
+def test_both_legacy_flags_map_to_load_mode_mlock():
+    sg = suggestions(_dense_caps(), {"mlock": True, "no-mmap": True}, False, False)
+    assert sg[0].settings["load-mode"] == "mlock"
+    assert "--mlock" in sg[0].text
+    assert "--no-mmap" in sg[0].text
+    assert "load-mode mlock" in sg[0].text
+
+
+def test_no_legacy_suggestion_on_ik_which_still_accepts_the_flags():
+    sg = suggestions(
+        _dense_caps(), {"mlock": True}, False, False, engine="ik_llama.cpp"
+    )
+    assert sg == []
+
+
+def test_no_legacy_suggestion_when_the_key_is_absent_or_false():
+    assert suggestions(_dense_caps(), {}, False, False) == []
+    assert suggestions(_dense_caps(), {"mlock": False}, False, False) == []

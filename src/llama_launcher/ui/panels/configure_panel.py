@@ -42,6 +42,7 @@ from llama_launcher.core.settings_catalog import (
     IK_EXTRA_KV_CACHE_TYPES,
     IK_EXTRA_SPEC_TYPES,
     KV_CACHE_TYPES,
+    accepts,
     for_engine,
     member_catalog,
     router_catalog,
@@ -928,15 +929,24 @@ class ConfigurePanel(QWidget):
         engine = self.engine_combo.currentData() or "llama.cpp"
         self._apply_engine_enums()
         self._apply_mode_to_settings_form()  # show/hide the ik group by active_catalog
+        # After the catalog/row visibility above, since it reads the new
+        # engine to decide whether --load-mode still wins over the legacy pair.
+        self._sync_load_mode_legacy()
         self._maybe_seed_default_image(engine)
         self.refresh_preview()
 
     def _sync_load_mode_legacy(self) -> None:
-        """Gray out --no-mmap/--mlock when load-mode is set (it wins in argv)."""
+        """Gray out --no-mmap/--mlock when load-mode is set (it wins in argv).
+        Only on an engine that actually accepts --load-mode; elsewhere the
+        flag never reaches argv, so it must not suppress anything."""
         lm = self._widgets.get("load-mode")
         if lm is None:
             return
-        load_mode_active = lm.value() != CATALOG["load-mode"].default
+        engine = self.engine_combo.currentData() or "llama.cpp"
+        load_mode_active = (
+            accepts(CATALOG["load-mode"], engine)
+            and lm.value() != CATALOG["load-mode"].default
+        )
         for key in ("no-mmap", "mlock"):
             w = self._widgets.get(key)
             if w is not None:

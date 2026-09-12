@@ -10,6 +10,56 @@ not on the release page, so the two never drift.
 
 ## [Unreleased]
 
+Mainline llama.cpp removed `--mlock`, `--no-mmap` and `--direct-io` from its
+argument parser at build 10902, so a profile carrying either of the first two
+aborts the launch against a current image. Both settings move to
+ik_llama.cpp, where they still work, and a profile still carrying one says so
+and offers `--load-mode` instead. `--override-tensor` stops claiming to be
+inapplicable on a dense model. The offload sweep no longer reports a winner
+with no memory figures behind it. The flag audit that should have caught the
+b10902 removals now catches the next one.
+
+### Changed
+
+- `--mlock` and `--no-mmap` are offered on ik_llama.cpp only. Mainline
+  rejects both from build 10902, so neither reaches a mainline launch from
+  the form, a profile JSON or the headless path, and `--load-mode` is the
+  mainline route to the same behaviour.
+- `--override-tensor` is a tuning knob on a mixture-of-experts model and
+  carries no recommendation on a dense one, where it stays usable and
+  unmarked. It places any tensor on any device, so no model makes it
+  inapplicable.
+- The `--mmproj-device` tooltip says the default follows `--device`, matching
+  b10902.
+
+### Added
+
+- A profile carrying `--mlock` or `--no-mmap` on a llama.cpp engine warns,
+  with the wording matching the route: a settings value is not sent and the
+  launch runs without it, while the same spelling in the raw arguments does
+  reach the launch and fails on an image from build 10902 on. A settings
+  value also offers a one-click move to the matching `--load-mode`.
+- The upstream flag audit reports both directions. Every flag the captured
+  build accepts is either catalogued, emitted directly by the launcher, or
+  listed in `tests/fixtures/unexposed_flags_mainline.txt`, and a flag on none
+  of those fails the suite naming itself, so regenerating the capture is the
+  audit.
+
+### Fixed
+
+- An ik profile carrying a leftover `--load-mode` value no longer silently
+  loses `--mlock` and `--no-mmap`. The suppression is gated on the engine
+  accepting `--load-mode`, which ik does not, and the two checkboxes stop
+  being greyed out on an ik form, including after switching engine in place.
+- The RAM shortfall wording treats a legacy `--mlock` as a lock only on an
+  engine that accepts it.
+- The offload sweep measures what it launches. Its own copy clears
+  `--log-disable` and `--log-colors` and negates a raw `--log-jsonl`, and it
+  refuses to start when the raw arguments carry `--log-disable` or a
+  `--log-colors` value upstream reads as on. Each of those hides the
+  load-time lines the sweep parses, and the sweep would otherwise name a
+  winner with no memory figures behind it.
+
 ## [0.2.0] - 2026-09-11
 
 The memory estimate is the headline. The Configure readout, the launch
