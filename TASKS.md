@@ -2,7 +2,8 @@
 
 ## Current phase
 
-Idle: no cycle open. v0.2.1 was cut on 2026-09-12 from
+Idle: no cycle open. v0.2.1 is tagged and released (2026-09-12) after all
+five owner smokes passed on the 5080 plus A2000 box against build 10920. v0.2.1 was cut on 2026-09-12 from
 fix/flag-availability-b10902, which landed the same day,
 from an audit of ghcr.io/ggml-org/llama.cpp:server at build 10902 against the
 catalog: SPEC 2.45, 2.46 and 2.47 are new, 2.12, 2.20 and 2.26 amended, and
@@ -124,7 +125,17 @@ verbosity route into the sweep.
       parse_overrides records CPU or card, not which card, so the output
       layer stays charged to the last card in the split even when
       'output\.weight=CUDA0' moves it. The readout's layer ranges and the
-      logits term follow the split, not the override.
+      logits term follow the split, not the override. Measured 2026-09-12
+      (DevDocs/llama_launcher/calibration-2026-09-12): the move is real
+      and worth 1122.37 MiB on the 27B, so the CUDA0 estimate reads that
+      much low under the override and CUDA1 the same high, while every
+      other term still lands; the run still fitted because the margin
+      covered it. When this lands, the walk already
+      matches with re.search exactly as llama.cpp's regex_search does, so
+      `output\.weight` must also move every blk.N.attn_output.weight to
+      the target card; the anchored `^output\.weight` is the pattern that
+      moves the output tensor alone, and any launcher text that suggests
+      the pattern should say so.
 - [ ] --device reordering is not modelled either way: --tensor-split indexes
       the device list, so --device CUDA1,CUDA0 with -ts 20,46 gives CUDA0 the
       larger share and the output layer, while the estimate reads the split
@@ -306,24 +317,41 @@ verbosity route into the sweep.
 
 ## Pending owner smokes
 
-- [ ] On the 5080 plus A2000 box against a b10902 image, launch a real
+- [x] Publish the GitHub release for v0.2.1. Done 2026-09-12 on the
+      owner's go, notes from `scripts/release-notes.sh 0.2.1`.
+- [x] On the 5080 plus A2000 box against a b10902 image, launch a real
       profile and confirm the server reaches ready with no unknown-argument
-      line in the log. This cycle is catalog work, so it is verified by
-      running, not by the suite.
-- [ ] On a dense model, confirm the --override-tensor row shows no dot and
+      line in the log. Done 2026-09-12 against build 10920 with the 27B
+      profile: "model loaded" and "listening", the only warnings the CORS
+      banner and the reasoning-preserve notice. Log filed in
+      DevDocs/llama_launcher/calibration-2026-09-12.
+- [x] On a dense model, confirm the --override-tensor row shows no dot and
       accepts a value, then launch with `-ot 'output\.weight=CUDA0'` and read
       the per-card buffer lines at verbosity 4 to confirm the output tensor
-      moved to card 0. The estimate will still charge it to the last card in
-      the split; that gap is an open item above.
-- [ ] Load a profile that still carries mlock, confirm the settings-route
+      moved to card 0. Done 2026-09-12 on the 27B (dense in the launcher's
+      sense, no expert tensors): CUDA0's model buffer grew from 8232.19 to
+      9745.60 MiB and CUDA1's shrank by the same 1513 MiB with the card
+      total unchanged. The split boundary moved two blocks in the same run
+      (45 blocks on CUDA0 by the KV and state lines against 43 on
+      2026-09-10), which is about 400 MiB of that; the rest is the
+      override, consistent with a q6_K output tensor (994.7 MiB) plus six
+      attn_output tensors the unanchored pattern also matched. The
+      estimate JSON at the same settings makes it exact: 1176885914 bytes
+      (1122.37 MiB) left CUDA1 for CUDA0, which is the q6_K output tensor
+      plus one q6_K and five q5_K attn_output tensors to within 2714
+      bytes. The row showed no dot and accepted the value, owner's report
+      2026-09-12.
+- [x] Load a profile that still carries mlock, confirm the settings-route
       warning appears and that clicking the load-mode suggestion clears both
-      the key and the warning in one go.
-- [ ] Put `--mlock` in a profile's raw args on a b10902 image and confirm the
+      the key and the warning in one go. Passed, owner's report 2026-09-12.
+- [x] Put `--mlock` in a profile's raw args on a b10902 image and confirm the
       raw-route warning appears and says the launch fails on an image that
-      new, then confirm it does fail if launched.
-- [ ] Run an offload sweep and confirm it still records memory figures per
+      new, then confirm it does fail if launched. Passed, owner's report
+      2026-09-12.
+- [x] Run an offload sweep and confirm it still records memory figures per
       point, and that a profile with `--log-disable` in its raw args is
-      refused rather than sweeping to a winner with zeroes.
+      refused rather than sweeping to a winner with zeroes. Passed, owner's
+      report 2026-09-12.
 - [x] Screenshots: checked, no re-shoot needed. The two rows this cycle
       removes from a mainline form sit immediately below config.png's
       captured fold, which ends at --lazy-mode, so the captured surface is
