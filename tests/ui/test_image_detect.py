@@ -82,3 +82,39 @@ def test_detect_uses_selected_engine(qtbot, monkeypatch):
     )
     w._launch.detect_image()
     assert seen["engine"] == "ik_llama.cpp"
+
+
+def test_detect_none_on_prism_points_at_the_build_tab(qtbot, monkeypatch):
+    monkeypatch.setattr(
+        mw.runtime, "list_local_images", lambda b, engine="llama.cpp": []
+    )
+    seen = {}
+    monkeypatch.setattr(
+        launch_controller.QMessageBox,
+        "information",
+        lambda parent, title, text: seen.setdefault("text", text),
+    )
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    panel = w._configure_panel
+    panel.engine_combo.setCurrentIndex(panel.engine_combo.findData("prism_llama.cpp"))
+    w._launch.detect_image()
+    assert "Build tab" in seen["text"] and "prism-custom" in seen["text"]
+    assert "pull" not in seen["text"]
+
+
+def test_detect_none_on_mainline_still_offers_a_pull(qtbot, monkeypatch):
+    monkeypatch.setattr(
+        mw.runtime, "list_local_images", lambda b, engine="llama.cpp": []
+    )
+    seen = {}
+    monkeypatch.setattr(
+        launch_controller.QMessageBox,
+        "information",
+        lambda parent, title, text: seen.setdefault("text", text),
+    )
+    w = mw.MainWindow()
+    qtbot.addWidget(w)
+    w._launch.detect_image()
+    assert "pull" in seen["text"]
+    assert "ghcr.io/ggml-org/llama.cpp:server" in seen["text"]

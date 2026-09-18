@@ -1,6 +1,6 @@
 from dataclasses import dataclass, replace
 
-from .spec import DEFAULT_PORT
+from .spec import DEFAULT_PORT, ENGINES, MAINLINE_FAMILY
 
 
 @dataclass(frozen=True)
@@ -20,17 +20,28 @@ class Setting:
     danger: bool = False
     option_help: tuple = ()  # multiselect only: ((option, help_text), ...)
     suggestions: tuple = ()  # int only: preset values offered in an editable combo
-    # Which engine surfaces this flag: "any" or "ik_llama.cpp"; build_catalog
-    # additionally uses "llama.cpp" for mainline-only CMake options.
-    engine: str = "any"
+    # Which engines surface this flag: "any" for every engine in ENGINES, one
+    # engine's name, or a tuple of names. build_catalog uses the same gate.
+    engine: str | tuple = "any"
     deprecated: bool = False  # superseded or defaulted on upstream; kept for old images
     secret: bool = False  # mask the editor (password field) -- e.g. api-key
 
 
+def engines_of(setting: "Setting") -> tuple:
+    """The engines a setting reaches: every engine for "any", the named one
+    for a string, the tuple itself otherwise."""
+    if setting.engine == "any":
+        return ENGINES
+    if isinstance(setting.engine, str):
+        return (setting.engine,)
+    return tuple(setting.engine)
+
+
 def accepts(setting: "Setting", engine: str) -> bool:
-    """Whether the chosen engine receives this setting at all: a setting
-    gated to one engine reaches only that engine's launch."""
-    return setting.engine == "any" or setting.engine == engine
+    """Whether the chosen engine receives this setting at all: an "any"
+    setting reaches every engine, a gated setting only the launches of the
+    engines it names."""
+    return setting.engine == "any" or engine in engines_of(setting)
 
 
 # engine_value() returns this when the flag is emitted with no value.
@@ -122,6 +133,9 @@ def engine_value(key: str, setting: "Setting", value, engine: str):
 # extras: offered by the UI only on the ik engine, dropped at emit time on a
 # mainline launch (mainline's parser has no such type).
 IK_EXTRA_SPEC_TYPES = ("suffix",)
+
+# Engines whose parser still takes the --mlock and --no-mmap pair.
+LEGACY_LOAD_ENGINES = ("ik_llama.cpp", "prism_llama.cpp")
 
 _ALL = [
     # Model & Context
@@ -293,6 +307,20 @@ _ALL = [
         "a lot of VRAM at a small quality cost; f16 (the default) is half precision, f32 is full.",
     ),
     Setting(
+        "kv-mean-center",
+        "--kv-mean-center",
+        "string",
+        "",
+        "GPU & Memory",
+        (),
+        engine="prism_llama.cpp",
+        tooltip="PrismML llama.cpp only. Path to a K-cache mean-centering bias "
+        "GGUF (inside the container, or on the host for a native launch) made "
+        "with the fork's tools/kv-mean-center: a fixed per-head, per-channel "
+        "bias is subtracted from K before it is quantized into the cache. "
+        "Requires cache-type-k q4_0.",
+    ),
+    Setting(
         "load-mode",
         "--load-mode",
         "enum",
@@ -332,12 +360,12 @@ _ALL = [
         False,
         "GPU & Memory",
         (),
-        engine="ik_llama.cpp",
+        engine=LEGACY_LOAD_ENGINES,
         deprecated=True,
-        tooltip="ik_llama.cpp only. Disable memory-mapping of the model file, "
-        "loading it fully into RAM instead. Mainline llama.cpp removed this "
-        "flag at build 10902; use load-mode 'none' there. Ignored when "
-        "load-mode is set.",
+        tooltip="ik_llama.cpp and PrismML llama.cpp only. Disable "
+        "memory-mapping of the model file, loading it fully into RAM instead. "
+        "Mainline llama.cpp removed this flag at build 10902; use load-mode "
+        "'none' there. Ignored when load-mode is set.",
     ),
     Setting(
         "mlock",
@@ -346,12 +374,13 @@ _ALL = [
         False,
         "GPU & Memory",
         (),
-        engine="ik_llama.cpp",
+        engine=LEGACY_LOAD_ENGINES,
         deprecated=True,
-        tooltip="ik_llama.cpp only. Lock the model in RAM so the OS never swaps "
-        "it out. Needs enough RAM and the privilege to lock memory. Mainline "
-        "llama.cpp removed this flag at build 10902; use load-mode "
-        "'mmap+mlock' there. Ignored when load-mode is set.",
+        tooltip="ik_llama.cpp and PrismML llama.cpp only. Lock the model in "
+        "RAM so the OS never swaps it out. Needs enough RAM and the "
+        "privilege to lock memory. Mainline llama.cpp removed this flag at "
+        "build 10902; use load-mode 'mmap+mlock' there. Ignored when "
+        "load-mode is set.",
     ),
     Setting(
         "split-mode",
@@ -3516,11 +3545,28 @@ MAINLINE_ONLY_FLAGS: frozenset = frozenset(
     }
 )
 
-# Applied here rather than as engine="llama.cpp" on 75 separate Setting() calls:
+# Flags mainline added after build 10685, the build PrismML's fork tracks; they
+# reach a mainline launch alone. Every other mainline-only flag reaches both
+# engines of MAINLINE_FAMILY.
+PRISM_LACKS_FLAGS: frozenset = frozenset(
+    {
+        "--kv-unified-per-slot",
+        "--lazy-mode",
+        "--n-cpu-ffn",
+        "--video-ffmpeg-dir",
+        "--video-fps",
+        "--video-timestamp-interval",
+    }
+)
+
+# Applied here rather than as an engine gate on 75 separate Setting() calls:
 # one list is auditable against the probe output, and a regenerated list is a
 # one-hunk diff instead of 75 scattered ones.
 _ALL = [
-    replace(s, engine="llama.cpp")
+    replace(
+        s,
+        engine="llama.cpp" if s.flag in PRISM_LACKS_FLAGS else MAINLINE_FAMILY,
+    )
     if s.engine == "any" and s.flag in MAINLINE_ONLY_FLAGS
     else s
     for s in _ALL
@@ -3591,6 +3637,6 @@ def member_catalog() -> dict:
 
 
 def for_engine(catalog: dict, engine: str) -> dict:
-    """Drop settings tagged for a different engine. 'any' settings always pass;
-    an engine-specific setting passes only when it matches `engine`."""
-    return {k: s for k, s in catalog.items() if s.engine == "any" or s.engine == engine}
+    """Drop settings gated to other engines. 'any' settings always pass; a
+    gated setting passes only when its gate names `engine`."""
+    return {k: s for k, s in catalog.items() if accepts(s, engine)}

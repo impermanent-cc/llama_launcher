@@ -1,6 +1,13 @@
 import struct
 
-from llama_launcher.core.gguf import parse_gguf_header, tensor_nbytes
+from llama_launcher.core.gguf import (
+    GgufMeta,
+    TensorInfo,
+    ftype_name,
+    parse_gguf_header,
+    prism_quant,
+    tensor_nbytes,
+)
 
 
 def _kv_str(key, val):
@@ -492,3 +499,50 @@ def test_sliding_window_pattern_absent_or_scalar_is_none():
         ]
     )
     assert parse_gguf_header(empty).sliding_window_pattern is None
+
+
+def test_prism_tensor_types_are_sized_at_their_block_size():
+    """PQ2_0 packs 128 elements into 34 bytes and PTQ1_0 into 28, so a
+    27B PTQ1_0 file sizes at its real 5.9 GB rather than two bytes per
+    element."""
+    assert tensor_nbytes(128, 142) == 34
+    assert tensor_nbytes(128, 143) == 28
+    assert tensor_nbytes(129, 143) == 56
+    assert tensor_nbytes(26869760000, 143) == 5877760000
+
+
+def test_prism_and_upstream_two_bit_file_types_have_names():
+    assert ftype_name(41) == "Q2_0"
+    assert ftype_name(141) == "PQ2_0"
+    assert ftype_name(142) == "PQ2_0"
+    assert ftype_name(143) == "PTQ1_0"
+    assert ftype_name(144) == "ftype144"
+
+
+def test_prism_quant_names_the_fork_only_type_from_the_tensor_table():
+    """The name comes from the tensor table, not the file type: a file
+    whose header claims a type its tensors do not use is not a PrismML
+    file, and one whose weights are PTQ1_0 is, whatever the header says."""
+    q = TensorInfo("blk.0.attn_q.weight", 128, 143, 28)
+    norm = TensorInfo("blk.0.attn_norm.weight", 128, 0, 512)
+    assert prism_quant(GgufMeta(tensors=(norm, q))) == "PTQ1_0"
+    assert prism_quant(GgufMeta(tensors=(TensorInfo("w", 128, 142, 34),))) == "PQ2_0"
+    assert prism_quant(GgufMeta(quant="PTQ1_0", tensors=(norm,))) == ""
+    assert prism_quant(GgufMeta(tensors=(TensorInfo("w", 128, 41, 18),))) == ""
+    assert prism_quant(GgufMeta()) == ""
+    assert prism_quant(None) == ""
+
+
+def test_parse_reads_a_prism_file_type_by_name():
+    kvs = [
+        _kv_str("general.architecture", "qwen35"),
+        _kv_u32("general.file_type", 143),
+    ]
+    blob = (
+        b"GGUF"
+        + struct.pack("<I", 3)
+        + struct.pack("<Q", 0)
+        + struct.pack("<Q", len(kvs))
+        + b"".join(kvs)
+    )
+    assert parse_gguf_header(blob).quant == "PTQ1_0"

@@ -685,17 +685,24 @@ class LaunchController:
         engine = self.window._configure_panel.engine_combo.currentData() or "llama.cpp"
         images = runtime.list_local_images(binary, engine)
         if not images:
-            example = (
-                "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
-                if engine == "ik_llama.cpp"
-                else "ghcr.io/ggml-org/llama.cpp:server"
-            )
-            QMessageBox.information(
-                self.window,
-                "Detect image",
-                f"No local {engine} images found for '{binary}'.\n"
-                f"Pull one (e.g. {binary} pull {example}) or type the image yourself.",
-            )
+            if engine == "prism_llama.cpp":
+                text = (
+                    f"No local PrismML images found for '{binary}'.\n"
+                    "No registry publishes one: build an image on the Build tab "
+                    "(it is tagged prism-custom:...) or type the tag of one you "
+                    "built yourself."
+                )
+            else:
+                example = (
+                    "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
+                    if engine == "ik_llama.cpp"
+                    else "ghcr.io/ggml-org/llama.cpp:server"
+                )
+                text = (
+                    f"No local {engine} images found for '{binary}'.\n"
+                    f"Pull one (e.g. {binary} pull {example}) or type the image yourself."
+                )
+            QMessageBox.information(self.window, "Detect image", text)
             return
         if len(images) == 1:
             self.window._configure_panel.image_edit.setText(images[0])

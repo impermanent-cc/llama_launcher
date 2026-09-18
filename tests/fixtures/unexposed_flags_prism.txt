@@ -1,0 +1,13 @@
+# Flags PrismML llama.cpp's llama-server accepts that the launcher does not
+# use on a PrismML launch, and that mainline build 10902 no longer accepts,
+# so unexposed_flags_mainline.txt cannot carry them. A flag that list
+# already carries is not repeated here.
+# --load-mode dio and mmap cover --direct-io and --mmap. --rpc is what the
+# RPC pool launch appends directly; the mainline fixture image is built
+# without RPC, so the structural table cannot name it.
+--direct-io
+--mmap
+--no-direct-io
+--rpc
+-dio
+-ndio

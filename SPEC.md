@@ -14,14 +14,15 @@ remote nodes, with the state of the running server visible in the GUI.
 
 ## 2. Requirements
 
-2.1 A profile is the unit of configuration: engine (mainline llama.cpp or
-ik_llama.cpp), image or native binary, model path, GPU mode, and any
+2.1 A profile is the unit of configuration: engine (mainline llama.cpp,
+ik_llama.cpp or PrismML llama.cpp), image or native binary, model path, GPU mode, and any
 catalogued llama-server setting. `--dry-run --profile NAME` prints the
 exact command without launching.
 
 2.2 The settings catalog exposes only flags the chosen engine accepts;
-mainline-only flags never reach an ik launch, and options only ik defines
-never reach a mainline build command. Re-audits against upstream
+a flag one engine lacks never reaches that engine's launch, and options
+only one engine defines never reach another engine's build command. A
+setting's engine gate is a set of engines, `any` meaning all of them. Re-audits against upstream
 `common/arg.cpp` and the CMake option lists are periodic maintenance,
 carried out by hand: the flag fixtures are the suite's only upstream
 oracle, and the build catalog has none.
@@ -110,7 +111,7 @@ RAM as the input layer; a model without an `output.weight` tensor reuses
 them as its output matrix, and that copy is placed with the output layer.
 
 2.16 GPU layers are distributed across cards by `--tensor-split` when set
-and otherwise in proportion to each card's free VRAM, as both engines do.
+and otherwise in proportion to each card's free VRAM, as every engine does.
 A layer's KV cache is placed with its layer, and `--no-kv-offload` moves
 all of it to RAM. Split mode `row` places weights by the same proportion
 and the KV cache and compute buffer on `--main-gpu`; split mode `none`
@@ -265,13 +266,14 @@ detached container named `llama-<slug>-sweep`, waits for `/health` up to a
 ready timeout (panel field, default 600 seconds), reads the memory lines
 from the container log, runs the benchmark with the panel's current prompt
 sizes, n-predict, warmup and repeats, stops and removes the container, and
-proceeds to the next count; on mainline llama.cpp the launch carries log
-verbosity 4 when the profile's is lower, on other engines the profile's
-own. The sweep's own copy also clears `--log-disable` and `--log-colors`,
-and appends `--no-log-jsonl` to the raw arguments only where they already
-carry `--log-jsonl` and not its negation, the later token winning; a build
-that does not know `--log-jsonl` rejects its negation, so the sweep never
-adds it unprompted and never adds a second one.
+proceeds to the next count; on mainline llama.cpp and PrismML llama.cpp
+the launch carries log verbosity 4 when the profile's is lower, on other
+engines the profile's own. The sweep's own copy also clears `--log-disable`
+and `--log-colors`, and appends `--no-log-jsonl` to the raw arguments only
+where they already carry `--log-jsonl` and not its negation, the later
+token winning; a build that does not know `--log-jsonl` rejects its
+negation, so the sweep never adds it unprompted and never adds a second
+one.
 `--log-file` is left as the profile sets it, since it does not suppress the
 console log. It refuses, with a one-line message in the panel, a native, RPC, router or remote-node profile, a profile with no
 model, an engine that does not accept the sweep's knob, raw arguments that
@@ -384,7 +386,7 @@ with the keys `value`, `layers_per_card`, `boundary_layers` and `fits`, the
 last being whether the split alone fits with no offload; the key is absent
 whenever 2.33 computes no split. When every card fits, the readout and its
 messages are unchanged and the split is carried in the JSON alone. A card
-shortfall message, on either engine and whether or not ik keeps experts in
+shortfall message, on any engine and whether or not ik keeps experts in
 RAM by 2.23, names the balanced split only where applying it would be an
 improvement: it places layers differently from the split the profile
 already resolves to, and it either fits on its own or needs a smaller
@@ -467,10 +469,10 @@ precision they already have.
 above 1: mainline llama.cpp serves speculative decoding on every slot. The
 warning that draft-mtp ignores `--mmproj` stays.
 
-2.45 `--mlock` and `--no-mmap` are offered on ik_llama.cpp only. Mainline
-llama.cpp rejects both from build 10902, so neither reaches a mainline
-launch from the form, a profile JSON or the headless path; `--load-mode` is
-the mainline route to the same behaviour.
+2.45 `--mlock` and `--no-mmap` are offered on ik_llama.cpp and PrismML
+llama.cpp only. Mainline llama.cpp rejects both from build 10902, so
+neither reaches a mainline launch from the form, a profile JSON or the
+headless path; `--load-mode` is the mainline route to the same behaviour.
 
 2.46 A profile carrying `--mlock` or `--no-mmap` on a llama.cpp engine
 raises a validation warning, never an error, since an older mainline image
@@ -491,6 +493,63 @@ names itself. Regenerating that fixture is the flag audit, and it reports
 three directions: a catalogued flag the build no longer accepts, a directly
 emitted flag it no longer accepts, and a newly accepted flag nothing accounts
 for. The ik capture keeps the catalogued direction alone.
+
+2.48 PrismML's fork of llama.cpp (https://github.com/PrismML-Eng/llama.cpp,
+branch `prism`, releases tagged `prism-b<N>-<sha>`) is the third engine.
+A profile stores it as `prism_llama.cpp`; Configure and Build display it
+as "PrismML llama.cpp"; build outputs use the short name `prism`. A
+profile JSON without an engine still loads as mainline llama.cpp. README
+carries an engine section beside the ik_llama.cpp one that names the
+Linux release tarballs (CUDA 12.4 and 12.8, Vulkan, ROCm, CPU) for a
+native launch and the Build tab route for a CUDA 13 host.
+
+2.49 The PrismML engine's server is mainline llama.cpp at build 10685. It
+receives every setting mainline receives except the flags mainline added
+after that build: `--kv-unified-per-slot`, `--lazy-mode`, `--n-cpu-ffn`,
+`--log-jsonl`, `--spec-synth-len`, `--spec-synth-rates`,
+`--video-ffmpeg-dir`, `--video-fps` and `--video-timestamp-interval`,
+which never reach a PrismML launch from the form, a profile JSON or the
+headless path (the six of these the catalog exposes are gated away from the
+engine; `--log-jsonl` and the two `--spec-synth` flags are exposed for no
+engine). It also receives the two legacy flags of 2.45 and one flag
+of its own, `--kv-mean-center FNAME`, a path row shown for this engine
+alone; a profile that sets it with `--cache-type-k` other than `q4_0`
+raises a validation warning naming the requirement. `--direct-io` is not
+exposed as a row: `--load-mode dio` reaches the engine instead.
+
+2.50 The PrismML flag fixture, `tests/fixtures/prism_llama_server_flags_b10685.txt`,
+is captured by `tests/fixtures/regen_prism_flags.sh <tag>`, which downloads
+that release's Ubuntu x64 CPU tarball and dumps its llama-server `--help`;
+the binary's runpath finds its libraries, so no environment is set. The
+audit of 2.47 runs against it in the same three directions, the flags the
+launcher does not use on purpose being the mainline unexposed list plus
+`tests/fixtures/unexposed_flags_prism.txt` for the flags this engine
+accepts that build 10902 dropped.
+
+2.51 The GGUF reader sizes the fork's private tensor types at their block
+size: type 142 (PQ2_0) at 34 bytes per 128 elements and type 143 (PTQ1_0)
+at 28 bytes per 128 elements, so a PTQ1_0 file estimates within its file
+size rather than at two bytes per element. File types 41, 141, 142 and
+143 read as Q2_0, PQ2_0, PQ2_0 and PTQ1_0 in the model readout.
+
+2.52 A model whose weight tensors are PQ2_0 or PTQ1_0 under a mainline or
+ik_llama.cpp engine raises a preflight warning, never an error, that names
+the type, states that those engines reject the file and that the image or
+native binary must be a PrismML build, and offers a suggestion that sets
+the engine to PrismML llama.cpp and changes nothing else.
+
+2.53 The estimate prices a PrismML launch at mainline's compute scale and
+mainline's default slot count of four until a calibration record for the
+engine exists.
+
+2.54 No registry publishes a PrismML image, so the engine has no default
+image: the Image field's placeholder says so and points at the Build tab,
+and Detect lists the locally present images whose name contains `prism`,
+which is what the Build tab tags its PrismML outputs.
+
+2.55 The Build tab offers the PrismML engine with its repository and the
+default ref `prism`, mainline's CMake option set, and one option gated to
+this engine alone, `GGML_CUDA_HOPPER_Q1` (off by default).
 
 ## 3. Constraints
 
@@ -558,6 +617,14 @@ walk for it.
 - `--log-jsonl` (llama.cpp build 10902 and later): one JSON object per
   line defeats the line-anchored load-time and MTP regexes read from the
   log of every launch the launcher owns.
+- Fetching a PrismML release tarball from the app; the README names the
+  asset and the binary field takes its llama-server.
+- Generating a `--kv-mean-center` bias file (the fork's tools/kv-mean-center).
+- PrismML's Windows and macOS tarballs and MLX weights.
+- RPC pooling and remote nodes on the PrismML engine: nothing blocks them
+  and nothing smokes them.
+- A PrismML-specific compute scale before a calibration record from a
+  measured launch exists; until then 2.53 applies.
 - Synthetic speculative acceptance flags (--spec-synth-len,
   --spec-synth-rates): upstream marks them benchmarking only and they
   falsify acceptance, so a profile carrying them serves nonsense.

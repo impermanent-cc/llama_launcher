@@ -48,6 +48,7 @@ from llama_launcher.core.build_outputs import (
 )
 from llama_launcher.core.build_spec import BuildConfig, BuildOutput
 from llama_launcher.core.settings_catalog import for_engine
+from llama_launcher.core.spec import ENGINE_LABELS, ENGINES
 from llama_launcher.services.gpu import query_compute_caps
 from llama_launcher.services.runtime import list_images_detailed, remove_image
 from llama_launcher.store.builds import (
@@ -206,8 +207,8 @@ class BuildPanel(QWidget):
         self._left_form.addRow("Saved config", config_widget)
 
         self.engine_combo = NoWheelComboBox()
-        self.engine_combo.addItem("llama.cpp", "llama.cpp")
-        self.engine_combo.addItem("ik_llama.cpp", "ik_llama.cpp")
+        for eng in ENGINES:
+            self.engine_combo.addItem(ENGINE_LABELS[eng], eng)
         self._left_form.addRow("Engine", self.engine_combo)
 
         self.target_combo = NoWheelComboBox()
@@ -265,7 +266,7 @@ class BuildPanel(QWidget):
         body.addWidget(left_scroll, 3)
 
         # RIGHT: catalog options, grouped, rebuilt whenever the engine flips
-        # (the two repos' CMake catalogs genuinely differ, not just which
+        # (the repos' CMake catalogs genuinely differ, not just which
         # rows are visible -- see BUILD_CATALOG's per-setting `engine` gate).
         right_scroll = QScrollArea()
         right_scroll.setWidgetResizable(True)

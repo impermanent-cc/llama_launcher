@@ -48,13 +48,18 @@ def test_defrag_thold_is_never_offered_on_mainline():
     assert CATALOG["defrag-thold"].deprecated is False
 
 
-def test_legacy_load_flags_reach_ik_only():
+def test_legacy_load_flags_reach_ik_and_prism_only():
     """Mainline llama.cpp rejects --mlock and --no-mmap from build 10902, so
-    neither reaches a mainline launch; ik still accepts both."""
+    neither reaches a mainline launch; ik_llama.cpp and PrismML llama.cpp
+    (mainline at build 10685) still accept both."""
+    from llama_launcher.core.settings_catalog import LEGACY_LOAD_ENGINES, engines_of
+
+    assert LEGACY_LOAD_ENGINES == ("ik_llama.cpp", "prism_llama.cpp")
     for key in ("mlock", "no-mmap"):
-        assert CATALOG[key].engine == "ik_llama.cpp"
+        assert engines_of(CATALOG[key]) == LEGACY_LOAD_ENGINES
         assert key not in for_engine(CATALOG, "llama.cpp")
         assert key in for_engine(CATALOG, "ik_llama.cpp")
+        assert key in for_engine(CATALOG, "prism_llama.cpp")
 
 
 def test_enum_defaults_are_within_enum():
@@ -632,3 +637,92 @@ def test_fit_emission_per_engine():
     assert engine_value("fit", fit, "off", "ik_llama.cpp") is SKIP
     assert engine_value("fit", fit, "unset", "ik_llama.cpp") is SKIP
     assert "ik_llama.cpp" in fit.tooltip and "off" in fit.tooltip
+
+
+def test_engines_of_expands_any_and_wraps_a_string():
+    from llama_launcher.core.settings_catalog import Setting, engines_of
+    from llama_launcher.core.spec import ENGINES
+
+    s_any = Setting("k", "--k", "bool", False, "G")
+    s_one = Setting("k", "--k", "bool", False, "G", engine="ik_llama.cpp")
+    s_two = Setting(
+        "k", "--k", "bool", False, "G", engine=("ik_llama.cpp", "prism_llama.cpp")
+    )
+    assert engines_of(s_any) == ENGINES
+    assert engines_of(s_one) == ("ik_llama.cpp",)
+    assert engines_of(s_two) == ("ik_llama.cpp", "prism_llama.cpp")
+
+
+def test_accepts_and_for_engine_honour_a_tuple_gate():
+    from llama_launcher.core.settings_catalog import Setting, accepts, for_engine
+
+    s = Setting(
+        "k", "--k", "bool", False, "G", engine=("ik_llama.cpp", "prism_llama.cpp")
+    )
+    assert accepts(s, "ik_llama.cpp") and accepts(s, "prism_llama.cpp")
+    assert not accepts(s, "llama.cpp")
+    assert "k" in for_engine({"k": s}, "prism_llama.cpp")
+    assert "k" not in for_engine({"k": s}, "llama.cpp")
+
+
+def test_prism_receives_mainline_flags_except_the_post_10685_ones():
+    """PrismML's server is mainline at build 10685: every mainline setting
+    reaches it except the flags mainline added after that build."""
+    from llama_launcher.core.settings_catalog import PRISM_LACKS_FLAGS, for_engine
+
+    prism = for_engine(CATALOG, "prism_llama.cpp")
+    mainline = for_engine(CATALOG, "llama.cpp")
+    for key in ("load-mode", "fit", "kv-unified", "ctx-size", "spec-type"):
+        assert key in prism, key
+    for key in (
+        "n-cpu-ffn",
+        "tensor-read-lazy",
+        "kv-unified-per-slot",
+        "video-fps",
+        "video-ffmpeg-dir",
+        "video-timestamp-interval",
+    ):
+        assert key not in prism, key
+        assert key in mainline, key
+    assert {CATALOG[k].flag for k in mainline if k not in prism} == set(
+        PRISM_LACKS_FLAGS
+    )
+
+
+def test_prism_lacks_flags_are_a_subset_of_the_mainline_only_list():
+    """The retag pass only visits flags in MAINLINE_ONLY_FLAGS, so a flag
+    the fork lacks has to be in that list to be gated away from it."""
+    from llama_launcher.core.settings_catalog import (
+        MAINLINE_ONLY_FLAGS,
+        PRISM_LACKS_FLAGS,
+    )
+
+    assert PRISM_LACKS_FLAGS <= MAINLINE_ONLY_FLAGS
+    assert len(PRISM_LACKS_FLAGS) == 6
+
+
+def test_kv_mean_center_is_a_prism_only_path_setting():
+    from llama_launcher.core.settings_catalog import for_engine
+
+    s = CATALOG["kv-mean-center"]
+    assert s.flag == "--kv-mean-center"
+    assert s.type == "string" and s.default == ""
+    assert s.engine == "prism_llama.cpp"
+    assert s.group == CATALOG["cache-type-k"].group
+    assert "kv-mean-center" in for_engine(CATALOG, "prism_llama.cpp")
+    assert "kv-mean-center" not in for_engine(CATALOG, "llama.cpp")
+    assert "kv-mean-center" not in for_engine(CATALOG, "ik_llama.cpp")
+
+
+def test_an_unknown_engine_string_still_receives_any_settings():
+    """A profile whose engine names no known engine (a hand-edited JSON, a
+    profile written by a newer version) still launches with the shared
+    settings; only gated settings are withheld from it."""
+    from llama_launcher.core.settings_catalog import accepts, for_engine
+
+    assert accepts(CATALOG["ctx-size"], "future_llama.cpp")
+    assert not accepts(CATALOG["mlock"], "future_llama.cpp")
+    assert not accepts(CATALOG["kv-mean-center"], "future_llama.cpp")
+    cat = for_engine(CATALOG, "future_llama.cpp")
+    assert "ctx-size" in cat and "port" in cat
+    assert "mlock" not in cat and "n-cpu-ffn" not in cat

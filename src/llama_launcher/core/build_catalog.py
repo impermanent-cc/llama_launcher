@@ -1,9 +1,11 @@
 """CMake build-option catalog for the Build tab.
 
 Setting.flag holds the bare CMake variable (no -D); the renderer prepends -D.
-Engine gate: "any" = option exists in BOTH repos; "llama.cpp"/"ik_llama.cpp" =
-only that repo has it. The inventory follows both repos' root + ggml
-CMakeLists.txt.
+Engine gate: "any" = option exists in every repo; "llama.cpp" = mainline's
+option, which PrismML's fork (mainline's CMake files plus GGML_CUDA_HOPPER_Q1)
+also has, so the gate is widened to MAINLINE_FAMILY below; "ik_llama.cpp" and
+"prism_llama.cpp" = only that repo has it. The inventory follows each repo's
+root + ggml CMakeLists.txt.
 
 Deviations from a literal grep of those files:
 - CMAKE_CUDA_ARCHITECTURES is a native CMake variable (not project-defined via
@@ -27,14 +29,22 @@ debug+validate+shader-debug options, RISC-V/LoongArch/s390x ISA options, MUSA
 sub-options, tests/examples toggles beyond the LLAMA_BUILD_* set carried below.
 """
 
+from dataclasses import replace
+
 from .settings_catalog import Setting
+from .spec import MAINLINE_FAMILY
 
 REPO_URL = {
     "llama.cpp": "https://github.com/ggml-org/llama.cpp",
     "ik_llama.cpp": "https://github.com/ikawrakow/ik_llama.cpp",
+    "prism_llama.cpp": "https://github.com/PrismML-Eng/llama.cpp",
 }
-DEFAULT_BRANCH = {"llama.cpp": "master", "ik_llama.cpp": "main"}
-ENGINE_SHORT = {"llama.cpp": "llama", "ik_llama.cpp": "ik"}
+DEFAULT_BRANCH = {
+    "llama.cpp": "master",
+    "ik_llama.cpp": "main",
+    "prism_llama.cpp": "prism",
+}
+ENGINE_SHORT = {"llama.cpp": "llama", "ik_llama.cpp": "ik", "prism_llama.cpp": "prism"}
 
 _ALL = [
     # Backend
@@ -320,6 +330,17 @@ _ALL = [
         tooltip="CUDA link binary compression mode (requires CUDA 12.8+). "
         "'size' (the default) favors a smaller binary; 'speed' favors "
         "faster linking.",
+    ),
+    Setting(
+        "cuda-hopper-q1",
+        "GGML_CUDA_HOPPER_Q1",
+        "bool",
+        False,
+        "CUDA tuning",
+        (),
+        engine="prism_llama.cpp",
+        tooltip="PrismML llama.cpp only. Opt-in sm_90a wgmma path for Q1_0 and "
+        "PQ2_0 prefill on Hopper GPUs; off by default.",
     ),
     Setting(
         "cuda-nccl",
@@ -993,6 +1014,12 @@ _ALL = [
         "leaves the CMake cache value empty, which falls back to the "
         "code's built-in default of 64.",
     ),
+]
+
+# A mainline-only CMake option is PrismML's too: the fork's CMake files are
+# mainline's plus one option of its own.
+_ALL = [
+    replace(s, engine=MAINLINE_FAMILY) if s.engine == "llama.cpp" else s for s in _ALL
 ]
 
 BUILD_CATALOG: dict = {s.key: s for s in _ALL}

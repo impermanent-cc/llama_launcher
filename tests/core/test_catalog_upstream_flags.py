@@ -5,15 +5,18 @@ tests assert that the app EMITS a flag, which stays green even when the server
 rejects it (a flag upstream has renamed, or a mainline-only flag reaching an
 ik_llama.cpp launch).
 
-Two engines, two fixtures, and they are NOT gathered the same way:
+Three engines, three fixtures, and they are NOT gathered the same way:
 
 * mainline (`llama_server_flags_b10902.txt`) is a straight `--help` dump.
 * ik (`ik_llama_server_flags_cu12.txt`) is `--help` PLUS flags confirmed by
   executing them, because ik's help under-reports its own parser.
+* PrismML (`prism_llama_server_flags_b10685.txt`) is a straight `--help` dump
+  of the release tarball's binary, captured by regen_prism_flags.sh.
 
-Regenerate with tests/fixtures/regen_flags.sh and regen_ik_flags.sh when moving
-to newer images, then read the diff: a flag that disappears means the engine
-renamed or dropped it, and the catalog has to follow.
+Regenerate with tests/fixtures/regen_flags.sh, regen_ik_flags.sh and
+regen_prism_flags.sh when moving to newer images, then read the diff: a flag
+that disappears means the engine renamed or dropped it, and the catalog has
+to follow.
 """
 
 import functools
@@ -25,6 +28,8 @@ from llama_launcher.core.command_builder import _STRUCTURAL_ALIASES
 from llama_launcher.core.settings_catalog import (
     CATALOG,
     MAINLINE_ONLY_FLAGS,
+    PRISM_LACKS_FLAGS,
+    engines_of,
     for_engine,
 )
 
@@ -39,15 +44,20 @@ FIXTURE = (
 # from what the launcher emits.
 MAINLINE_KEYS = sorted(for_engine(CATALOG, "llama.cpp"))
 IK_KEYS = sorted(for_engine(CATALOG, "ik_llama.cpp"))
+PRISM_KEYS = sorted(for_engine(CATALOG, "prism_llama.cpp"))
+
+
+def _flags_in(path: pathlib.Path) -> frozenset[str]:
+    return frozenset(
+        ln.strip()
+        for ln in path.read_text().splitlines()
+        if ln.strip() and not ln.startswith("#")
+    )
 
 
 @functools.cache
 def _upstream_flags() -> frozenset[str]:
-    return frozenset(
-        ln.strip()
-        for ln in FIXTURE.read_text().splitlines()
-        if ln.strip() and not ln.startswith("#")
-    )
+    return _flags_in(FIXTURE)
 
 
 def test_fixture_looks_like_a_real_help_dump():
@@ -98,11 +108,7 @@ IK_FIXTURE = (
 
 @functools.cache
 def _ik_flags() -> frozenset[str]:
-    return frozenset(
-        ln.strip()
-        for ln in IK_FIXTURE.read_text().splitlines()
-        if ln.strip() and not ln.startswith("#")
-    )
+    return _flags_in(IK_FIXTURE)
 
 
 def test_ik_fixture_looks_like_a_real_capture():
@@ -142,6 +148,9 @@ def test_parametrised_selections_cover_the_engine_specific_buckets():
     assert any(CATALOG[k].engine == "llama.cpp" for k in MAINLINE_KEYS)
     assert not any(CATALOG[k].engine == "llama.cpp" for k in IK_KEYS)
     assert not any(CATALOG[k].engine == "ik_llama.cpp" for k in MAINLINE_KEYS)
+    assert any(CATALOG[k].engine == "prism_llama.cpp" for k in PRISM_KEYS)
+    assert not any(CATALOG[k].engine == "llama.cpp" for k in PRISM_KEYS)
+    assert not any(CATALOG[k].engine == "ik_llama.cpp" for k in PRISM_KEYS)
 
 
 def test_mainline_only_flags_are_actually_absent_from_ik():
@@ -165,8 +174,18 @@ def test_every_mainline_only_flag_still_exists_in_the_catalog():
 
 def test_retag_actually_took_effect():
     # MAINLINE_ONLY_FLAGS is applied by a post-pass over _ALL; if that pass were
-    # dropped, every test above would still pass while ik launches broke.
-    tagged = {s.flag for s in CATALOG.values() if s.engine == "llama.cpp"}
+    # dropped, every test above would still pass while ik launches broke. Settings
+    # gated away from ik_llama.cpp by an explicit engine= on their own Setting()
+    # call (kv-mean-center, the legacy load pair) are excluded: they were never
+    # "any" before the pass and so are not evidence the pass ran.
+    from llama_launcher.core.spec import MAINLINE_FAMILY
+
+    tagged = {
+        s.flag
+        for s in CATALOG.values()
+        if s.engine in ("llama.cpp", MAINLINE_FAMILY)
+        and "ik_llama.cpp" not in engines_of(s)
+    }
     assert tagged == set(MAINLINE_ONLY_FLAGS)
 
 
@@ -179,11 +198,7 @@ UNEXPOSED_FIXTURE = (
 
 @functools.cache
 def _unexposed_flags() -> frozenset[str]:
-    return frozenset(
-        ln.strip()
-        for ln in UNEXPOSED_FIXTURE.read_text().splitlines()
-        if ln.strip() and not ln.startswith("#")
-    )
+    return _flags_in(UNEXPOSED_FIXTURE)
 
 
 def _catalog_covered_flags() -> frozenset[str]:
@@ -242,3 +257,128 @@ def test_structural_aliases_are_accepted_by_the_build():
         "command_builder._STRUCTURAL_ALIASES, or services.sweep.sweep_profile, "
         "not the fixture."
     )
+
+
+# -- PrismML llama.cpp --------------------------------------------------------
+# The fork's server is mainline's parser at build 10685: it lacks the flags
+# mainline added after that build and keeps the pair mainline dropped at 10902.
+
+PRISM_FIXTURE = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "prism_llama_server_flags_b10685.txt"
+)
+PRISM_UNEXPOSED_FIXTURE = (
+    pathlib.Path(__file__).resolve().parents[1]
+    / "fixtures"
+    / "unexposed_flags_prism.txt"
+)
+# The sweep appends --no-log-jsonl beside a raw --log-jsonl alone, and build
+# 10685 knows neither, so this is the one structural flag the fork never sees.
+PRISM_STRUCTURAL_EXEMPT = frozenset({"--no-log-jsonl"})
+
+
+@functools.cache
+def _prism_flags() -> frozenset[str]:
+    return _flags_in(PRISM_FIXTURE)
+
+
+@functools.cache
+def _prism_unexposed() -> frozenset[str]:
+    return _flags_in(PRISM_UNEXPOSED_FIXTURE)
+
+
+def _prism_covered_flags() -> frozenset[str]:
+    out = set()
+    for s in for_engine(CATALOG, "prism_llama.cpp").values():
+        out.add(s.flag)
+        out.update(s.aliases or ())
+    out.update(_STRUCTURAL_ALIASES)
+    return frozenset(out)
+
+
+def test_prism_fixture_looks_like_a_real_help_dump():
+    flags = _prism_flags()
+    assert len(flags) > 200
+    for anchor in (
+        "--port",
+        "--host",
+        "--model",
+        "--lora",
+        "--ctx-size",
+        "--load-mode",
+        "--mlock",
+        "--kv-mean-center",
+    ):
+        assert anchor in flags
+
+
+@pytest.mark.parametrize("key", PRISM_KEYS)
+def test_setting_reaching_prism_is_accepted_by_prism(key):
+    setting = CATALOG[key]
+    assert setting.flag in _prism_flags(), (
+        f"{key}: engine={setting.engine!r} means this reaches a PrismML launch, "
+        f"but the release does not accept {setting.flag}. If mainline added it "
+        "after build 10685, add it to PRISM_LACKS_FLAGS; if it is PrismML-only, "
+        "fix the spelling or drop the setting."
+    )
+
+
+def test_prism_lacks_flags_are_absent_from_prism_and_present_on_mainline():
+    """Both directions of the lacking list: a listed flag the release does
+    accept hides a working setting, and a listed flag mainline no longer
+    accepts is dead weight."""
+    wrongly_hidden = sorted(f for f in PRISM_LACKS_FLAGS if f in _prism_flags())
+    assert wrongly_hidden == []
+    gone_upstream = sorted(f for f in PRISM_LACKS_FLAGS if f not in _upstream_flags())
+    assert gone_upstream == []
+
+
+def test_every_mainline_flag_prism_rejects_is_listed_as_lacking():
+    """Exactly the lacking list separates the two mainline-family catalogs."""
+    rejected = sorted(
+        {
+            s.flag
+            for s in for_engine(CATALOG, "llama.cpp").values()
+            if s.flag not in _prism_flags()
+        }
+    )
+    assert rejected == sorted(PRISM_LACKS_FLAGS)
+
+
+def test_every_flag_prism_accepts_is_catalogued_or_recorded_as_unexposed():
+    unaccounted = sorted(
+        _prism_flags()
+        - _prism_covered_flags()
+        - _unexposed_flags()
+        - _prism_unexposed()
+    )
+    assert unaccounted == [], (
+        f"PrismML llama-server accepts these and nothing accounts for them: "
+        f"{unaccounted}. Add a Setting, or add each to "
+        f"{PRISM_UNEXPOSED_FIXTURE.name} (or the mainline list if mainline "
+        "accepts it too) to record it as deliberately unexposed."
+    )
+
+
+def test_prism_unexposed_list_carries_nothing_the_release_rejects():
+    stale = sorted(_prism_unexposed() - _prism_flags())
+    assert stale == [], f"{PRISM_UNEXPOSED_FIXTURE.name} lists rejected flags: {stale}"
+
+
+def test_prism_unexposed_list_repeats_nothing_and_overlaps_no_setting():
+    repeated = sorted(_prism_unexposed() & _unexposed_flags())
+    assert repeated == [], f"already in the mainline list: {repeated}"
+    both = sorted(_prism_unexposed() & _prism_covered_flags())
+    assert both == [], f"listed as unexposed but catalogued: {both}"
+
+
+def test_structural_aliases_are_accepted_by_prism():
+    missing = sorted(
+        f
+        for f in _STRUCTURAL_ALIASES
+        if f not in _prism_flags() and f not in PRISM_STRUCTURAL_EXEMPT
+    )
+    assert missing == []
+    assert PRISM_STRUCTURAL_EXEMPT <= set(_STRUCTURAL_ALIASES)
+    assert not (PRISM_STRUCTURAL_EXEMPT & _prism_flags())

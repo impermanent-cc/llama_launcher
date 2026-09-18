@@ -2,29 +2,54 @@
 
 ## Current phase
 
-Idle: no cycle open. v0.2.1 is tagged and released (2026-09-12) after all
-five owner smokes passed on the 5080 plus A2000 box against build 10920. v0.2.1 was cut on 2026-09-12 from
-fix/flag-availability-b10902, which landed the same day,
-from an audit of ghcr.io/ggml-org/llama.cpp:server at build 10902 against the
-catalog: SPEC 2.45, 2.46 and 2.47 are new, 2.12, 2.20 and 2.26 amended, and
---log-jsonl is recorded out of scope. Next: whatever the owner picks from
-ROADMAP.md "Next"; the Gemma tied output tensor and the balanced split in the
-sweep remain the two estimate items that measured runs already motivate, and
-the open items below carry three follow-ups this cycle deliberately left,
-the live-launch log warnings, the SPEC 2.46 load-mode refinement and the raw
-verbosity route into the sweep.
+Idle: no cycle open. feat/prism-engine (started 2026-09-17) added PrismML's
+llama.cpp fork as the third engine, `prism_llama.cpp`: SPEC 2.48 to 2.55 are
+new and 2.1, 2.2, 2.26 and 2.45 amended. The cycle's two owner smokes below
+are still open; the first is the fork's first calibration record. Next:
+whatever the owner picks from ROADMAP.md "Next", or the smokes' findings.
 
 ## Open items
 
-- [ ] Engine-gating the load-mode suppression leaves it with no observable
-      positive case on either engine: mainline carries --load-mode but no
-      longer catalogues the legacy pair, and ik carries the pair but never
-      receives --load-mode, so only the negative branch is testable. Three
-      sites hold the now-inert mechanism
-      (command_builder._load_mode_suppression, router_preset,
-      configure_panel._sync_load_mode_legacy). Keeping the gate
-      is right while the tags can move again; removing the mechanism is a
-      separate cleanup.
+- [ ] The load-mode suppression has its positive case again on PrismML
+      llama.cpp, which receives --load-mode and the legacy pair both, so
+      the three sites (command_builder._load_mode_suppression,
+      router_preset, configure_panel._sync_load_mode_legacy) are live
+      there and untested in that direction: a PrismML profile with a
+      non-default load-mode should grey out and drop --mlock and --no-mmap.
+      Pin it with a test.
+- [ ] The RPC pool launch appends --rpc directly, but the mainline fixture
+      image (server-b10902) is built without RPC, so the flag is in neither
+      the fixture nor the structural table and the audit cannot see a rename;
+      the fork's fixture, from a tarball with RPC built in, lists it as
+      unexposed instead. Capture mainline from an RPC-capable build or record
+      --rpc structurally with a note.
+- [ ] Headless --launch and --dry-run call validate() without a GGUF read,
+      so the wrong-engine warning of SPEC 2.52 is GUI-only; a PrismML file
+      launched headless under a mainline engine fails at model load with no
+      preflight line.
+- [ ] The card shortfall note in memory_fit names "llama.cpp" in prose where
+      a PrismML profile now sees the same note; wording only, and only if
+      engine-named readouts are wanted (ENGINE_LABELS exists).
+- [ ] The Image field hint for PrismML and the Detect dialog's no-image text
+      say the same thing in two places (configure_panel.PRISM_IMAGE_HINT and
+      launch_controller.detect_image); only "Build tab" is asserted in both.
+- [ ] test_settings_catalog pins len(PRISM_LACKS_FLAGS) == 6 as a bare count,
+      which the fixture audit already derives; and the parametrised bucket
+      test in test_catalog_upstream_flags asserts a "llama.cpp"-only bucket on
+      MAINLINE_KEYS, which holds only while PRISM_LACKS_FLAGS is non-empty.
+      Both fail confusingly the day the fork catches up with mainline.
+- [ ] gguf.prism_quant reports the first fork-only type in a mixed tensor
+      table; no published file mixes PQ2_0 and PTQ1_0, and the docstring does
+      not state the tie-break.
+- [ ] build_panel.py carries " -- " prose separators at three sites
+      (documentation cycle, with the rest of the doubled-hyphen guard work).
+- [ ] GGML_CUDA_HOPPER_Q1 needs GGML_CUDA_CUTLASS_DIR, which the build catalog
+      does not carry, so a Hopper build of the fork must supply it through raw
+      defines; either add the option gated to the fork or say so in the
+      tooltip.
+- [ ] The wrong-engine and kv-mean-center warnings sit under the non-router
+      branch of validate(), so a router profile whose member carries PQ2_0 or
+      PTQ1_0 weights relies on the member profile's own preflight.
 - [ ] Two comments in settings_catalog.py name test artefacts, which the house
       rule bans: one cites tests/fixtures/regen_ik_flags.sh and one names
       test_catalog_upstream_flags. Both predate the b10902 cycle and were left
@@ -317,190 +342,47 @@ verbosity route into the sweep.
 
 ## Pending owner smokes
 
-- [x] Publish the GitHub release for v0.2.1. Done 2026-09-12 on the
-      owner's go, notes from `scripts/release-notes.sh 0.2.1`.
-- [x] On the 5080 plus A2000 box against a b10902 image, launch a real
-      profile and confirm the server reaches ready with no unknown-argument
-      line in the log. Done 2026-09-12 against build 10920 with the 27B
-      profile: "model loaded" and "listening", the only warnings the CORS
-      banner and the reasoning-preserve notice. Log filed in
-      DevDocs/llama_launcher/calibration-2026-09-12.
-- [x] On a dense model, confirm the --override-tensor row shows no dot and
-      accepts a value, then launch with `-ot 'output\.weight=CUDA0'` and read
-      the per-card buffer lines at verbosity 4 to confirm the output tensor
-      moved to card 0. Done 2026-09-12 on the 27B (dense in the launcher's
-      sense, no expert tensors): CUDA0's model buffer grew from 8232.19 to
-      9745.60 MiB and CUDA1's shrank by the same 1513 MiB with the card
-      total unchanged. The split boundary moved two blocks in the same run
-      (45 blocks on CUDA0 by the KV and state lines against 43 on
-      2026-09-10), which is about 400 MiB of that; the rest is the
-      override, consistent with a q6_K output tensor (994.7 MiB) plus six
-      attn_output tensors the unanchored pattern also matched. The
-      estimate JSON at the same settings makes it exact: 1176885914 bytes
-      (1122.37 MiB) left CUDA1 for CUDA0, which is the q6_K output tensor
-      plus one q6_K and five q5_K attn_output tensors to within 2714
-      bytes. The row showed no dot and accepted the value, owner's report
-      2026-09-12.
-- [x] Load a profile that still carries mlock, confirm the settings-route
-      warning appears and that clicking the load-mode suggestion clears both
-      the key and the warning in one go. Passed, owner's report 2026-09-12.
-- [x] Put `--mlock` in a profile's raw args on a b10902 image and confirm the
-      raw-route warning appears and says the launch fails on an image that
-      new, then confirm it does fail if launched. Passed, owner's report
-      2026-09-12.
-- [x] Run an offload sweep and confirm it still records memory figures per
-      point, and that a profile with `--log-disable` in its raw args is
-      refused rather than sweeping to a winner with zeroes. Passed, owner's
-      report 2026-09-12.
-- [x] Screenshots: checked, no re-shoot needed. The two rows this cycle
-      removes from a mainline form sit immediately below config.png's
-      captured fold, which ends at --lazy-mode, so the captured surface is
-      unchanged.
-- [x] Re-shoot assets/screenshots/config.png and build.png on the 5080 plus
-      A2000 box, where the group titles had the ampersand swallowed. Done
-      2026-09-11 along with router.png: "Model & Context", "GPU & Memory"
-      and "CPU & ISA" render as ampersands.
-- [x] Run the 27B profile at `--parallel 2` with the MTP draft on. Done
-      2026-09-10, the fourth run in
-      DevDocs/llama_launcher/calibration-2026-09-10/verb4-27b-and-35b.md.
-      `llama_memory_recurrent: size = 897.75 MiB (2 cells, 64 layers, 2
-      seqs 2 rs_seq)`: the rule is `slots x (depth + 1)`, six units, and
-      the estimate's `slots + depth` reads 299.25 MiB low (the first open
-      item). The draft's KV buffer read 352.00 MiB at 45056 cells times 2/2
-      seqs: the draft keeps the full context, divided per slot like the
-      main model's, so the estimate's full-context pricing holds. The
-      launcher's draft-mtp warning against --parallel above 1 fired and
-      was ignored; the server ran both slots with the draft (the second
-      open item).
-- [x] Re-shoot assets/screenshots/bench.png on the 5080 plus A2000 box now
-      that the columns are formatted. Done 2026-09-10: the history table
-      reads 32.9, 43.9 and 3.04, right-aligned.
-- [x] On the 5080 plus A2000 box, compare the readout's per-card layer
-      ranges, KV per 1024 tokens and per-layer weight against Verbosity 4
-      launches of the 27B and 35B-A3B profiles. Done across the 2026-09-06
-      and 2026-09-10 logs: the per-card model buffers match the estimate to
-      the byte on both profiles at two different splits of the 27B (60,40
-      and 43,23), which pins the boundary layer and the per-layer weight;
-      the KV matches exactly per card at two context sizes of the 27B
-      (32768 and 90112) and on both cards of the 35B, which pins the KV
-      per 1024 tokens.
-- [x] Confirm on your display that the settings column shows no horizontal
-      scrollbar, that the Environment column and the top bar fields stop at
-      their maxima, and that the 1032 px window minimum is acceptable.
-      Confirmed by the owner on 2026-09-10.
-- [x] Take a profile that is over budget on one card on the 5080 plus
-      A2000 box, apply the suggested `--tensor-split` from
-      `--estimate --json`, launch at Verbosity 4 and check the per-card
-      model buffer lines against the predicted boundary layer. Done by the
-      owner before 2026-09-10: the suggestion is what put the 27B on the
-      layer-count split 43,23, and that launch is the 2026-09-10 27B
-      calibration record, whose model buffers match the estimate to the
-      byte on both cards.
-- [x] Re-run `--estimate --json` for the 27B dense and 35B-A3B profiles on
-      the 5080 plus A2000 box and compare against the measured figures. Done
-      2026-09-10 against one Verbosity 4 log carrying both profiles, filed
-      with the estimates and a term by term table in
-      DevDocs/llama_launcher/calibration-2026-09-10. Weights are exact on
-      every device on both profiles, the draft's own buffers included, and
-      the 35B's KV and recurrent state are exact on both cards. The 27B's
-      KV reads exactly twice the truth and its recurrent state 32 percent
-      under; see the open items below. Not done: a second sweep per profile
-      with the measured against estimated columns.
-- [x] Re-read the g31b_ud4k container's log once the run has finished.
-      Dropped 2026-09-10: the owner deleted the 31B profile because it ran
-      poorly on the box, so the 2026-09-06 paste stays model buffers only.
-- [x] Measure one dense non-hybrid model on the 5080 plus A2000 box. Done
-      2026-09-06 with Gemma 4 12B (dense, MTP draft), 26B-A4B (MoE) and 31B
-      (dense, model buffers only), mainline b10818 at Verbosity 4 with
-      --swa-full; print_info blocks, buffer lines, commands and estimate
-      JSON in DevDocs/llama_launcher/calibration-2026-09-06. Weights are
-      exact on every card; KV reads 1.9x to 2.2x high and compute reads low
-      on card 0, see the open items. Not yet added as records: the KV rule
-      fails until the reader knows the sliding-window head size.
-- [x] On the 27B dense profile, run a sweep whose "from" sits a few counts
-      below the prefilled start so the first point is too small: confirm it
-      records as failed with its log line in the tooltip and the sweep
-      continues. Confirmed by the owner on 2026-09-10.
-- [ ] On that same sweep, confirm the winner is marked and Apply writes the
-      count into the profile.
-- [x] Open the launch dialog on KDE/Wayland with an over-budget context and
-      confirm it shows the per-card breakdown, the --fit note and the
-      suggested offload count. Confirmed by the owner on 2026-09-06.
-- [x] Run a sweep on the 5080 plus A2000 box on the 27B dense profile with
-      the prefilled range. Done 2026-09-06, files in
-      DevDocs/llama_launcher/calibration-2026-09-06: n-cpu-ffn 0 to 8 on the
-      27B dense (ctx 32768, tensor-split 60,40, q8_0 KV) and n-cpu-moe 2 to
-      10 on the 35B-A3B MoE, five points each, every point launched,
-      benchmarked, stopped and recorded ok in 5 to 6 s to ready, with the
-      measured model, KV and compute columns filled. The measured columns
-      were not within a few hundred MiB: KV read six times high on the dense
-      and twice high on the MoE, which became the estimate calibration
-      cycle.
-- [x] Calibrate the compute constants on the 5080 plus A2000 box. Done
-      2026-09-06 from the two sweep files above, the ik_llama.cpp launch log
-      at Verbosity 4 and a CPU-only e2b run on the dev box: the four records
-      live in tests/core/calibration_records.py and
-      scripts/fit_compute_terms.py refit COMPUTE_TERMS from them
-      (fix/estimate-calibration). CARD_OVERHEAD_BYTES is still unmeasured;
-      it needs the exit-time table.
-- [x] Launch a real profile and confirm the four-line readout and its
-      tooltip on KDE/Wayland. Done 2026-09-06 during the ik smoke below: one
-      line per card and one for RAM, the tooltip carrying the --fit note and
-      the offload suggestion. The suggested counts (--n-cpu-ffn 3 and
-      --n-cpu-moe 24) came from the pre-calibration estimate and were too
-      high; the launch dialog is the open item above.
-- [x] Smoke an ik_llama.cpp profile with --fit on. Done 2026-09-06 on the
-      5080 plus A2000 box with Qwen3.6-35B-A3B MXFP4 on the cu13-server
-      image: the command carried bare --fit, the server ran with it, and
-      the readout tooltip carried the ik note (24 layers' experts in host
-      RAM). The note was wrong in substance: ik loaded all 41 layers on the
-      cards with 1.2 and 1.8 GiB to spare, the KV over-estimate again.
-- [x] Smoke the new flags against a real llama.cpp 0.4.0 image. Done
-      2026-09-05 against ghcr.io/ggml-org/llama.cpp:server-b10818 (version
-      0.4.0-dev, build 10818), the first server tag past b10795; the
-      floating :server tag was still b10795 that morning. A profile carrying
-      --parallel 2, --kv-unified-per-slot 2048, --no-reasoning-preserve,
-      --video-fps 2.0, --video-timestamp-interval 1000 and
-      --video-ffmpeg-dir /usr/bin plus the e2b mmproj: --dry-run emitted all
-      of them with no validation issue and exit 0; --launch --wait reached
-      "ready", /health returned ok, /props reported build b10818 with two
-      slots of 2048, and the server log carried no unknown-argument line.
-      --stop exited 0.
-- [x] Launch a real profile and confirm the UI text renders unchanged.
-      Done 2026-09-03 on KDE/Wayland through XWayland (QT_QPA_PLATFORM=xcb):
-      the e2b profile loaded through the profile combo's activated signal,
-      the command preview matched `--dry-run --profile e2b` exactly, and
-      the glyphs rendered as glyphs, not tofu. An AST comparison of every
-      non-ASCII string constant in src/ against the pre-cycle tree found 66
-      distinct constants over 81 occurrences, all byte-identical.
-- [x] Open a fresh session in this repo and confirm the session-start
-      summary prints this file's current phase. Done 2026-09-03 by running
-      ~/.claude/hooks/session-start.sh, which is what a session runs; it
-      printed the branch, the last ten commits and this file's phase.
-- [ ] Live multi-node test on a GPU worker when one is available. Still
-      blocked: nvidia-smi is absent on this box and the Stats dock reports
-      "GPU: unavailable".
+- [ ] On the 5080 plus A2000 box (CUDA 13): from the Build tab, a container
+      build of the PrismML engine from the `prism` branch with CUDA 13 builder
+      and runtime images typed into the image fields; Detect then lists the
+      `prism-custom` image; a container launch of
+      Ternary-Bonsai-2-27B-PTQ1_0.gguf at verbosity 4 reaches ready and a
+      completion returns coherent text (the model card wants temperature 1.0,
+      top-p 0.95, top-k 20 for thinking mode). File the log and the
+      `--estimate` JSON in DevDocs/llama_launcher as the fork's first
+      calibration record, and compare the model buffer lines with the
+      estimate's 5.94 GB of weights: this is the first measurement of a
+      PTQ1_0 file and of the qwen35 hybrid state terms on this engine.
+- [ ] Trailing, optional: the same from the Build tab's native target, a
+      cmake build against the CUDA 13 toolkit, pointed at from a native
+      profile.
+- [ ] Screenshots: config.png's captured fold includes the Engine row, which
+      gained a third combo entry and a suggestion dot beside it, and build.png
+      shows the Build tab's engine combo. Re-shoot both on the GPU box once the
+      first smoke has a working image, or confirm the fold hides the change.
 
 ## Done this cycle
 
-- `--mlock` and `--no-mmap` are ik-only: mainline rejects both from build
-  10902, and the engine gate keeps them out of the form and out of argv on
-  every path (SPEC 2.45).
-- A profile still carrying either warns, with the wording matching the route,
-  since a settings value is dropped while a raw spelling reaches the launch
-  and fails; a settings value also offers the matching `--load-mode`
-  (SPEC 2.46).
-- `--override-tensor` is unmarked on a dense model rather than "not
-  applicable", and stays a tuning knob on a MoE one (SPEC 2.12).
-- The RAM shortfall wording treats a legacy `--mlock` as a lock only where
-  the engine accepts it (SPEC 2.20).
-- The load-mode suppression is engine-gated at all three sites, so an ik
-  profile with a leftover load-mode keeps the pair and its checkboxes,
-  including after an in-place engine switch.
-- The sweep carries the log format its parser reads and refuses raw args that
-  hide it (SPEC 2.26).
-- The mainline flag fixture tracks b10902 and gains a committed list of the
-  155 flags the launcher does not use there, so regenerating the capture is
-  the audit and a new upstream flag fails the suite naming itself (SPEC 2.47).
-- `--direct-io` references are gone; the `--mmproj-device` tooltip matches
-  b10902's "follows --device" default.
+- PrismML's llama.cpp fork is the third engine, stored as `prism_llama.cpp`
+  and shown as "PrismML llama.cpp" in Configure and Build; build outputs are
+  tagged `prism-custom` (SPEC 2.48, 2.55).
+- A setting's engine gate is a set: `any`, one name, or a tuple. The fork
+  receives mainline's catalog minus the six flags mainline added after build
+  10685, plus `--mlock`, `--no-mmap` and its own `--kv-mean-center`, which
+  warns when cache-type-k is not q4_0 on either route (SPEC 2.2, 2.45, 2.49).
+- The fork's flag fixture is captured from the release tarball by
+  `regen_prism_flags.sh` and audited in the three directions of 2.47, with a
+  six-line unexposed list of its own (SPEC 2.50).
+- The GGUF reader sizes PQ2_0 and PTQ1_0 at their block size and names file
+  types 41, 141, 142 and 143; the owner's 27B PTQ1_0 file now reads 5.94 GB
+  instead of 50 GiB, matching its data section byte for byte (SPEC 2.51).
+- A PQ2_0 or PTQ1_0 model under mainline or ik gets a preflight warning and
+  a dot beside Engine that switches the engine alone (SPEC 2.52).
+- The estimate, the fit gate and the sweep's verbosity treat the fork as
+  mainline; a whole-estimate equality test pins it (SPEC 2.26, 2.53).
+- No default image for the fork: the Image field says so and points at the
+  Build tab on every path, including profile load, and Detect matches
+  `prism` (SPEC 2.54).
+- The Build tab knows the fork's repository, `prism` ref, mainline's CMake
+  options and `GGML_CUDA_HOPPER_Q1` (SPEC 2.55).
+- README, CHANGELOG, VRAM.md and AGENTS.md name the third engine.

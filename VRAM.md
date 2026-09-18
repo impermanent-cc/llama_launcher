@@ -61,7 +61,8 @@ In RAM:
   output tensor stays in RAM instead of landing on a card;
 - an output buffer the server hands back per slot: vocabulary size times
   four bytes times the slot count (the `--parallel` setting, else the
-  engine's default of four on llama.cpp and one on ik_llama.cpp).
+  engine's default of four on llama.cpp and PrismML llama.cpp and one on
+  ik_llama.cpp).
 
 The compute buffer is a formula of f32 terms, each scaled by `--ubatch-size`
 (itself capped to `--batch-size`, which is capped to the context): FFN

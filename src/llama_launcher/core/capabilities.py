@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from enum import StrEnum
 
-from .gguf import GgufMeta
+from .gguf import GgufMeta, prism_quant
 from .settings_catalog import CATALOG, accepts
 from .vram import effective_ctx_size, positive_int
 
@@ -36,6 +36,7 @@ class ModelCaps:
     is_embedding: bool = False
     is_reranker: bool = False
     pooling_type: str | None = None
+    prism_quant: str = ""  # PQ2_0 or PTQ1_0 when only PrismML's fork reads the file
 
     @property
     def has_mtp(self) -> bool:
@@ -79,6 +80,7 @@ def derive_caps(meta: GgufMeta | None, sibling_filenames) -> ModelCaps:
         # heuristic) to avoid false positives.
         is_reranker=(pooling == "rank"),
         pooling_type=pooling,
+        prism_quant=prism_quant(meta),
     )
 
 
@@ -95,7 +97,8 @@ class Tier(StrEnum):
 class Suggestion:
     text: str
     settings: dict  # catalog setting changes to apply on click
-    fields: dict  # profile-field changes; sibling values are FILENAMES
+    fields: dict  # profile-field changes: mmproj and draft_model take sibling
+    # FILENAMES, engine takes an engine name from spec.ENGINES
 
 
 def _rel_core(caps):
@@ -352,12 +355,28 @@ def _sug_legacy_load(caps, settings, mmproj_set, draft_set, engine="llama.cpp"):
     ]
 
 
+def _sug_prism_engine(caps, settings, mmproj_set, draft_set, engine="llama.cpp"):
+    """The PrismML engine for a model whose weights are a type only that
+    fork reads; nothing when the engine is already PrismML or the weights
+    are mainline types."""
+    if not caps.prism_quant or engine == "prism_llama.cpp":
+        return []
+    return [
+        Suggestion(
+            f"{caps.prism_quant} weights need PrismML llama.cpp \u2192 switch engine",
+            {},
+            {"engine": "prism_llama.cpp"},
+        )
+    ]
+
+
 SUGGESTION_DETECTORS = [
     _sug_mtp,
     _sug_vision,
     _sug_ctx,
     _sug_embedding,
     _sug_legacy_load,
+    _sug_prism_engine,
 ]
 
 

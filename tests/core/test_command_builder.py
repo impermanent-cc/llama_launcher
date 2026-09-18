@@ -190,3 +190,22 @@ def test_mlock_never_reaches_a_mainline_launch_from_a_profile_json():
     p.runtime = Runtime(bind_host="127.0.0.1", engine="ik_llama.cpp")
     argv = build_command(p)
     assert "--mlock" in argv and "--no-mmap" in argv
+
+
+def test_kv_mean_center_reaches_a_prism_launch_alone():
+    base = dict(name="p", image="img", model="/models/m.gguf")
+    p = Profile(
+        runtime=Runtime(engine="prism_llama.cpp"),
+        settings={"kv-mean-center": "/models/k-bias.gguf"},
+        **base,
+    )
+    argv = build_command(p)
+    assert argv[argv.index("--kv-mean-center") + 1] == "/models/k-bias.gguf"
+    empty = Profile(
+        runtime=Runtime(engine="prism_llama.cpp"),
+        settings={"kv-mean-center": ""},
+        **base,
+    )
+    assert "--kv-mean-center" not in build_command(empty)
+    mainline = Profile(settings={"kv-mean-center": "/models/k-bias.gguf"}, **base)
+    assert "--kv-mean-center" not in build_command(mainline)

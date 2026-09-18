@@ -15,11 +15,11 @@ def test_keys_match_setting_key_and_no_aliases():
 
 
 def test_engine_values_are_valid():
-    assert {s.engine for s in BUILD_CATALOG.values()} <= {
-        "any",
-        "llama.cpp",
-        "ik_llama.cpp",
-    }
+    from llama_launcher.core.settings_catalog import engines_of
+    from llama_launcher.core.spec import ENGINES
+
+    for s in BUILD_CATALOG.values():
+        assert set(engines_of(s)) <= set(ENGINES), s.key
 
 
 def test_for_engine_filters_both_directions():
@@ -62,14 +62,14 @@ def test_sched_max_copies_split_by_engine():
 
 
 def test_repo_constants():
-    assert (
-        set(REPO_URL)
-        == set(DEFAULT_BRANCH)
-        == set(ENGINE_SHORT)
-        == {"llama.cpp", "ik_llama.cpp"}
-    )
+    from llama_launcher.core.spec import ENGINES
+
+    assert set(REPO_URL) == set(DEFAULT_BRANCH) == set(ENGINE_SHORT) == set(ENGINES)
     assert DEFAULT_BRANCH["llama.cpp"] == "master"
     assert DEFAULT_BRANCH["ik_llama.cpp"] == "main"
+    assert DEFAULT_BRANCH["prism_llama.cpp"] == "prism"
+    assert REPO_URL["prism_llama.cpp"] == "https://github.com/PrismML-Eng/llama.cpp"
+    assert ENGINE_SHORT["prism_llama.cpp"] == "prism"
 
 
 def test_peer_max_batch_size_is_ik_only():
@@ -85,3 +85,20 @@ def test_every_engine_gated_option_carries_a_tooltip():
     assert gated and all(o.tooltip.strip() for o in gated), [
         o.key for o in gated if not o.tooltip.strip()
     ]
+
+
+def test_prism_shares_mainline_cmake_options_plus_its_hopper_path():
+    """PrismML's CMake files are mainline's plus one option, so every
+    mainline-only option reaches it, no ik-only option does, and its own
+    option reaches it alone."""
+    ml = for_engine(BUILD_CATALOG, "llama.cpp")
+    ik = for_engine(BUILD_CATALOG, "ik_llama.cpp")
+    prism = for_engine(BUILD_CATALOG, "prism_llama.cpp")
+    assert set(prism) == (set(ml) | {"cuda-hopper-q1"})
+    assert "iqk-flash-attention" not in prism
+    assert "cuda-hopper-q1" not in ml and "cuda-hopper-q1" not in ik
+    hopper = BUILD_CATALOG["cuda-hopper-q1"]
+    assert hopper.flag == "GGML_CUDA_HOPPER_Q1"
+    assert hopper.type == "bool" and hopper.default is False
+    assert hopper.engine == "prism_llama.cpp"
+    assert prism["sched-max-copies"].default == 4

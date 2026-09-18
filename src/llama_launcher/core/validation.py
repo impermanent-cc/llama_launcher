@@ -13,7 +13,7 @@ from .command_builder import (
 )
 from .router_preset import convert_raw_args
 from .settings_catalog import CATALOG, accepts
-from .spec import DEFAULT_PORT, Profile, member_model_id, profile_port
+from .spec import DEFAULT_PORT, ENGINE_LABELS, Profile, member_model_id, profile_port
 from .vram import effective_ctx_size
 
 # A model id becomes an INI section header ([id]) in a router preset and is sent
@@ -87,6 +87,7 @@ def validate(
     image_present: bool = True,
     worker_image_present: dict | None = None,
     worker_free_mb: dict | None = None,
+    prism_quant: str = "",
 ) -> list[Issue]:
     """`native_binary_ok` mirrors `binary_found`: core stays I/O-free, so the
     caller stats `profile.runtime.native_binary` (e.g. via
@@ -94,7 +95,11 @@ def validate(
 
     `worker_image_present`/`worker_free_mb` are the RPC-pool equivalents:
     dependency-injected {node: value} maps for `_validate_rpc`, populated by a
-    caller that has actually probed the worker nodes."""
+    caller that has actually probed the worker nodes.
+
+    `prism_quant` is the PrismML-only tensor type name the model's weights
+    use (PQ2_0 or PTQ1_0) or empty; a caller that has read the GGUF passes
+    gguf.prism_quant(meta)."""
     issues: list[Issue] = []
     is_native = profile.runtime.launch_mode == "native"
 
@@ -151,11 +156,15 @@ def validate(
                 )
             )
         elif not is_ik and looks_ik and profile.mode != "router":
+            engine_label = ENGINE_LABELS.get(
+                profile.runtime.engine, profile.runtime.engine
+            )
             issues.append(
                 Issue(
                     "warning",
-                    "Engine is llama.cpp but the image looks like an ik_llama.cpp build; "
-                    "switch the Engine to ik_llama.cpp to reach its flags.",
+                    f"Engine is {engine_label} but the image looks like an "
+                    "ik_llama.cpp build; switch the Engine to ik_llama.cpp to "
+                    "reach its flags.",
                 )
             )
 
@@ -359,13 +368,13 @@ def validate(
         # parsing. A flag carried by both routes only ever reaches argv
         # through raw_args (the settings side is gated off before it can
         # emit), so the raw wording is the one that applies there.
-        raw_legacy_values = raw_arg_values(profile.raw_args)
+        raw_arg_map = raw_arg_values(profile.raw_args)
         settings_legacy = []
         raw_legacy = []
         for key, flag in (("mlock", "--mlock"), ("no-mmap", "--no-mmap")):
             if accepts(CATALOG[key], profile.runtime.engine):
                 continue
-            if raw_legacy_values.get(key):
+            if raw_arg_map.get(key):
                 raw_legacy.append(flag)
             elif profile.settings.get(key):
                 settings_legacy.append(flag)
@@ -391,6 +400,38 @@ def validate(
                     f"{verb} sent: a mainline build from 10902 on rejects "
                     f"{pronoun} at argument parsing, so the launch fails on an "
                     "image that new.",
+                )
+            )
+
+        if prism_quant and profile.runtime.engine != "prism_llama.cpp":
+            issues.append(
+                Issue(
+                    "warning",
+                    f"{prism_quant} weights: mainline llama.cpp and ik_llama.cpp "
+                    "reject this file as an unknown tensor type, so the launch "
+                    "fails at model load. Set the engine to PrismML llama.cpp, "
+                    "and point the image or llama-server binary at a PrismML "
+                    "build.",
+                )
+            )
+
+        kv_mean_center_set = raw_arg_map.get("kv-mean-center") or profile.settings.get(
+            "kv-mean-center"
+        )
+        cache_type_k = raw_arg_map.get("cache-type-k") or profile.settings.get(
+            "cache-type-k"
+        )
+        if (
+            kv_mean_center_set
+            and accepts(CATALOG["kv-mean-center"], profile.runtime.engine)
+            and cache_type_k != "q4_0"
+        ):
+            issues.append(
+                Issue(
+                    "warning",
+                    "--kv-mean-center requires cache-type-k q4_0 (the bias is "
+                    "subtracted before K is quantized into a q4_0 cache); set "
+                    "cache-type-k to q4_0 or clear the bias path.",
                 )
             )
 

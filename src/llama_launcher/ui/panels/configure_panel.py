@@ -49,6 +49,8 @@ from llama_launcher.core.settings_catalog import (
 )
 from llama_launcher.core.spec import (
     DEFAULT_STOP_TIMEOUT,
+    ENGINE_LABELS,
+    ENGINES,
     Profile,
     RouterMember,
     Runtime,
@@ -83,6 +85,12 @@ _ENGINE_DEFAULT_IMAGE = {
     "llama.cpp": "ghcr.io/ggml-org/llama.cpp:server-cuda",
     "ik_llama.cpp": "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server",
 }
+
+# Shown in the empty Image field for an engine no registry publishes.
+PRISM_IMAGE_HINT = (
+    "No published PrismML image: build one on the Build tab (tagged "
+    "prism-custom:...) or type the tag of your own"
+)
 
 
 def _gather_check_fit(profile: Profile, base_dir, estimate_bytes: int):
@@ -241,8 +249,9 @@ class ConfigurePanel(QWidget):
         self.binary_combo = NoWheelComboBox()
         self.binary_combo.addItems(["podman", "docker"])
         self.engine_combo = NoWheelComboBox()
-        self.engine_combo.addItem("llama.cpp", "llama.cpp")
-        self.engine_combo.addItem("ik_llama.cpp", "ik_llama.cpp")
+        for eng in ENGINES:
+            self.engine_combo.addItem(ENGINE_LABELS[eng], eng)
+        self._engine_dot = SuggestionDot(self)
         self.engine_combo.currentIndexChanged.connect(self._on_engine_changed)
         self.gpu_combo = NoWheelComboBox()
         for _gpu_label, _gpu_val in (
@@ -320,7 +329,8 @@ class ConfigurePanel(QWidget):
         self.native_binary_edit = QLineEdit()
         self.native_binary_edit.setPlaceholderText("/path/to/llama-server")
         self.native_binary_edit.setToolTip(
-            "Path to a prebuilt llama-server executable (mainline or ik_llama.cpp). "
+            "Path to a prebuilt llama-server executable (mainline, ik_llama.cpp or "
+            "PrismML llama.cpp). "
             "The launcher runs it directly as a managed background process."
         )
         self.native_binary_edit.textChanged.connect(self.refresh_preview)
@@ -437,7 +447,12 @@ class ConfigurePanel(QWidget):
         left_form.addRow("Stop grace period", self.stop_timeout_spin)
         left_form.addRow("Router members", members_widget)
 
-        left_form.addRow("Engine", self.engine_combo)
+        engine_widget = QWidget()
+        engine_row = QHBoxLayout(engine_widget)
+        engine_row.setContentsMargins(0, 0, 0, 0)
+        engine_row.addWidget(self.engine_combo, 1)
+        engine_row.addWidget(self._engine_dot)
+        left_form.addRow("Engine", engine_widget)
         left_form.addRow("Image", image_widget)
         left_form.addRow("Model", self._field_with_browse(self.model_edit))
         left_form.addRow("Runtime", self.binary_combo)
@@ -503,7 +518,10 @@ class ConfigurePanel(QWidget):
         self.engine_combo.setToolTip(
             "Which llama.cpp-family server to run. 'llama.cpp' = mainline "
             "(ghcr.io/ggml-org/llama.cpp); 'ik_llama.cpp' = ikawrakow's fork with "
-            "extra MoE/quant flags (ghcr.io/ikawrakow/ik-llama-cpp)."
+            "extra MoE/quant flags (ghcr.io/ikawrakow/ik-llama-cpp); 'PrismML "
+            "llama.cpp' = PrismML's fork that reads Bonsai PQ2_0 and PTQ1_0 "
+            "weights (no published image: build one on the Build tab or run a "
+            "release tarball natively)."
         )
         self.gpu_combo.setToolTip(
             "GPU passthrough. CDI (nvidia.com/gpu=all) is recommended on modern "
@@ -918,12 +936,28 @@ class ConfigurePanel(QWidget):
             extra_spec = IK_EXTRA_SPEC_TYPES if is_ik else ()
             spec.set_enum_choices(tuple(CATALOG["spec-type"].enum) + tuple(extra_spec))
 
+    def _apply_image_placeholder(self, engine: str) -> None:
+        """The empty Image field's hint: the no-registry note for PrismML,
+        nothing for any other engine."""
+        hint = PRISM_IMAGE_HINT if engine == "prism_llama.cpp" else ""
+        self.image_edit.setPlaceholderText(hint)
+
     def _maybe_seed_default_image(self, engine: str) -> None:
-        """Seed a sensible default image only when the field is empty or still
-        holds the OTHER engine's default; never clobber a user-typed value."""
+        """Seed the engine's default image only when the field is empty or
+        still holds another engine's default; never clobber a user-typed
+        value. An engine with no default clears a seeded value and shows a
+        hint in the empty field instead."""
         cur = self.image_edit.text().strip()
-        if cur == "" or cur in set(_ENGINE_DEFAULT_IMAGE.values()):
-            self.image_edit.setText(_ENGINE_DEFAULT_IMAGE[engine])
+        seeded = cur in set(_ENGINE_DEFAULT_IMAGE.values())
+        default = _ENGINE_DEFAULT_IMAGE.get(engine)
+        if default is None:
+            if seeded:
+                self.image_edit.setText("")
+            self._apply_image_placeholder(engine)
+            return
+        self._apply_image_placeholder(engine)
+        if cur == "" or seeded:
+            self.image_edit.setText(default)
 
     def _on_engine_changed(self, _index=0) -> None:
         engine = self.engine_combo.currentData() or "llama.cpp"
@@ -1154,6 +1188,7 @@ class ConfigurePanel(QWidget):
             api_key_present=key_present,
             native_binary_ok=native.native_binary_ok_for(p),
             image_present=img_present,
+            prism_quant=self._last_caps.prism_quant if self._last_caps else "",
         )
         for name in self.missing_member_profiles():
             issues.append(
@@ -1239,6 +1274,11 @@ class ConfigurePanel(QWidget):
         _eidx = self.engine_combo.findData(p.runtime.engine)
         self.engine_combo.setCurrentIndex(_eidx if _eidx >= 0 else 0)
         self.engine_combo.blockSignals(False)
+        self._apply_image_placeholder(
+            p.runtime.engine
+            if self.engine_combo.findData(p.runtime.engine) >= 0
+            else "llama.cpp"
+        )
         self._apply_engine_enums()  # extend enums before values are set (no image seeding on load)
         self.mounts_panel.set_mounts(p.mounts)
         self.mmproj_edit.setText(p.mmproj or "")
@@ -1380,6 +1420,9 @@ class ConfigurePanel(QWidget):
         )
         self._apply_field_dot(
             self._draft_model_dot, "draft_model", described, sugg_by_key, reason_by_key
+        )
+        self._apply_field_dot(
+            self._engine_dot, "engine", described, sugg_by_key, reason_by_key
         )
 
     # -- live fit readout -----------------------------------------------------
@@ -1708,8 +1751,13 @@ class ConfigurePanel(QWidget):
         for key, val in sg.settings.items():
             if key in self._widgets:
                 self._widgets[key].set_value(val)
-        for field, filename in sg.fields.items():
-            container = self._resolve_sibling(filename)
+        for field, value in sg.fields.items():
+            if field == "engine":
+                idx = self.engine_combo.findData(value)
+                if idx >= 0:
+                    self.engine_combo.setCurrentIndex(idx)
+                continue
+            container = self._resolve_sibling(value)
             if container is None:
                 continue
             if field == "mmproj":
