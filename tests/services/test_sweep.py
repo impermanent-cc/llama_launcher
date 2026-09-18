@@ -366,3 +366,12 @@ def test_stop_and_remove_runs_stop_then_rm_and_survives_a_timeout(monkeypatch):
     svc._stop_and_remove("llama-x-sweep", "podman", 7)
     assert [c[0] for c in calls] == ["stop", "rm"]
     assert all(c[1] == 37 for c in calls)
+
+
+def test_sweep_profile_raises_verbosity_on_prism_like_mainline():
+    """PrismML llama.cpp logs as mainline does, so its sweep launch carries
+    the verbosity that prints the load-time buffer lines."""
+    p = _profile()
+    p.runtime = Runtime(binary="podman", engine="prism_llama.cpp")
+    q = svc.sweep_profile(p, 6, "n-cpu-moe")
+    assert q.settings["verbosity"] == 4

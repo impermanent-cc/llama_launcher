@@ -677,3 +677,15 @@ def test_delete_binary_uses_shared_build_dir_rule(qtbot, tmp_path, monkeypatch):
     p.delete_selected_output()
     qtbot.waitUntil(lambda: load_outputs(tmp_path) == [], timeout=3000)
     assert not build_dir.exists()
+
+
+def test_form_offers_prism_with_mainline_options_and_its_hopper_path(qtbot, tmp_path):
+    p = _panel(qtbot, tmp_path)
+    combo = p.engine_combo
+    idx = combo.findData("prism_llama.cpp")
+    assert idx >= 0 and combo.itemText(idx) == "PrismML llama.cpp"
+    combo.setCurrentIndex(idx)
+    assert "cpu-repack" in p._widgets and "cuda-hopper-q1" in p._widgets
+    assert "iqk-fa-all-quants" not in p._widgets
+    combo.setCurrentIndex(combo.findData("llama.cpp"))
+    assert "cuda-hopper-q1" not in p._widgets

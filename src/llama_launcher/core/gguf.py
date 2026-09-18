@@ -57,6 +57,10 @@ _FTYPE = {
     38: "MXFP4_MOE",
     39: "NVFP4",
     40: "Q1_0",
+    41: "Q2_0",
+    141: "PQ2_0",
+    142: "PQ2_0",
+    143: "PTQ1_0",
 }
 
 
@@ -136,6 +140,8 @@ GGML_TYPE_SIZES = {
     40: (64, 36),  # NVFP4
     41: (128, 18),  # Q1_0
     42: (64, 18),  # Q2_0
+    142: (128, 34),  # PQ2_0, PrismML fork
+    143: (128, 28),  # PTQ1_0, PrismML fork
 }
 
 
@@ -144,6 +150,20 @@ def tensor_nbytes(n_elements: int, ggml_type: int) -> int:
     as a whole block; an unknown type counts two bytes per element."""
     block, size = GGML_TYPE_SIZES.get(ggml_type, (1, 2))
     return -(-int(n_elements) // block) * size
+
+
+# Tensor types only PrismML's fork of llama.cpp reads, by ggml type id.
+PRISM_TENSOR_TYPES = {142: "PQ2_0", 143: "PTQ1_0"}
+
+
+def prism_quant(meta) -> str:
+    """The name of the PrismML-only tensor type a model's weights use, or an
+    empty string when every tensor is a type mainline llama.cpp reads."""
+    for t in getattr(meta, "tensors", None) or ():
+        name = PRISM_TENSOR_TYPES.get(t.ggml_type)
+        if name:
+            return name
+    return ""
 
 
 @dataclass

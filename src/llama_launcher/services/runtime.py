@@ -144,6 +144,7 @@ def stats(name: str, binary: str, connection: str = "") -> dict | None:
 _ENGINE_IMAGE_MATCH = {
     "llama.cpp": ("llama.cpp",),
     "ik_llama.cpp": ("ik-llama-cpp", "ik_llama"),
+    "prism_llama.cpp": ("prism",),
 }
 
 

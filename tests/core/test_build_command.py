@@ -210,3 +210,28 @@ def test_rpc_raw_override_of_checkbox_still_builds_target():
     from llama_launcher.core.build_command import render_native
 
     assert "rpc-server" in render_native(c).build_cmd
+
+
+def test_prism_tag_repo_ref_and_hopper_define():
+    from llama_launcher.core.build_command import auto_tag, render_container
+
+    c = BuildConfig(
+        name="bonsai",
+        engine="prism_llama.cpp",
+        target="container",
+        options={"cuda": True, "cuda-hopper-q1": True},
+        builder_image="docker.io/nvidia/cuda:13.0.1-devel-ubuntu24.04",
+        runtime_image="docker.io/nvidia/cuda:13.0.1-runtime-ubuntu24.04",
+    )
+    tag = auto_tag(c, set(), datetime.date(2026, 9, 17))
+    assert tag == "prism-custom:bonsai-20260917"
+    cf = render_container(c, tag, "/store/bonsai.containerfile").containerfile
+    assert "git clone https://github.com/PrismML-Eng/llama.cpp src" in cf
+    assert "git -C src checkout prism" in cf
+    assert "-DGGML_CUDA_HOPPER_Q1=ON" in cf
+    assert (
+        render_defines(
+            BuildConfig(engine="llama.cpp", options={"cuda-hopper-q1": True})
+        )
+        == []
+    )

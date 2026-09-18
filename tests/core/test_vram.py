@@ -2076,3 +2076,26 @@ def test_a_partial_tensor_table_does_not_shrink_a_main_models_layers():
     # are recurrent-eligible and stay charged as state, not dropped.
     assert sum(part.kv) == 352 * MIB
     assert sum(part.state) > 0
+
+
+def test_prism_takes_mainline_slot_default_and_compute_scale():
+    """PrismML llama.cpp is mainline's server, so the estimate prices it
+    exactly as mainline until a calibration record says otherwise: four
+    slots by default and no compute scale of its own."""
+    assert slot_count({}, "prism_llama.cpp") == 4
+    assert slot_count({"parallel": 2}, "prism_llama.cpp") == 2
+    assert "prism_llama.cpp" not in ENGINE_COMPUTE_SCALE
+    m = _meta(n_embd=64, n_vocab=1000, n_layers=4)
+    common = dict(
+        settings={
+            "ctx-size": 1024,
+            "n-gpu-layers": "all",
+            "flash-attn": "on",
+            "parallel": 4,
+        },
+        free_bytes_per_gpu=[8 * 1024**3],
+    )
+    main = estimate_memory(m, 10**9, engine="llama.cpp", **common)
+    prism = estimate_memory(m, 10**9, engine="prism_llama.cpp", **common)
+    assert main.cards[0].compute > 0 and main.ram.host > 0
+    assert prism == main

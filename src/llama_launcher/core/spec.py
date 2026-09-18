@@ -13,6 +13,17 @@ DEFAULT_STOP_TIMEOUT = 10
 # it lands, changing it here is the whole edit.
 DEFAULT_PORT = 8080
 
+# Every engine a profile can name, the label the UI shows for each, and the
+# engines whose llama-server is mainline's parser at some build: PrismML's
+# fork tracks mainline, ik_llama.cpp does not.
+ENGINES = ("llama.cpp", "ik_llama.cpp", "prism_llama.cpp")
+ENGINE_LABELS = {
+    "llama.cpp": "llama.cpp",
+    "ik_llama.cpp": "ik_llama.cpp",
+    "prism_llama.cpp": "PrismML llama.cpp",
+}
+MAINLINE_FAMILY = ("llama.cpp", "prism_llama.cpp")
+
 
 @dataclass
 class Mount:
@@ -65,7 +76,7 @@ class Runtime:
     bind_host: str = "127.0.0.1"  # publish address; non-loopback exposes the port
     detached: bool = False  # GUI server launch: no terminal, Monitor-driven
     router_key_mode: str = "global"  # "global" (shared key) | "own" (per-profile key)
-    engine: str = "llama.cpp"  # "llama.cpp" | "ik_llama.cpp"
+    engine: str = "llama.cpp"  # one of ENGINES
     stop_timeout: int = DEFAULT_STOP_TIMEOUT  # `podman stop -t` grace before SIGKILL
     launch_mode: str = (
         "container"  # "container" (podman/docker) | "native" (subprocess) | "rpc"

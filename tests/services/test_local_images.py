@@ -71,3 +71,15 @@ def test_parse_images_ik_engine_keeps_ik_only():
 
 def test_parse_images_llama_engine_output_unchanged():
     assert rt.parse_images(_MIXED, "llama.cpp") == rt.parse_images(_MIXED)
+
+
+_WITH_PRISM = _MIXED + "\nlocalhost/prism-custom:bonsai-20260917"
+
+
+def test_parse_images_prism_engine_keeps_prism_tagged_images_only():
+    assert rt.parse_images(_WITH_PRISM, "prism_llama.cpp") == [
+        "localhost/prism-custom:bonsai-20260917"
+    ]
+    assert "localhost/prism-custom:bonsai-20260917" not in rt.parse_images(
+        _WITH_PRISM, "llama.cpp"
+    )

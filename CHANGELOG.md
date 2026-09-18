@@ -10,6 +10,19 @@ not on the release page, so the two never drift.
 
 ## [Unreleased]
 
+### Added
+
+- PrismML llama.cpp as a third engine: the fork that reads the Bonsai models'
+  `PQ2_0` and `PTQ1_0` weights. The settings form offers the flags its
+  release accepts (mainline at build 10685 plus `--kv-mean-center`, checked
+  against a captured help dump) minus the ones the launcher leaves out on
+  purpose, the Build tab knows its repository, `prism` branch and
+  `GGML_CUDA_HOPPER_Q1`, and Detect lists images whose name contains
+  `prism`. The memory estimate sizes both weight types at their block size
+  instead of two bytes per element, and a profile that points a mainline or
+  ik_llama.cpp engine at such a file gets a warning and a one-click engine
+  switch.
+
 ## [0.2.1] - 2026-09-12
 
 Mainline llama.cpp removed `--mlock`, `--no-mmap` and `--direct-io` from its

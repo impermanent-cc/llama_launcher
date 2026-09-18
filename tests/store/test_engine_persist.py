@@ -11,3 +11,8 @@ def test_old_profile_without_engine_loads_as_llama_cpp():
 def test_engine_survives_roundtrip():
     p = Profile(name="p", runtime=Runtime(engine="ik_llama.cpp"))
     assert profile_from_dict(profile_to_dict(p)).runtime.engine == "ik_llama.cpp"
+
+
+def test_prism_engine_survives_roundtrip():
+    p = Profile(name="p", runtime=Runtime(engine="prism_llama.cpp"))
+    assert profile_from_dict(profile_to_dict(p)).runtime.engine == "prism_llama.cpp"

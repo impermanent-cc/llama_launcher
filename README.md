@@ -13,9 +13,9 @@ offload sweep that measures each `--n-cpu-moe` or `--n-cpu-ffn` count and applie
 
 Beyond single-container launches it can also run a **prebuilt binary natively** (no container),
 drive **remote machines** over podman-over-SSH, **pool VRAM+RAM across nodes** via llama.cpp
-RPC, show a live **CPU/GPU/memory stats dock**, and write **custom build commands** for both
-engines from a CMake-flag catalog (the Build tab), tracking the image tags and binaries those
-builds produce.
+RPC, show a live **CPU/GPU/memory stats dock**, and write **custom build commands** for all
+three engines from a CMake-flag catalog (the Build tab), tracking the image tags and binaries
+those builds produce.
 
 ## Requirements
 
@@ -170,7 +170,30 @@ Images live at `ghcr.io/ikawrakow/ik-llama-cpp`; use the `*-server` tag for sing
 server mode and the `*-swap` tag for router mode (e.g. `cu12-server`, `cpu-server`).
 **Detect** lists your locally-pulled ik images when this engine is selected.
 
-Either engine can also be run from a self-built binary; see **Native launch** below.
+Any of the three engines can also be run from a self-built binary; see **Native
+launch** below.
+
+### PrismML llama.cpp engine
+
+Select **Engine → PrismML llama.cpp** in Configure to run
+[PrismML's fork](https://github.com/PrismML-Eng/llama.cpp), the one that reads
+PrismML's Bonsai models' `PQ2_0` and `PTQ1_0` weights. Mainline and ik_llama.cpp
+reject those files as unknown tensor types; when a profile points either engine
+at one, the preflight says so, and clicking the suggestion dot beside **Engine**
+sets the engine to PrismML. The fork's server is mainline at build 10685: the
+form hides the flags mainline added after that build (`--n-cpu-ffn`,
+`--lazy-mode`, `--kv-unified-per-slot` and the video group), keeps `--mlock`
+and `--no-mmap`, and adds `--kv-mean-center`. The memory estimate sizes both
+weight types at their real block size.
+
+The fork publishes no container image. Either run a release tarball natively
+(Linux CUDA 12.4 and 12.8, Vulkan, ROCm and CPU builds under
+[Releases](https://github.com/PrismML-Eng/llama.cpp/releases); unpack it and
+point a native profile's **llama-server binary** at its `llama-server`), or
+build an image on the **Build** tab from the `prism` branch, which is the
+route on a CUDA 13 host since the tarballs stop at 12.8: type CUDA 13 images
+into the **Builder image** and **Runtime image** fields. **Detect** then
+lists the result (tagged `prism-custom:...`).
 
 ## Build helper
 
@@ -178,11 +201,12 @@ Either engine can also be run from a self-built binary; see **Native launch** be
 
 *The Build tab: pick engine, target, and CMake options; copy the generated configure/build commands and run them yourself.*
 
-The **Build** tab generates copyable build command strings for compiling llama.cpp
-and ik_llama.cpp from source. Unlike Configure and Launch, it never runs a build; it
-renders command strings (native: a cmake configure and build pair; container: a
-Containerfile plus a podman build command) for you to run manually, experimenting with
-CMake flags like `-DGGML_CUDA=ON` or `-DGGML_CUDA_FA=ON`.
+The **Build** tab generates copyable build command strings for compiling
+llama.cpp, ik_llama.cpp and PrismML llama.cpp from source. Unlike Configure
+and Launch, it never runs a build; it renders command strings (native: a
+cmake configure and build pair; container: a Containerfile plus a podman
+build command) for you to run manually, experimenting with CMake flags like
+`-DGGML_CUDA=ON` or `-DGGML_CUDA_FA=ON`.
 
 Saved build configs remember your choices. Each generated build is recorded with its
 output (image tag or binary path) and tracked as **built** (exists locally), **missing**
@@ -199,10 +223,12 @@ Native binaries are machine-specific and do not work remotely yet.
 ## Native (non-container) launch
 
 To run a prebuilt `llama-server` binary directly instead of pulling an image, set
-Configure → **Launch mode** to **Native (run a built binary)**. A **llama-server binary**
-row appears: type the path or use **Browse…** to point at your executable (mainline or
-ik_llama.cpp). Selecting native hides all container-only controls (Image, Runtime, GPU mode,
-Folders/mounts, Extra podman args, SELinux, and Run detached), since none apply.
+Configure → **Launch mode** to **Native (run a built binary)**. A
+**llama-server binary** row appears: type the path or use **Browse…** to
+point at your executable (mainline, ik_llama.cpp or PrismML llama.cpp).
+Selecting native hides all container-only controls (Image, Runtime, GPU
+mode, Folders/mounts, Extra podman args, SELinux, and Run detached), since
+none apply.
 
 The launcher runs the binary as a managed background process (its own session), streams its
 output to a per-profile log file, and tracks it by PID, so **Stop**, **Remove**, logs, and

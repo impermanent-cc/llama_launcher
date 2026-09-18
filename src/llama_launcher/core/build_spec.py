@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass, field, fields
 @dataclass
 class BuildConfig:
     name: str = ""
-    engine: str = "llama.cpp"  # "llama.cpp" | "ik_llama.cpp"
+    engine: str = "llama.cpp"  # one of core.spec.ENGINES
     target: str = "native"  # "native" | "container"
     git_ref: str = ""  # "" = engine's default branch
     source_dir: str = ""  # native target: user's checkout

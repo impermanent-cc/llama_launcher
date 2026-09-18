@@ -1305,3 +1305,27 @@ def test_load_mode_mlock_still_claims_a_failed_launch_on_mainline():
     users set instead, and it still locks."""
     msg = _ram_message(engine="llama.cpp", **{"n-gpu-layers": 0, "load-mode": "mlock"})
     assert "the launch will fail" in msg
+
+
+def test_shortfall_keeps_the_fit_note_on_prism():
+    """PrismML llama.cpp carries mainline's fit search, so the shortfall
+    sentence states that the suggested split keeps --fit from acting, as it
+    does on mainline, whose report it matches line for line."""
+    r = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192},
+        engine="prism_llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    assert "keeps --fit from acting" in " ".join(m.text for m in r.messages)
+    mainline = mf.fit_report(
+        _meta(n_layers=16),
+        0,
+        settings={"ctx-size": 8192},
+        engine="llama.cpp",
+        free_bytes_per_gpu=[5 * GIB, 5 * GIB],
+        ram_available=64 * GIB,
+    )
+    assert [m.text for m in r.messages] == [m.text for m in mainline.messages]

@@ -7,7 +7,7 @@ from llama_launcher.core.capabilities import (
     relevance,
     suggestions,
 )
-from llama_launcher.core.gguf import GgufMeta
+from llama_launcher.core.gguf import GgufMeta, TensorInfo
 
 
 def test_qwen_mtp_infile():
@@ -230,3 +230,29 @@ def test_no_legacy_suggestion_on_ik_which_still_accepts_the_flags():
 def test_no_legacy_suggestion_when_the_key_is_absent_or_false():
     assert suggestions(_dense_caps(), {}, False, False) == []
     assert suggestions(_dense_caps(), {"mlock": False}, False, False) == []
+
+
+def _prism_caps():
+    q = TensorInfo("blk.0.attn_q.weight", 128, 143, 28)
+    return derive_caps(GgufMeta(arch="qwen35", tensors=(q,)), [])
+
+
+def test_caps_carry_the_prism_only_weight_type():
+    assert _prism_caps().prism_quant == "PTQ1_0"
+    assert _dense_caps().prism_quant == ""
+
+
+def test_prism_weights_under_another_engine_suggest_the_engine_switch():
+    """Mainline and ik reject PQ2_0 and PTQ1_0 files, so the suggestion
+    changes the engine field alone and touches no setting."""
+    for engine in ("llama.cpp", "ik_llama.cpp"):
+        sg = suggestions(_prism_caps(), {}, False, False, engine=engine)
+        assert len(sg) == 1, engine
+        assert sg[0].fields == {"engine": "prism_llama.cpp"}
+        assert sg[0].settings == {}
+        assert "PTQ1_0" in sg[0].text and "PrismML" in sg[0].text
+
+
+def test_no_engine_suggestion_on_prism_or_for_mainline_weights():
+    assert suggestions(_prism_caps(), {}, False, False, engine="prism_llama.cpp") == []
+    assert suggestions(_dense_caps(), {}, False, False, engine="ik_llama.cpp") == []

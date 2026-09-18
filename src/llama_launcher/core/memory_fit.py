@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from . import balance as _balance
 from . import placement as _pl
 from .settings_catalog import CATALOG, accepts
+from .spec import MAINLINE_FAMILY
 from .vram import estimate_memory
 
 _GIB = 1024**3
@@ -106,7 +107,7 @@ def _fit_active_mainline(settings, engine, n_cards: int = 1) -> bool:
     (--cpu-moe, --n-cpu-moe, --n-cpu-ffn), no --n-gpu-layers, no
     --override-tensor, no --tensor-split, and the split mode is layer
     (or there is only one card)."""
-    if engine != "llama.cpp" or _fit_state(settings) == "off":
+    if engine not in MAINLINE_FAMILY or _fit_state(settings) == "off":
         return False
     ngl = settings.get("n-gpu-layers", "auto")
     if ngl not in (None, "auto"):

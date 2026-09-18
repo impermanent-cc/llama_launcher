@@ -1005,3 +1005,87 @@ def test_legacy_flag_by_both_routes_warns_only_the_raw_route():
         "10902 on rejects it at argument parsing, so the launch fails on an "
         "image that new."
     )
+
+
+def test_prism_weights_under_mainline_warn_and_name_the_engine():
+    """The server fails at model load, so the preflight warns rather than
+    blocks, and says what to change."""
+    hits = [
+        i
+        for i in validate(_ok_profile(), prism_quant="PTQ1_0")
+        if "PTQ1_0" in i.message
+    ]
+    assert len(hits) == 1
+    assert hits[0].level == "warning"
+    assert hits[0].message == (
+        "PTQ1_0 weights: mainline llama.cpp and ik_llama.cpp reject this file "
+        "as an unknown tensor type, so the launch fails at model load. Set "
+        "the engine to PrismML llama.cpp, and point the image or llama-server "
+        "binary at a PrismML build."
+    )
+
+
+def test_prism_weights_under_ik_warn_too():
+    p = _ok_profile()
+    p.runtime = Runtime(engine="ik_llama.cpp")
+    assert [i for i in validate(p, prism_quant="PQ2_0") if "PQ2_0" in i.message]
+
+
+def test_prism_weights_under_prism_do_not_warn():
+    p = _ok_profile()
+    p.runtime = Runtime(engine="prism_llama.cpp")
+    assert not [i for i in validate(p, prism_quant="PTQ1_0") if "PTQ1_0" in i.message]
+
+
+def test_kv_mean_center_without_q4_0_k_cache_warns_on_prism():
+    p = _ok_profile()
+    p.runtime = Runtime(engine="prism_llama.cpp")
+    p.settings["kv-mean-center"] = "/models/k-bias.gguf"
+    hits = [i for i in validate(p) if "--kv-mean-center" in i.message]
+    assert len(hits) == 1 and hits[0].level == "warning"
+    assert hits[0].message == (
+        "--kv-mean-center requires cache-type-k q4_0 (the bias is subtracted "
+        "before K is quantized into a q4_0 cache); set cache-type-k to q4_0 or "
+        "clear the bias path."
+    )
+    p.settings["cache-type-k"] = "q4_0"
+    assert not [i for i in validate(p) if "--kv-mean-center" in i.message]
+
+
+def test_kv_mean_center_does_not_warn_where_it_never_reaches_argv():
+    p = _ok_profile()
+    p.settings["kv-mean-center"] = "/models/k-bias.gguf"
+    assert not [i for i in validate(p) if "--kv-mean-center" in i.message]
+
+
+def test_kv_mean_center_check_reads_both_routes():
+    """The bias path and the K cache type each count whether they arrive as
+    a setting or as a raw argument."""
+    p = _ok_profile()
+    p.runtime = Runtime(engine="prism_llama.cpp")
+    p.raw_args = "--kv-mean-center /models/k-bias.gguf"
+    assert [i for i in validate(p) if "--kv-mean-center" in i.message]
+    p.raw_args = "--kv-mean-center /models/k-bias.gguf --cache-type-k q4_0"
+    assert not [i for i in validate(p) if "--kv-mean-center" in i.message]
+    p.raw_args = ""
+    p.settings["kv-mean-center"] = "/models/k-bias.gguf"
+    p.raw_args = "--cache-type-k q4_0"
+    assert not [i for i in validate(p) if "--kv-mean-center" in i.message]
+
+
+def test_no_wrong_engine_warning_without_a_prism_type():
+    assert not [
+        i
+        for i in validate(_ok_profile())
+        if "reject this file as an unknown tensor type" in i.message
+    ]
+
+
+def test_ik_image_under_prism_names_the_selected_engine():
+    p = _ok_profile()
+    p.runtime = Runtime(engine="prism_llama.cpp")
+    p.image = "ghcr.io/ikawrakow/ik-llama-cpp:cu12-server"
+    hits = [i for i in validate(p) if "looks like an ik_llama.cpp" in i.message]
+    assert len(hits) == 1
+    assert "Engine is PrismML llama.cpp" in hits[0].message
+    assert "Engine is llama.cpp" not in hits[0].message
